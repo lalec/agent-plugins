@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "agent-plugins",
+  "description": "Claude Code plugins by lalec",
+  "owner": {
+    "name": "lalec"
+  },
+  "plugins": [
+    {
+      "name": "yggdrasil",
+      "description": "Bootstrap a 3-agent delivery pipeline (dev → qa → pm) with skill-guard hooks, domain skills, and roadmap tracking on any project",
+      "author": {
+        "name": "lalec"
+      },
+      "source": "./plugins/yggdrasil",
+      "category": "productivity",
+      "homepage": "https://github.com/lalec/agent-plugins"
+    }
+  ]
+}

@@ -71,6 +71,7 @@ Required steps before writing the log entry:
 ---
 name: <PREFIX>-review
 description: Code review practices with technical rigor and verification gates. Use for receiving feedback, requesting code-reviewer subagent reviews, or preventing false completion claims in pull requests.
+license: MIT
 ---
 
 # Code Review
@@ -1346,9 +1347,9 @@ description: Use when making any visual decision — color, spacing, gradient, c
 
 # <PREFIX>-design
 
-Visual authority for all <PROJECT> UI decisions. Use `ui-ux-pro-max` when executing design work.
+Visual authority for all <PROJECT> UI decisions.
 
-When the user asks to explore design alternatives for a specific component, use `ui-ux-pro-max` to generate variants — but constrain it to the <PROJECT> design system (palette, fonts, surface). Do not propose styles or palettes outside the existing system.
+When the user asks to explore design alternatives for a specific component, generate variants but constrain it to the <PROJECT> design system (palette, fonts, surface). Do not propose styles or palettes outside the existing system.
 
 ## What this skill owns
 - Color palette (exact hex values and gradient stops) — see `references/design-tokens.md`

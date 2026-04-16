@@ -43,11 +43,11 @@ A multi-agent delivery workflow for Claude Code and Gemini CLI. One install comm
 
 **2. Navigate to your project root and invoke the skill:**
 ```
-set up the yggdrasil workflow here
+/yggdrasil set up the yggdrasil workflow here
 ```
 or
 ```
-bootstrap this project with AI agents
+/yggdrasil bootstrap this project with AI agents
 ```
 
 The skill auto-detects Claude Code vs Gemini CLI from `.claude/` / `.gemini/` presence.

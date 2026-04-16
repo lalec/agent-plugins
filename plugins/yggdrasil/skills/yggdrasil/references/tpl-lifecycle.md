@@ -1347,9 +1347,11 @@ description: Use when making any visual decision — color, spacing, gradient, c
 
 # <PREFIX>-design
 
-Visual authority for all <PROJECT> UI decisions.
+Visual authority for all <PROJECT> UI decisions. Use `frontend-design` when executing design work.
 
-When the user asks to explore design alternatives for a specific component, generate variants but constrain it to the <PROJECT> design system (palette, fonts, surface). Do not propose styles or palettes outside the existing system.
+> **Design skill:** This skill delegates execution to `frontend-design` by default. If you prefer a different design skill, replace `frontend-design` with your chosen skill name in the two lines above and below this note.
+
+When the user asks to explore design alternatives for a specific component, use `frontend-design` to generate variants — but constrain it to the <PROJECT> design system (palette, fonts, surface). Do not propose styles or palettes outside the existing system.
 
 ## What this skill owns
 - Color palette (exact hex values and gradient stops) — see `references/design-tokens.md`

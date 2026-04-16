@@ -221,11 +221,9 @@ Then:
 - **No** — tell the user design was cancelled and stop
 - **Other / custom input** — incorporate the comment, restate the updated description, and ask again
 
-## Step 1 — Design (<PREFIX>-design + ui-ux-pro-max)
+## Step 1 — Design (<PREFIX>-design)
 
-Invoke the `<PREFIX>-design` skill and the `ui-ux-pro-max` skill together.
-
-Generate 2–3 distinct HTML design variants for: $ARGUMENTS
+Invoke the `<PREFIX>-design` and generate 2–3 distinct HTML design variants for: $ARGUMENTS
 
 - Write each variant to `/tmp/<PREFIX>-design-variant-N.html` (N = 1, 2, 3)
 - Each variant must be a complete, self-contained HTML file with inline CSS

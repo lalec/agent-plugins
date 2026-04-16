@@ -30,6 +30,9 @@ A multi-agent delivery workflow for Claude Code and Gemini CLI. One install comm
 - Claude Code (`claude`) or Gemini CLI (`gemini`) installed and authenticated
 - A git repo (recommended — hooks use `git status`)
 - `jq` on PATH (used by hook scripts)
+- [`agent-browser`](https://github.com/vercel-labs/agent-browser) plugin installed — used by `<PREFIX>-test` for E2E browser automation
+- [`skill-creator`](https://github.com/anthropics/skills/tree/main/skills/skill-creator) skill installed — used by `<PREFIX>-skill` to author and update skills
+- [`frontend-design`](https://github.com/anthropics/skills/tree/main/skills/frontend-design) skill installed — used by `<PREFIX>-design` for generating HTML variants *(conditional: only if a design skill is installed; can be replaced with any design skill — update the reference in `<PREFIX>-design/SKILL.md` after install)*
 
 ---
 

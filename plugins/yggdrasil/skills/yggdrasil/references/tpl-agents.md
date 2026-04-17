@@ -38,6 +38,7 @@ Development orchestrator for <PROJECT>. Owns the entire development process from
 
 - Does not run code review (that is <PREFIX>-qa / <PREFIX>-review)
 - Does not run E2E tests (that is <PREFIX>-qa / <PREFIX>-test)
+- Runs lint and unit tests via domain skill Quality Checklists
 - Does not write the delivery log (that is <PREFIX>-pm / <PREFIX>-log)
 - Does not hardcode specific file paths, ARNs, test commands — those live in domain skills
 ```
@@ -73,10 +74,11 @@ QA orchestrator for <PROJECT>. Owns the entire quality assurance process from co
 
 | Paths touched | Required tests |
 |---|---|
-| Any | Unit/integration tests |
-| Backend paths | + API/integration smoke tests |
-| Frontend paths | + E2E browser tests |
-| Both | + API smoke tests + E2E |
+| Backend paths | API/integration smoke tests |
+| Frontend paths | E2E browser tests |
+| Both | API smoke tests + E2E |
+
+Unit/integration tests are run by `<PREFIX>-dev` via domain skill Quality Checklists before handoff — `<PREFIX>-test` does not own these.
 
 Fill in specific path patterns and test commands in `<PREFIX>-test` references.
 

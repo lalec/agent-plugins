@@ -32,6 +32,11 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
    ```
    Use only skills that appear in this output for the **Skills** field. If none appear, use `—`.
 4. Write the new entry at the **top** of `docs/project-log.md`, immediately below the header block, before the previous `---` separator
+5. Commit the log entry — stage `docs/project-log.md` only and commit:
+   ```bash
+   git add docs/project-log.md
+   git commit -m "log: <short title from the entry>"
+   ```
 
 ## Entry Format
 
@@ -61,6 +66,7 @@ Required steps before writing the log entry:
 3. [ ] Skills field is derived from transcript grep, not from memory
 4. [ ] Body is 1–3 sentences, no `What:` label
 5. [ ] `Checklist:` line omitted when nothing was updated
+6. [ ] `docs/project-log.md` committed with `log: <short title>`
 ```
 
 ---
@@ -1390,17 +1396,26 @@ description: Use when writing or performing tests for <PROJECT>. Trigger any tim
 
 # <PREFIX>-test
 
-Testing authority for <PROJECT>. Covers unit/integration tests, API smoke tests, and E2E browser tests.
+Testing authority for <PROJECT>. Covers API/service smoke tests, functional feature tests, and E2E browser tests. Unit tests are run by the dev agent via domain skill Quality Checklists — not this skill's responsibility.
 
-## Test Commands
+## Test Plan
 
-Fill in project-specific test commands: `references/test-commands.md`
+**Step 1 — Determine mode** from invoking context:
 
-## Unit / Integration Tests
+| Mode | Condition | Scope |
+|---|---|---|
+| **Plan-driven** | Context provides all three: *what was implemented*, *verifications to run*, *expected results* | Full suite — functional tests + applicable smoke sections |
+| **Smoke / regression** | Any of the three are missing | Baseline only — API/Service Smoke + Log Check |
 
-Run with: `<fill in unit test command>`
+**Step 2 — Map what changed to sections** (fill in path patterns during project setup):
 
-See `references/test-commands.md` for full details.
+| What changed | Plan-driven | Smoke / regression |
+|---|---|---|
+| `<BACKEND_PATHS>` | Functional Feature → API/Service Smoke → Log Check | API/Service Smoke → Log Check |
+| `<FRONTEND_PATHS>` | E2E Browser Tests | E2E Browser Tests (happy-path only) |
+| Both | Merge applicable above | Merge applicable above |
+
+Execute in listed order. Report actual vs expected per section before moving to the next.
 
 ## Functional Feature Tests
 
@@ -1468,7 +1483,6 @@ Verify before finishing any `<PREFIX>-test` invocation that touches API handlers
 - [ ] Database schema, table/collection name, or query pattern changes
 - [ ] A new E2E browser target URL or environment is added
 - [ ] Dev server port changes
-- [ ] Test structure changes (new test directory, new fixture pattern, new test runner config)
 ```
 
 ---

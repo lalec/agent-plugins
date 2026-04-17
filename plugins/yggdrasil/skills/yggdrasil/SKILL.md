@@ -199,7 +199,7 @@ Also create `docs/workflow.md` if not present — generate with real content usi
 | `<PREFIX>-log` | Appends delivery log entries to `docs/project-log.md` |
 | `<PREFIX>-review` | Code review reception, reviewer dispatch, verification gates |
 | `<PREFIX>-debug` | Systematic debugging — four-phase root cause investigation |
-| `<PREFIX>-test` | Unit, smoke, and E2E testing |
+| `<PREFIX>-test` | Smoke tests and E2E testing |
 | `<PREFIX>-skill` | Meta-skill — skill system governance and path ownership |
 | `<PREFIX>-docs` | Documentation sync — README and workflow.md |
 

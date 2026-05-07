@@ -1,0 +1,25 @@
+collectors:
+  processes:
+    maturity: stable
+    version: 1
+    graduated_at_stable: '2026-04-29T00:00:00Z'
+  launchd:
+    maturity: stable
+    version: 1
+    graduated_at_stable: '2026-04-29T00:00:00Z'
+  network:
+    maturity: stable
+    version: 1
+    graduated_at_stable: '2026-04-29T00:00:00Z'
+  sensitive_paths:
+    maturity: stable
+    version: 1
+    graduated_at_stable: '2026-04-29T00:00:00Z'
+  docker:
+    maturity: stable
+    version: 1
+    graduated_at_stable: '2026-04-29T00:00:00Z'
+  claude_code_config:
+    maturity: stable
+    version: 1
+    graduated_at_stable: '2026-04-29T00:00:00Z'

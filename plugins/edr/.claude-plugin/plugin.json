@@ -1,0 +1,7 @@
+{
+  "name": "edr",
+  "description": "Endpoint Detection & Response for macOS — collectors gather telemetry, the analyst (Claude) performs NIST SP 800-61 Identification on anomalies. Detects launchd persistence, unsigned binaries, exposed listeners, sensitive-path tampering, container-escape vectors, and Claude Code supply-chain risks (hooks, plugins, skills, MCP servers).",
+  "author": {
+    "name": "lalec"
+  }
+}

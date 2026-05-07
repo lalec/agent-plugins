@@ -1,0 +1,7 @@
+{
+  "name": "agent-eval",
+  "description": "Evaluate Claude Code instruction-based agent pipelines — 46 deterministic + heuristic checks across efficiency, reliability, behavioral, workflow, spec conformance, and orchestration. Identifies inefficient agents, silent failures, turn exhaustion, and cost hotspots.",
+  "author": {
+    "name": "lalec"
+  }
+}

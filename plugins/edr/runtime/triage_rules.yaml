@@ -1,0 +1,105 @@
+# Triage fast-path rules.
+#
+# Two purposes:
+#   1. Auto-suppress: anomaly's signature_hash present in cloud false_positives/
+#      (handled by triage.py directly, not by rules in this file).
+#   2. Auto-promote: textbook-bad patterns get a floor severity. Analyst
+#      can RAISE this floor but not lower it.
+#
+# Each rule:
+#   id: short stable id
+#   collector: which collector's evidence to match against
+#   match: list of conditions (field-path: predicate). All must hold.
+#   floor: critical | high | medium | low | info
+#   mitre: [ATT&CK technique IDs this rule corresponds to]
+#   rationale: shown in alert evidence
+#
+# Rules are loaded by triage.py and applied after collectors emit Evidence.
+
+rules:
+  # === critical ===
+  - id: ssh_authorized_keys_added
+    collector: sensitive_paths
+    match:
+      kind: "ssh_file"
+      change: ["added", "modified"]
+      path_glob: ["~/.ssh/authorized_keys"]
+    floor: critical
+    mitre: ["T1098.004"]
+    rationale: "SSH authorized_keys changed — possible backdoor key install"
+
+  - id: launchd_unsigned_target
+    collector: launchd
+    match:
+      kind: "launchd_item"
+      change: "added"
+      target_codesign_status: ["unsigned", "adhoc", "broken"]
+    floor: critical
+    mitre: ["T1547.011", "T1543.001", "T1543.004"]
+    rationale: "New launchd persistence pointing to unsigned/adhoc binary"
+
+  - id: docker_privileged_or_socket_mount
+    collector: docker
+    match:
+      kind: "container"
+      change: "added"
+      privileged_or_docker_socket: true
+    floor: critical
+    mitre: ["T1611"]
+    rationale: "Container with --privileged or /var/run/docker.sock mount = host escape"
+
+  - id: claude_hook_added
+    collector: claude_code_config
+    match:
+      kind: "hook_added"
+      change: "added"
+    floor: critical
+    mitre: ["T1546"]
+    rationale: "New entry in Claude Code hooks.* — runs arbitrary shell on every Claude tool use"
+
+  # === high ===
+  - id: mcp_server_added
+    collector: claude_code_config
+    match:
+      kind: "mcp_server_added"
+      change: "added"
+    floor: high
+    mitre: ["T1195.002"]
+    rationale: "New MCP server registered — supply-chain risk; can read everything Claude reads"
+
+  - id: claude_plugin_skill_added
+    collector: claude_code_config
+    match:
+      kind: ["plugin_added", "skill_added", "command_added", "agent_added"]
+      change: "added"
+    floor: high
+    mitre: ["T1195.002"]
+    rationale: "New Claude Code extension — supply-chain risk; instructions can manipulate model behavior"
+
+  - id: shell_rc_curl_pipe_sh
+    collector: sensitive_paths
+    match:
+      kind: "shell_rc"
+      has_curl_pipe_sh: true
+    floor: high
+    mitre: ["T1059.004", "T1546.004"]
+    rationale: "Shell rc contains curl|sh / wget|sh / eval-curl pattern"
+
+  - id: tcp_listener_unsigned
+    collector: network
+    match:
+      kind: "tcp_listener"
+      change: "added"
+      bind_addr: "0.0.0.0"
+    floor: high
+    mitre: ["T1571"]
+    rationale: "New TCP listener on all interfaces (analyst should re-check binary signing)"
+
+  - id: cron_at_added
+    collector: sensitive_paths
+    match:
+      kind: "cron_or_at_added"
+      change: "added"
+    floor: high
+    mitre: ["T1053.003"]
+    rationale: "New cron or at job"

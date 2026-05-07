@@ -1,0 +1,40 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "agent-plugins",
+  "description": "Claude Code plugins by lalec",
+  "owner": {
+    "name": "lalec"
+  },
+  "plugins": [
+    {
+      "name": "dev-workflow",
+      "description": "Install or upgrade a 3-agent delivery pipeline (dev → qa → pm) with skill-guard hooks, domain skills, and roadmap tracking. Claude Code only. Two commands: /dev-workflow:install (fresh) and /dev-workflow:upgrade (existing).",
+      "author": {
+        "name": "lalec"
+      },
+      "source": "./plugins/dev-workflow",
+      "category": "productivity",
+      "homepage": "https://github.com/lalec/agent-plugins"
+    },
+    {
+      "name": "edr",
+      "description": "Endpoint Detection & Response for macOS — collectors gather telemetry, Claude performs NIST SP 800-61 Identification on anomalies (launchd persistence, unsigned binaries, exposed listeners, sensitive-path tampering, docker escape vectors, Claude Code supply-chain risks)",
+      "author": {
+        "name": "lalec"
+      },
+      "source": "./plugins/edr",
+      "category": "security",
+      "homepage": "https://github.com/lalec/agent-plugins"
+    },
+    {
+      "name": "agent-eval",
+      "description": "Evaluate Claude Code instruction-based agent pipelines — 46 deterministic + heuristic checks across efficiency, reliability, behavioral, workflow, spec conformance, and orchestration. Identifies inefficient agents, silent failures, turn exhaustion, and cost hotspots.",
+      "author": {
+        "name": "lalec"
+      },
+      "source": "./plugins/agent-eval",
+      "category": "productivity",
+      "homepage": "https://github.com/lalec/agent-plugins"
+    }
+  ]
+}

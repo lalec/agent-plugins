@@ -5,7 +5,7 @@
 ## § Domain skill stub
 
 Create one copy per confirmed domain skill. Substitute:
-- `<SKILL_NAME>` → e.g. `tosk-backend`
+- `<SKILL_NAME>` → e.g. `<PREFIX>-backend`
 - `<SKILL_DESCRIPTION>` → one-line description of what this skill owns
 - `<OWNED_PATHS>` → path patterns this skill owns (e.g. `^lambda/ ^src/lib/api\.ts$`)
 - `<PROJECT>` → project name

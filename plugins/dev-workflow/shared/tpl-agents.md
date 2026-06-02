@@ -77,11 +77,17 @@ Caller passes `mode`:
 - `mode: initial` (default) — full pipeline: review → tests → sign off.
 - `mode: retest` — review already passed earlier in this session; skip step 1 (Code review) and step 2 (Address findings); start at step 3 (Test). Use only when the caller confirms no new code changed beyond the previous review's findings.
 
+Caller also passes `regression_mode`:
+- `regression_mode: smart` (default) — `<PREFIX>-test` runs Smoke + this task's new functional features + relevant priors.
+- `regression_mode: full` — `<PREFIX>-test` additionally runs the full Regression suite.
+
+Forward `regression_mode` unchanged to `<PREFIX>-test`, and preserve it across any `mode=retest` re-spawn in the same task.
+
 ## Workflow
 
 1. **Code review** — use `<PREFIX>-review` skill for a full code review; no shortcuts
 2. **Address findings** — any issues found in review must be resolved before proceeding to testing. **You do not edit code.** If code changes are needed (security fixes, bug fixes, refactors — any source-file modification), return immediately with `Status: blocked — fixes required` in the handoff block (same shape as `<PREFIX>-dev`'s) and `Notes:` listing what must change. The orchestrator re-spawns `<PREFIX>-dev` to apply the fix, which re-deploys non-prod, then re-spawns this agent. Self-patching skips the deploy step and leaves non-prod stale — never do it.
-3. **Test** — invoke `<PREFIX>-test`; the skill selects the appropriate tier from the paths <PREFIX>-dev touched and runs the suite.
+3. **Test** — invoke `<PREFIX>-test`, passing through: `regression_mode`, the names of any new functional-feature entries captured for this task, and the paths `<PREFIX>-dev` reported under `Files changed:`. The skill selects tiers from those signals (Smoke always · new entries always · priors whose `paths` overlap the changed paths · Regression iff `regression_mode: full`) and runs the suite.
 4. **On test failure** — use `<PREFIX>-debug` skill to identify root cause, then delegate back to <PREFIX>-dev for the fix; re-enter the full dev → qa flow after the fix
 5. **Sign off** — only when review reports no unresolved findings and `<PREFIX>-test` reports clean.
 5.5. **Reference Sync** — for each project (`<PREFIX>-*`) skill used: run its `## Reference Sync` checklist only if the skill's owned paths or `references/` were modified this invocation; otherwise skip. Static-content skills omit `## Reference Sync`. Commit reference updates by name.

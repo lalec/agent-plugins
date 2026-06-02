@@ -47,7 +47,7 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
 <1–3 sentences. What shipped and why it matters. No label — this is the body.>
 
 **Tests:** <what was actually verified>
-**Skills:** <tosk-x> · <tosk-y>
+**Skills:** <PREFIX>-x · <PREFIX>-y
 **Deployed:** <component> → <env> · <url> (omit line entirely if no deploy happened)
 **Checklist:** <skill> — <what changed> (omit line entirely if nothing to note)
 ~~~
@@ -1304,80 +1304,57 @@ description: Use when writing or performing tests for <PROJECT>. Trigger any tim
 
 # <PREFIX>-test
 
-Testing authority for <PROJECT>. Covers API/service smoke tests, functional feature tests, and E2E browser tests. Unit tests are not this skill's responsibility — they belong to domain skill Quality Checklists.
+Testing authority for <PROJECT>. Runs three tiers — **Smoke** (always), **Functional Feature Tests** (per-task assertions captured by `/code` and `/fix`), and **Regression** (on demand). Unit tests are not this skill's responsibility — they belong to domain skill Quality Checklists.
 
 ## Test Plan
 
-**Step 1 — Determine mode** from invoking context:
+**Step 1 — Select tiers** from the invoking context:
 
-| Mode | Condition | Scope |
+| Tier | Source | When to run |
 |---|---|---|
-| **Plan-driven** | Context provides all three: *what was implemented*, *verifications to run*, *expected results* | Full suite — functional tests + applicable smoke sections |
-| **Smoke / regression** | Any of the three are missing | Baseline only — API/Service Smoke + Log Check |
+| **Smoke** | `references/test-commands.md § Smoke` | Always, every invocation |
+| **Functional Feature** | `references/custom-tests.yaml` | This task's new entries always; prior entries whose `paths:` intersect the changed paths named in the prompt |
+| **Regression** | `references/test-commands.md § Regression` + every `custom-tests.yaml` entry | Only when the caller passes `regression_mode: full` |
 
-**Step 2 — Map what changed to sections** (fill in path patterns during project setup):
+If the prompt names no changed paths and no new entries (a bare smoke request), run Smoke only — plus Regression when `regression_mode: full`.
 
-| What changed | Plan-driven | Smoke / regression |
-|---|---|---|
-| `<BACKEND_PATHS>` | Functional Feature → API/Service Smoke → Log Check | API/Service Smoke → Log Check |
-| `<FRONTEND_PATHS>` | E2E Browser Tests | E2E Browser Tests (happy-path only) |
-| Both | Merge applicable above | Merge applicable above |
+**Step 2 — Execute** in tier order (Smoke → Functional Feature → Regression). Report actual vs expected per tier before moving to the next.
 
-Execute in listed order. Report actual vs expected per section before moving to the next.
+## Smoke
+
+Always-run baseline: service/endpoint reachability + log check. Curl templates and run commands: `references/test-commands.md § Smoke`.
 
 ## Functional Feature Tests
 
-When a change touches a core handler, route, or service, run max 3 different scenario tests — one per distinct code path the feature or fix introduces. Always use subject IDs provided in the prompt if given; otherwise select them dynamically from the data store.
+Per-task verifications captured up-front by `/code` and `/fix` as plain assertions and accumulated in `references/custom-tests.yaml`. This skill resolves *how* to verify each entry at runtime — read `references/custom-tests.md` for the schema, the execution protocol (surface → tool → pass criterion, including the ui screenshot rule), and the prior-selection rule before running this tier.
 
-**How to pick subjects if none are provided:**
+## Regression
 
-Query the data store for representative items that cover each distinct scenario (e.g. different statuses, types, or states). Fill this in during project setup — the query pattern depends on the stack:
-
-```
-# Example: DynamoDB (Python)
-# resp = table.scan(Limit=50); items = resp.get("Items", [])
-# active   = next((i for i in items if i.get("status") == "active"), None)
-# done     = next((i for i in items if i.get("status") == "done"), None)
-# failed   = next((i for i in items if i.get("status") == "failed"), None)
-
-# Example: SQL / ORM
-# subjects = db.query(Model).filter(Model.status.in_(["active","done","failed"])).limit(3).all()
-```
-
-Run the relevant operation against each selected subject and confirm each takes the expected code path (check logs or test output). Three scenarios is the ceiling — stop there unless a fourth genuinely distinct path exists.
-
-See `references/test-commands.md` for project-specific query snippets and data store access setup.
-
-## API Smoke Tests
-
-Curl templates for endpoints: `references/test-commands.md`
-
-## E2E Browser Tests
-
-Use the `agent-browser` skill for browser automation against `<APP_URL>`.
-
-**Screenshot rule:** Every E2E test that verifies a visual or real-time state must take a screenshot of the actual UI at the moment of verification. The screenshot is the evidence — without it, the test did not happen. Never substitute DOM injection, console evaluation, or code inspection for a real screenshot of the live UI.
-
-**Open rule:** After taking screenshots, always run `open <paths>` via Bash so the user can view them immediately.
+Full broad suite — `references/test-commands.md § Regression` (hand-authored) plus every entry in `custom-tests.yaml`. Run only when the caller passes `regression_mode: full`.
 
 ## Rules
 
 - Run tests after every significant change before closing the task.
 - Never start automated actions against live targets without explicit user confirmation.
 - Use representative placeholder inputs for smoke tests; live/real targets require explicit opt-in.
+- In the `/code`/`/fix` pipeline this skill runs inside the `<PREFIX>-qa` subagent and **must not** ask the user interactively — resolve each entry deterministically; if a target cannot be resolved, report that entry as blocked rather than prompting. Interactive disambiguation is allowed only when this skill is invoked directly at top level (see `references/custom-tests.md`).
 
 ## Reference Sync
 
 Verify before finishing any `<PREFIX>-test` invocation that touches API handlers or test infrastructure:
-- [ ] `references/test-commands.md` commands match current handlers, endpoints, and run scripts
+- [ ] `references/test-commands.md` Smoke / Regression / Functional Feature Subjects match current handlers, endpoints, and run scripts
+- [ ] `references/custom-tests.yaml` entries reflect current behavior; stale `surface`/`paths` corrected
+- [ ] `references/custom-tests.md` execution protocol matches the surfaces in use
 - [ ] `references/sync-checklist.md` trigger rules reflect current API surface and test tooling
 
 ## References
-- `references/test-commands.md` — test commands, curl templates, environment setup
-- `references/sync-checklist.md` — when-to-update rules for test-commands.md
+- `references/test-commands.md` — Smoke snippets, Regression suite, Functional Feature Subjects (data-store query helpers)
+- `references/custom-tests.yaml` — per-task functional feature assertions captured by `/code` and `/fix`
+- `references/custom-tests.md` — schema + runtime execution/inference protocol + prior-selection rule
+- `references/sync-checklist.md` — when-to-update rules for the reference files
 ```
 
-**Also create this reference file when installing `<PREFIX>-test`:**
+**Also create these reference files when installing `<PREFIX>-test`:**
 
 `references/sync-checklist.md`:
 ```markdown
@@ -1389,9 +1366,99 @@ Verify before finishing any `<PREFIX>-test` invocation that touches API handlers
 - [ ] Request or response shape for any endpoint changes
 - [ ] Auth pattern changes (session cookie format, JWT validation, API keys)
 - [ ] Database schema, table/collection name, or query pattern changes
-- [ ] A new E2E browser target URL or environment is added
+- [ ] A Smoke or Regression command no longer matches current handlers / run scripts
 - [ ] Dev server port changes
+
+## Update `references/custom-tests.yaml` when:
+
+- [ ] A functional feature entry's `assert`, `surface`, or `paths` no longer matches current behavior
+- [ ] A captured assertion is permanently obsolete (feature removed) — delete the entry
 ```
+
+`references/test-commands.md`:
+```markdown
+# Test Commands — <PROJECT>
+
+## Smoke
+
+<!-- Always-run baseline. Curl templates / run commands for service & endpoint reachability + log check. Fill in per stack. -->
+
+## Regression
+
+<!-- Full broad suite, run only on regression_mode: full. Hand-authored; grows as broad invariants are added. -->
+
+## Functional Feature Subjects
+
+<!-- Data-store query snippets used to pick representative subjects when executing a `surface: data` assertion.
+     Fill in the query pattern for this stack, e.g.:
+     # resp = table.scan(Limit=50); items = resp.get("Items", [])
+     # subjects = db.query(Model).filter(Model.status.in_([...])).limit(3).all()
+-->
+```
+
+`references/custom-tests.yaml`:
+```yaml
+# Functional Feature Tests captured by /code and /fix.
+# <PREFIX>-test resolves each entry's concrete target at runtime from
+# surface + task + project context (deploy-config.yaml, test-commands.md).
+# Schema + execution protocol: references/custom-tests.md
+tests: []
+```
+
+`references/custom-tests.md`:
+~~~markdown
+# Functional Feature Tests — schema + execution
+
+Per-task verifications captured by `/code` and `/fix`, stored in `custom-tests.yaml`.
+Each entry is a plain assertion; this skill resolves *how* to verify it at runtime.
+
+## Schema (`custom-tests.yaml`)
+
+```yaml
+tests:
+  - name: <short-kebab-slug>       # auto-generated at capture
+    added: YYYY-MM-DD
+    task: "<the /code or /fix invocation that captured this>"
+    assert: "<one sentence: what must be true>"
+    surface: ui | api | data        # resolved at capture
+    paths: ["<changed path/glob>"]  # from dev's `Files changed:`; drives prior-selection
+```
+
+`surface` and `paths` are the only persisted signals — both stable. The concrete target
+(url / endpoint / query) is re-derived every run, never stored, so route changes can't go stale.
+
+## Execution (per entry, every run)
+
+1. Read `surface`, `assert`, `task`, `paths`.
+2. Resolve the concrete target deterministically:
+   - **ui** → component url from `<PREFIX>-deploy/references/deploy-config.yaml`
+   - **api** → endpoint from `test-commands.md`
+   - **data** → subject query from `test-commands.md § Functional Feature Subjects`
+3. Execute and check the predicate:
+
+| surface | tool | pass criterion |
+|---|---|---|
+| ui | `agent-browser` to the resolved url; assert the predicate | predicate holds **and** a screenshot of the live UI was saved |
+| api | curl/wget the resolved endpoint | HTTP 2xx **and** body satisfies the assertion |
+| data | the project's data-store query pattern | result row(s) satisfy the assertion |
+
+**ui screenshot rule:** every ui entry must take a screenshot of the actual UI at the moment of
+verification — the screenshot is the evidence; DOM injection or console inspection is not a
+substitute. After screenshots, run `open <paths>` via Bash so the user sees them immediately.
+
+## Prior-selection
+
+Include a prior entry in this run when its stored `paths:` set intersects the changed-paths list
+passed by the caller. New entries from the current task always run.
+
+## Interactive fallback — top-level only
+
+When invoked **directly** at top level (a manual test run, not via `<PREFIX>-qa`), this skill may
+`AskUserQuestion` once for a genuinely ambiguous piece, use the answer, and continue — **do not**
+write the answer back to the yaml (re-infer next run). In the `/code`/`/fix` pipeline this skill
+runs inside the `<PREFIX>-qa` subagent and must never ask: resolve deterministically, or report the
+entry as blocked in the handoff.
+~~~
 
 ---
 

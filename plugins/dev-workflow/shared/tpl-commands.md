@@ -33,9 +33,29 @@ Use the AskUserQuestion tool with a single question:
   - label: "Other" — description: "Let the user refine the description"
 
 Then:
-- **Yes** — continue to Step 1
+- **Yes** — continue to Step 0.5
 - **No** — tell the user the feature was cancelled and stop
 - **Other / custom input** — incorporate the comment, restate the updated description, and ask again
+
+## Step 0.5 — Capture acceptance criteria + regression flag
+
+**Read-free step — do NOT read `custom-tests.yaml`, `test-commands.md`, or any reference file here.**
+
+**(a) Capture verifications.** Ask the user in prose (not AskUserQuestion):
+
+> "What should be verified before this ships? One assertion per line; blank to finish; `skip` for none."
+
+For each assertion, infer its `surface` from the wording — **ui** ("page", "button", "renders", "screenshot"), **api** ("endpoint", "returns", "status code"), or **data** ("row", "record", "stored", "status in"). Only if a sentence is genuinely ambiguous, use AskUserQuestion with options **UI · API · Data** to resolve that one. Hold the captured `{assert, surface}` pairs in context — **do not write or commit anything yet**. If the user answers `skip`, capture nothing and continue.
+
+**(b) Regression flag.** Use the AskUserQuestion tool:
+
+- question: "Run full regression after dev as well?"
+- header: "Regression"
+- options:
+  - label: "No (Recommended)" — description: "Smoke + this task's checks + relevant prior checks"
+  - label: "Yes" — description: "Also run the full regression suite"
+
+Capture the answer as a bare boolean `regression_mode` = `smart` (No) or `full` (Yes).
 
 ## Step 1 — Implement (<PREFIX>-dev)
 
@@ -44,6 +64,21 @@ Task:
   prompt: |
     Implement the following for <PROJECT>: $ARGUMENTS
     Complete the full <PREFIX>-dev workflow (domain skills, implement, deploy, Reference Sync).
+    Acceptance criteria (these must hold when done): <the assertions captured in Step 0.5, or "none">
+
+## Step 1.5 — Persist captured verifications
+
+Run only if assertions were captured in Step 0.5 (not `skip`) **and** <PREFIX>-dev returned `Status: complete`. If dev blocked, skip — nothing is written.
+
+For each captured `{assert, surface}`, append an entry to `.claude/skills/<PREFIX>-test/references/custom-tests.yaml`:
+- `name` — auto-slug from the assertion
+- `added` — today's date
+- `task` — `$ARGUMENTS`
+- `assert` — the sentence
+- `surface` — the inferred/confirmed surface
+- `paths` — the list from the dev `## Handoff` block's `Files changed:` field
+
+Commit: `test: capture verifications for <task-slug>` (the tree is clean post-dev — a clean follow-up commit). Keep the new entry `name`s to forward to Step 2.
 
 ## Step 2 — Review & Test (<PREFIX>-qa)
 
@@ -55,11 +90,14 @@ Task:
   subagent_type: <PREFIX>-qa
   prompt: |
     Run code review (<PREFIX>-review) and tests (<PREFIX>-test) for the most recent changes. mode=initial
+    regression_mode: <smart | full, from Step 0.5>
+    New functional-feature entries this task: <names from Step 1.5, or "none">
+    Changed paths: <the dev Handoff `Files changed:` list>
     Sign off when quality gates pass.
 
 After <PREFIX>-qa returns, parse its `## Handoff` block:
 - `Status: signed-off` → continue to Step 3.
-- `Status: blocked` with code-fix `Notes:` → re-spawn <PREFIX>-dev with the fix request, then on dev complete re-spawn <PREFIX>-qa with `mode=retest` (review already passed, run tests only). Repeat until signed-off or user aborts.
+- `Status: blocked` with code-fix `Notes:` → re-spawn <PREFIX>-dev with the fix request, then on dev complete re-spawn <PREFIX>-qa with `mode=retest` (review already passed, run tests only) — keep the same `regression_mode`. Repeat until signed-off or user aborts.
 
 ## Step 3 — Log & Docs (<PREFIX>-pm)
 
@@ -107,9 +145,29 @@ Use the AskUserQuestion tool with a single question:
   - label: "Other" — description: "Let the user refine the description"
 
 Then:
-- **Yes** — continue to Step 1
+- **Yes** — continue to Step 0.5
 - **No** — tell the user the fix was cancelled and stop
 - **Other / custom input** — incorporate the comment, restate the updated description, and ask again
+
+## Step 0.5 — Capture acceptance criteria + regression flag
+
+**Read-free step — do NOT read `custom-tests.yaml`, `test-commands.md`, or any reference file here.**
+
+**(a) Capture verifications.** Ask the user in prose (not AskUserQuestion):
+
+> "What should be verified before this ships? One assertion per line; blank to finish; `skip` for none."
+
+For each assertion, infer its `surface` from the wording — **ui** ("page", "button", "renders", "screenshot"), **api** ("endpoint", "returns", "status code"), or **data** ("row", "record", "stored", "status in"). Only if a sentence is genuinely ambiguous, use AskUserQuestion with options **UI · API · Data** to resolve that one. Hold the captured `{assert, surface}` pairs in context — **do not write or commit anything yet**. If the user answers `skip`, capture nothing and continue. (A bug's verification becomes its never-regress-again invariant.)
+
+**(b) Regression flag.** Use the AskUserQuestion tool:
+
+- question: "Run full regression after dev as well?"
+- header: "Regression"
+- options:
+  - label: "No (Recommended)" — description: "Smoke + this task's checks + relevant prior checks"
+  - label: "Yes" — description: "Also run the full regression suite"
+
+Capture the answer as a bare boolean `regression_mode` = `smart` (No) or `full` (Yes).
 
 ## Step 1 — Investigate (<PREFIX>-debug)
 
@@ -135,6 +193,21 @@ Task:
     Fix the following in <PROJECT>: $ARGUMENTS
     Root cause has already been investigated — implement the fix.
     Complete the full <PREFIX>-dev workflow (domain skills, implement, deploy, Reference Sync).
+    Acceptance criteria (these must hold when done): <the assertions captured in Step 0.5, or "none">
+
+## Step 2.5 — Persist captured verifications
+
+Run only if assertions were captured in Step 0.5 (not `skip`) **and** <PREFIX>-dev returned `Status: complete`. If dev blocked, skip — nothing is written.
+
+For each captured `{assert, surface}`, append an entry to `.claude/skills/<PREFIX>-test/references/custom-tests.yaml`:
+- `name` — auto-slug from the assertion
+- `added` — today's date
+- `task` — `$ARGUMENTS`
+- `assert` — the sentence
+- `surface` — the inferred/confirmed surface
+- `paths` — the list from the dev `## Handoff` block's `Files changed:` field
+
+Commit: `test: capture verifications for <task-slug>` (the tree is clean post-dev — a clean follow-up commit). Keep the new entry `name`s to forward to Step 3.
 
 ## Step 3 — Review & Test (<PREFIX>-qa)
 
@@ -146,11 +219,14 @@ Task:
   subagent_type: <PREFIX>-qa
   prompt: |
     Run code review (<PREFIX>-review) and tests (<PREFIX>-test) for the most recent changes. mode=initial
+    regression_mode: <smart | full, from Step 0.5>
+    New functional-feature entries this task: <names from Step 2.5, or "none">
+    Changed paths: <the dev Handoff `Files changed:` list>
     Sign off when quality gates pass.
 
 After <PREFIX>-qa returns, parse its `## Handoff` block:
 - `Status: signed-off` → continue to Step 4.
-- `Status: blocked` with code-fix `Notes:` → re-spawn <PREFIX>-dev with the fix request, then on dev complete re-spawn <PREFIX>-qa with `mode=retest` (review already passed, run tests only). Repeat until signed-off or user aborts.
+- `Status: blocked` with code-fix `Notes:` → re-spawn <PREFIX>-dev with the fix request, then on dev complete re-spawn <PREFIX>-qa with `mode=retest` (review already passed, run tests only) — keep the same `regression_mode`. Repeat until signed-off or user aborts.
 
 ## Step 4 — Log & Docs (<PREFIX>-pm)
 

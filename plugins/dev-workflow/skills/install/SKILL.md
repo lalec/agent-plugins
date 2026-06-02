@@ -185,7 +185,7 @@ Create these files (skip if already present, offer to overwrite if stale):
 .claude/skills/<PREFIX>-debug/SKILL.md        ← also create 4 reference files + scripts (see tpl-lifecycle.md § debug)
 .claude/skills/<PREFIX>-deploy/SKILL.md       ← from tpl-lifecycle.md § tosk-deploy/SKILL.md
 .claude/skills/<PREFIX>-deploy/references/deploy-config.yaml  ← populated, not a stub — see "Populate deploy-config.yaml" below
-.claude/skills/<PREFIX>-test/SKILL.md
+.claude/skills/<PREFIX>-test/SKILL.md       ← also creates references/test-commands.md, sync-checklist.md, custom-tests.md, and custom-tests.yaml (tests: []) — see tpl-lifecycle.md § tosk-test
 .claude/skills/<PREFIX>-skill/SKILL.md
 .claude/skills/<PREFIX>-skill/references/skill-manifest.md  ← stub; populate with all lifecycle + domain skills installed in this run
 .claude/skills/<PREFIX>-docs/SKILL.md
@@ -292,7 +292,7 @@ Also create `docs/workflow.md` if not present — generate with real content usi
 | `<PREFIX>-review` | Code review reception, reviewer dispatch, verification gates |
 | `<PREFIX>-debug` | Systematic debugging — four-phase root cause investigation |
 | `<PREFIX>-deploy` | Deploy authority — caller-driven env selection (`target=non-prod` from `<PREFIX>-dev`, `target=prod` from `<PREFIX>-pm`); reads `references/deploy-config.yaml`, fills missing values, gates prod inline via `AskUserQuestion`, verifies reachability |
-| `<PREFIX>-test` | Smoke tests and E2E testing |
+| `<PREFIX>-test` | Smoke (always) · per-task functional features via `custom-tests.yaml` · on-demand regression |
 | `<PREFIX>-skill` | Meta-skill — skill system governance and path ownership |
 | `<PREFIX>-docs` | Documentation sync — README and workflow.md |
 
@@ -434,6 +434,7 @@ Walk the checklist before declaring done:
 - [ ] `.claude/agents/` has `<PREFIX>-dev.md`, `<PREFIX>-qa.md`, `<PREFIX>-pm.md`
 - [ ] `.claude/skills/` has all 7 lifecycle skills (`<PREFIX>-log`, `-review`, `-debug`, `-deploy`, `-test`, `-skill`, `-docs`) + all confirmed domain skills, all named `<PREFIX>-*`
 - [ ] `.claude/skills/<PREFIX>-skill/references/skill-manifest.md` exists and lists all installed lifecycle and domain skills
+- [ ] `.claude/skills/<PREFIX>-test/references/` has `test-commands.md` (with `## Smoke`, `## Regression`, `## Functional Feature Subjects` headings), `sync-checklist.md`, `custom-tests.md`, and `custom-tests.yaml` (initialized to `tests: []`). `<PREFIX>-test/SKILL.md` has a `## Test Plan` with the three tiers and no `## E2E Browser Tests` section
 - [ ] `.claude/commands/code.md`, `fix.md`, `roadmap.md`, and `wrap.md` exist (markdown format, `$ARGUMENTS`)
 - [ ] `.claude/skills/<PREFIX>-debug/` has SKILL.md + `references/systematic-debugging.md`, `references/root-cause-tracing.md`, `references/defense-in-depth.md`, `references/verification.md` + `scripts/find-polluter.sh` (executable) + `scripts/find-polluter.test.md`. SKILL.md contains a `## Read Map` and **no** `## Reference Sync` section (static-content skill).
 - [ ] `.claude/skills/<PREFIX>-review/` has SKILL.md + `references/code-review-reception.md`, `references/requesting-code-review.md`, `references/issuing-findings.md` (no `verification-before-completion.md` — `<PREFIX>-debug` owns that). SKILL.md contains a `## Read Map` and **no** `## Reference Sync` section (static-content skill).

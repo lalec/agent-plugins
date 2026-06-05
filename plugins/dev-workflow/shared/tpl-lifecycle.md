@@ -1304,7 +1304,7 @@ description: Use when writing or performing tests for <PROJECT>. Trigger any tim
 
 # <PREFIX>-test
 
-Testing authority for <PROJECT>. Runs three tiers — **Smoke** (always), **Functional Feature Tests** (per-task assertions captured by `/code` and `/fix`), and **Regression** (on demand). Unit tests are not this skill's responsibility — they belong to domain skill Quality Checklists.
+Testing authority for <PROJECT>. Runs three tiers — **Smoke** (always), **Functional Feature Tests** (per-task verifications captured by `/code` and `/fix`), and **Regression** (on demand). Unit tests are not this skill's responsibility — they belong to domain skill Quality Checklists.
 
 ## Test Plan
 
@@ -1313,10 +1313,10 @@ Testing authority for <PROJECT>. Runs three tiers — **Smoke** (always), **Func
 | Tier | Source | When to run |
 |---|---|---|
 | **Smoke** | `references/test-commands.md § Smoke` | Always, every invocation |
-| **Functional Feature** | `references/custom-tests.yaml` | This task's new entries always; prior entries whose `paths:` intersect the changed paths named in the prompt |
-| **Regression** | `references/test-commands.md § Regression` + every `custom-tests.yaml` entry | Only when the caller passes `regression_mode: full` |
+| **Functional Feature** | `references/custom-tests.yaml` | This task's verifications always; prior verifications whose `paths:` intersect the changed paths named in the prompt |
+| **Regression** | `references/test-commands.md § Regression` + every `custom-tests.yaml` verification | Only when the caller passes `regression_mode: full` |
 
-If the prompt names no changed paths and no new entries (a bare smoke request), run Smoke only — plus Regression when `regression_mode: full`.
+If the prompt names no changed paths and no new verifications (a bare smoke request), run Smoke only — plus Regression when `regression_mode: full`.
 
 **Step 2 — Execute** in tier order (Smoke → Functional Feature → Regression). Report actual vs expected per tier before moving to the next.
 
@@ -1326,30 +1326,30 @@ Always-run baseline: service/endpoint reachability + log check. Curl templates a
 
 ## Functional Feature Tests
 
-Per-task verifications captured up-front by `/code` and `/fix` as plain assertions and accumulated in `references/custom-tests.yaml`. This skill resolves *how* to verify each entry at runtime — read `references/custom-tests.md` for the schema, the execution protocol (surface → tool → pass criterion, including the ui screenshot rule), and the prior-selection rule before running this tier.
+Per-task verifications captured up-front by `/code` and `/fix` and accumulated in `references/custom-tests.yaml`. This skill resolves *how* to verify each one at runtime — read `references/custom-tests.md` for the schema, the execution protocol (surface → tool → pass criterion, including the ui screenshot rule), and the prior-selection rule before running this tier.
 
 ## Regression
 
-Full broad suite — `references/test-commands.md § Regression` (hand-authored) plus every entry in `custom-tests.yaml`. Run only when the caller passes `regression_mode: full`.
+Full broad suite — `references/test-commands.md § Regression` (hand-authored) plus every verification in `custom-tests.yaml`. Run only when the caller passes `regression_mode: full`.
 
 ## Rules
 
 - Run tests after every significant change before closing the task.
 - Never start automated actions against live targets without explicit user confirmation.
 - Use representative placeholder inputs for smoke tests; live/real targets require explicit opt-in.
-- In the `/code`/`/fix` pipeline this skill runs inside the `<PREFIX>-qa` subagent and **must not** ask the user interactively — resolve each entry deterministically; if a target cannot be resolved, report that entry as blocked rather than prompting. Interactive disambiguation is allowed only when this skill is invoked directly at top level (see `references/custom-tests.md`).
+- In the `/code`/`/fix` pipeline this skill runs inside the `<PREFIX>-qa` subagent and **must not** ask the user interactively — resolve each verification deterministically; if a target cannot be resolved, report that verification as blocked rather than prompting. Interactive disambiguation is allowed only when this skill is invoked directly at top level (see `references/custom-tests.md`).
 
 ## Reference Sync
 
 Verify before finishing any `<PREFIX>-test` invocation that touches API handlers or test infrastructure:
 - [ ] `references/test-commands.md` Smoke / Regression / Functional Feature Subjects match current handlers, endpoints, and run scripts
-- [ ] `references/custom-tests.yaml` entries reflect current behavior; stale `surface`/`paths` corrected
+- [ ] `references/custom-tests.yaml` verifications reflect current behavior; stale `surface`/`paths` corrected
 - [ ] `references/custom-tests.md` execution protocol matches the surfaces in use
 - [ ] `references/sync-checklist.md` trigger rules reflect current API surface and test tooling
 
 ## References
 - `references/test-commands.md` — Smoke snippets, Regression suite, Functional Feature Subjects (data-store query helpers)
-- `references/custom-tests.yaml` — per-task functional feature assertions captured by `/code` and `/fix`
+- `references/custom-tests.yaml` — per-task verifications captured by `/code` and `/fix`
 - `references/custom-tests.md` — schema + runtime execution/inference protocol + prior-selection rule
 - `references/sync-checklist.md` — when-to-update rules for the reference files
 ```
@@ -1372,7 +1372,7 @@ Verify before finishing any `<PREFIX>-test` invocation that touches API handlers
 ## Update `references/custom-tests.yaml` when:
 
 - [ ] A functional feature entry's `assert`, `surface`, or `paths` no longer matches current behavior
-- [ ] A captured assertion is permanently obsolete (feature removed) — delete the entry
+- [ ] A captured verification is permanently obsolete (feature removed) — delete the entry
 ```
 
 `references/test-commands.md`:
@@ -1389,7 +1389,7 @@ Verify before finishing any `<PREFIX>-test` invocation that touches API handlers
 
 ## Functional Feature Subjects
 
-<!-- Data-store query snippets used to pick representative subjects when executing a `surface: data` assertion.
+<!-- Data-store query snippets used to pick representative subjects when executing a `surface: data` verification.
      Fill in the query pattern for this stack, e.g.:
      # resp = table.scan(Limit=50); items = resp.get("Items", [])
      # subjects = db.query(Model).filter(Model.status.in_([...])).limit(3).all()
@@ -1410,7 +1410,7 @@ tests: []
 # Functional Feature Tests — schema + execution
 
 Per-task verifications captured by `/code` and `/fix`, stored in `custom-tests.yaml`.
-Each entry is a plain assertion; this skill resolves *how* to verify it at runtime.
+Each entry is one verification — a plain statement of what must be true; this skill resolves *how* to verify it at runtime.
 
 ## Schema (`custom-tests.yaml`)
 
@@ -1427,7 +1427,7 @@ tests:
 `surface` and `paths` are the only persisted signals — both stable. The concrete target
 (url / endpoint / query) is re-derived every run, never stored, so route changes can't go stale.
 
-## Execution (per entry, every run)
+## Execution (per verification, every run)
 
 1. Read `surface`, `assert`, `task`, `paths`.
 2. Resolve the concrete target deterministically:
@@ -1439,8 +1439,8 @@ tests:
 | surface | tool | pass criterion |
 |---|---|---|
 | ui | `agent-browser` to the resolved url; assert the predicate | predicate holds **and** a screenshot of the live UI was saved |
-| api | curl/wget the resolved endpoint | HTTP 2xx **and** body satisfies the assertion |
-| data | the project's data-store query pattern | result row(s) satisfy the assertion |
+| api | curl/wget the resolved endpoint | HTTP 2xx **and** body satisfies the verification |
+| data | the project's data-store query pattern | result row(s) satisfy the verification |
 
 **ui screenshot rule:** every ui entry must take a screenshot of the actual UI at the moment of
 verification — the screenshot is the evidence; DOM injection or console inspection is not a
@@ -1448,8 +1448,8 @@ substitute. After screenshots, run `open <paths>` via Bash so the user sees them
 
 ## Prior-selection
 
-Include a prior entry in this run when its stored `paths:` set intersects the changed-paths list
-passed by the caller. New entries from the current task always run.
+Include a prior verification in this run when its stored `paths:` set intersects the changed-paths list
+passed by the caller. This task's own verifications always run.
 
 ## Interactive fallback — top-level only
 
@@ -1457,7 +1457,7 @@ When invoked **directly** at top level (a manual test run, not via `<PREFIX>-qa`
 `AskUserQuestion` once for a genuinely ambiguous piece, use the answer, and continue — **do not**
 write the answer back to the yaml (re-infer next run). In the `/code`/`/fix` pipeline this skill
 runs inside the `<PREFIX>-qa` subagent and must never ask: resolve deterministically, or report the
-entry as blocked in the handoff.
+verification as blocked in the handoff.
 ~~~
 
 ---

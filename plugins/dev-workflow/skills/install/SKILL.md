@@ -292,7 +292,7 @@ Also create `docs/workflow.md` if not present — generate with real content usi
 | `<PREFIX>-review` | Code review reception, reviewer dispatch, verification gates |
 | `<PREFIX>-debug` | Systematic debugging — four-phase root cause investigation |
 | `<PREFIX>-deploy` | Deploy authority — caller-driven env selection (`target=non-prod` from `<PREFIX>-dev`, `target=prod` from `<PREFIX>-pm`); reads `references/deploy-config.yaml`, fills missing values, gates prod inline via `AskUserQuestion`, verifies reachability |
-| `<PREFIX>-test` | Smoke (always) · per-task functional features via `custom-tests.yaml` · on-demand regression |
+| `<PREFIX>-test` | Smoke (always) · per-task verifications via `custom-tests.yaml` · on-demand regression |
 | `<PREFIX>-skill` | Meta-skill — skill system governance and path ownership |
 | `<PREFIX>-docs` | Documentation sync — README and workflow.md |
 

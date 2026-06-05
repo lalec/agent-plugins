@@ -33,47 +33,9 @@ Example:
 /plugin install dev-workflow@agent-plugins
 ```
 
-## Plugin structure
+## Status line
 
-```
-plugins/
-└── plugin-name/
-    ├── .claude-plugin/
-    │   └── plugin.json       # Plugin metadata (required)
-    ├── skills/               # Model-invoked skills
-    │   └── skill-name/
-    │       └── SKILL.md
-    ├── commands/             # User-invoked slash commands (optional)
-    ├── agents/               # Agent definitions (optional)
-    └── README.md
-```
-
-## Optional: status line
-
-A minimal Claude Code [status line](https://code.claude.com/docs/en/statusline) showing the current directory, model, context usage, and git branch:
-
-```
-~/py-projects/agent-plugins Opus 4.8 (1M context) 43% ctx main
-```
-
-Claude Code does not let plugins set the main status line, so it is installed as a personal setting:
-
-1. Install the script (requires [`jq`](https://jqlang.github.io/jq/) — `brew install jq`):
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/lalec/agent-plugins/main/statusline/statusline-command.sh \
-     -o ~/.claude/statusline-command.sh && chmod +x ~/.claude/statusline-command.sh
-   ```
-2. Add to `~/.claude/settings.json` (merge with any existing keys):
-   ```json
-   {
-     "statusLine": {
-       "type": "command",
-       "command": "bash ~/.claude/statusline-command.sh"
-     }
-   }
-   ```
-
-Source: [`statusline/statusline-command.sh`](./statusline/statusline-command.sh).
+Optional minimal status line (directory, model, context, git) — see [`statusline/`](./statusline/README.md).
 
 ## Docs
 

@@ -271,7 +271,10 @@ Also create `docs/workflow.md` if not present — generate with real content usi
   <PREFIX>-qa  ── <PREFIX>-review ── <PREFIX>-test ── sign-off
       │
       ▼
-  <PREFIX>-pm  ── <PREFIX>-deploy(prod) ── <PREFIX>-log ── docs update
+  <PREFIX>-pm  ── <PREFIX>-log ── docs update
+      │
+      ▼
+  (only with `--prod`) ── <PREFIX>-deploy(prod) at the command top level, after sign-off
 ```
 
 ## Agents
@@ -280,7 +283,9 @@ Also create `docs/workflow.md` if not present — generate with real content usi
 |---|---|
 | `<PREFIX>-dev` | Design → implement → deploy non-prod → Reference Sync → hand off to `<PREFIX>-qa` |
 | `<PREFIX>-qa` | Code review (`<PREFIX>-review`) + tests (`<PREFIX>-test`) → sign-off → hand off to `<PREFIX>-pm` |
-| `<PREFIX>-pm` | Verify QA phases ran → deploy prod (if declared) → write delivery log (`<PREFIX>-log`) → update docs if needed |
+| `<PREFIX>-pm` | Verify QA phases ran → write delivery log (`<PREFIX>-log`) → update docs if needed |
+
+Prod deploy is **not** an agent step — it runs at the command top level only when `/code` / `/fix` is invoked with `--prod` (so the `<PREFIX>-deploy` `AskUserQuestion` gate reaches the user), after QA sign-off, on the final code.
 
 ## Skills
 
@@ -465,12 +470,12 @@ Walk the checklist before declaring done:
 - [ ] If any IaC/CI/CD/Build/Deployment categories were discovered, `governed-paths.conf` `PATH_MAP` has a `<PREFIX>-deploy` entry covering those paths
 - [ ] `<PREFIX>-deploy/SKILL.md` `## Deployment` contains the strings "Caller contract", "Fill-in pass", and the inline gate context block fields (`env:`, `url:`, `command:`, `trigger:`, `commit:`, `branch:`) — gate runs inside the skill's turn via `AskUserQuestion`
 - [ ] `<PREFIX>-dev.md` step 4 invokes `<PREFIX>-deploy` with `target=non-prod` and does not contain the phrase "If a gate is declined"
-- [ ] `<PREFIX>-pm.md` has a step 1.5 invoking `<PREFIX>-deploy` with `target=prod` between step 1 (Verify QA phases) and step 2 (Write delivery log)
+- [ ] `<PREFIX>-pm.md` has **no** prod-deploy step (no `target=prod`) — prod deploy lives only in the `/code` / `/fix` `--prod` command step; pm's `## Boundaries` says "No deployments"
 - [ ] `<PREFIX>-dev.md` step 7 (Hand off) is a one-line pointer to `## Response Requirements`; the structured `## Handoff` block format (`Status: complete | blocked`, Files changed, Deployed, Reference Sync, Commit, Notes) lives in a terminal `## Response Requirements` section after `## Boundaries`
 - [ ] `<PREFIX>-qa.md` step 2 (Address findings) explicitly forbids self-patching ("You do not edit code") and routes fixes back to `<PREFIX>-dev` via blocked-status return
 - [ ] `<PREFIX>-qa.md` step 6 (Hand off) is a one-line pointer to `## Response Requirements`; the structured `## Handoff` block format (`Status: signed-off | blocked`, Review, Tests, Reference Sync, Notes) lives in a terminal `## Response Requirements` section after `## Boundaries`
 - [ ] `<PREFIX>-pm.md` step 1 (Verify QA evidence) reads `**QA-evidence:**` from the invocation prompt — does **not** grep session jsonl (subagent skill invocations don't reach the parent session)
-- [ ] `<PREFIX>-pm.md` step 1.5 contains "You do not ask the user" — the deploy skill is the single gate; pm never returns mid-flow questions to the orchestrator
+- [ ] `.claude/commands/code.md` and `fix.md` parse a `--prod` flag in Step 0 and have a final "Deploy to prod (only if `--prod`)" step that invokes `<PREFIX>-deploy target=prod` at the top level after pm
 - [ ] `<PREFIX>-qa.md` has a `## Invocation modes` section with `mode: initial` (default, full pipeline) and `mode: retest` (skip review, run tests only — for re-runs after a dev fix)
 - [ ] `.claude/commands/code.md` Step 2 parses dev `## Handoff` Status, branches on qa Status, and re-spawns qa with `mode=retest` after a dev fix; Step 3 passes the qa handoff verbatim to pm under `**QA-evidence:**`
 - [ ] `.claude/commands/fix.md` Step 3 has the same qa-branching + retest logic; Step 4 passes `**QA-evidence:**` to pm

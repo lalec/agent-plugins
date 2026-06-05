@@ -1248,7 +1248,7 @@ Read `references/deploy-config.yaml` before any deploy action.
 - `target: non-prod` → deploy only to the **first** env in `deploy-config.yaml` whose name is not `prod` (declaration order). If no non-prod env exists for a component, return silently for that component.
 - `target: prod` → deploy only to the env named `prod`. If `prod` is not declared (pre-launch component), return silently.
 
-Never deploy across the boundary regardless of caller request. `<PREFIX>-dev` always passes `non-prod`; `<PREFIX>-pm` always passes `prod`.
+Never deploy across the boundary regardless of caller request. `<PREFIX>-dev` always passes `non-prod` (mid-pipeline, so `<PREFIX>-qa` tests a running stack). `target: prod` is passed only by the top-level `/code --prod` / `/fix --prod` command step **after** QA sign-off — never by a subagent, because the prod gate below needs `AskUserQuestion` and that only reaches the user at the top level.
 
 **Fill-in pass** (before any deploy action, for the resolved target env):
 - Required per env: `deploy`, `url`.
@@ -1257,7 +1257,7 @@ Never deploy across the boundary regardless of caller request. `<PREFIX>-dev` al
 - Never invent values; never write placeholder text like `<fill in>`.
 
 **Per affected component:**
-- `verify: local` → check the `local.url` (suffixed by `local.health_path` if set, else `/`) returns HTTP 2xx/3xx. If not reachable, ask the user to start the local server with `local.run` and require confirmation before running it.
+- `verify: local` → check the `local.url` (suffixed by `local.health_path` if set, else `/`) returns HTTP 2xx/3xx. If not reachable, **do not auto-start it** — when this skill is invoked from the `<PREFIX>-dev` subagent, `AskUserQuestion` (and a long-running server process) can't be driven from there. Report `local stack not running — start with \`local.run\`` and return without deploying; the caller surfaces it and the user starts the server, then re-runs.
 - `verify: cloud:<env>` → run `envs.<env>.deploy`, wait for it to finish, then confirm `envs.<env>.url` (suffixed by `envs.<env>.health_path` if set, else `/`) returns HTTP 2xx/3xx.
 
 **Gates** (per env):
@@ -1416,13 +1416,17 @@ Each entry is one verification — a plain statement of what must be true; this 
 
 ```yaml
 tests:
-  - name: <short-kebab-slug>       # auto-generated at capture
+  - name: <short-kebab-slug>        # auto-generated at capture
     added: YYYY-MM-DD
-    task: "<the /code or /fix invocation that captured this>"
-    assert: "<one sentence: what must be true>"
-    surface: ui | api | data        # resolved at capture
-    paths: ["<changed path/glob>"]  # from dev's `Files changed:`; drives prior-selection
+    task: '<the /code or /fix invocation that captured this>'
+    assert: '<one sentence: what must be true>'
+    surface: ui | api | data         # resolved at capture
+    paths: ["<changed path/glob>"]   # from dev's `Files changed:` (minus .claude/**); drives prior-selection
 ```
+
+`task` and `assert` are **single-quoted** (double any internal `'`): both routinely contain colons,
+braces, or double-quotes — e.g. `returns {"version": "0.1.0"}` — which break unquoted *and*
+double-quoted YAML. Single quotes survive all of those.
 
 `surface` and `paths` are the only persisted signals — both stable. The concrete target
 (url / endpoint / query) is re-derived every run, never stored, so route changes can't go stale.
@@ -1445,6 +1449,14 @@ tests:
 **ui screenshot rule:** every ui entry must take a screenshot of the actual UI at the moment of
 verification — the screenshot is the evidence; DOM injection or console inspection is not a
 substitute. After screenshots, run `open <paths>` via Bash so the user sees them immediately.
+
+**Running-stack rule:** every verification runs against the actually-running deployed target
+resolved above (the live url / endpoint / datastore). If that target is unreachable — typically the
+local server isn't started — report the verification **blocked** (`target not running — start with
+deploy-config \`local.run\``). **Never** substitute an in-process test runner (FastAPI `TestClient`,
+supertest, an imported app handler, etc.): an in-process pass does not prove the running stack works,
+and `<PREFIX>-test`'s job is to test the running stack, not dead code. Blocked is an honest result; a
+faked green is not.
 
 ## Prior-selection
 

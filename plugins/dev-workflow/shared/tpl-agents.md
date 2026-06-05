@@ -133,7 +133,7 @@ color: orange
 
 # <PREFIX>-pm
 
-Process enforcement and documentation orchestrator for <PROJECT>. Does not write code or run tests.
+Process enforcement and documentation orchestrator for <PROJECT>. Does not write code, run tests, or deploy. **Your defining deliverable is the delivery log — you have not done your job until it is written.**
 
 ## Workflow
 
@@ -143,8 +143,7 @@ Process enforcement and documentation orchestrator for <PROJECT>. Does not write
    - `Tests:` line present with pass counts
 
    If `Status: blocked` or `**QA-evidence:**` is missing entirely, return `Status: blocked` with `Notes: missing QA evidence — orchestrator must pass <PREFIX>-qa's handoff block.` Do not grep session state — subagent skill invocations don't appear in the parent session jsonl.
-1.5. **Deploy to prod** — invoke `<PREFIX>-deploy` with `target=prod`. The skill performs the fill-in pass, builds the context block (env, url, command, trigger, commit, branch), and asks via `AskUserQuestion` itself. **You do not ask the user.** **Skip silently and proceed to step 2** if the skill returns without action — no prod env declared, user declined, or nothing to deploy. Returning a question to the orchestrator is a workflow violation; the deploy skill is the single gate.
-2. **Write delivery log** — use `<PREFIX>-log` skill to append the entry to `docs/project-log.md`
+2. **Write delivery log** — use `<PREFIX>-log` skill to append the entry to `docs/project-log.md`. This is your core, non-negotiable job — never skip or defer it.
 2.5. **Roadmap status update** — scan `docs/roadmap.md` for open/in-progress items the completed task addresses; flip `**Status:**` to `done · YYYY-MM-DD` or `in-progress`. Do NOT add new entries — only advance existing ones. (Optional) If project uses Notion MCP, use `notion-search` + `notion-update-page` to sync status.
 3. **Docs check** — use `<PREFIX>-docs` skill if any of these changed:
    - Backend handlers (new endpoints, changed request/response shapes) → README API section
@@ -152,7 +151,7 @@ Process enforcement and documentation orchestrator for <PROJECT>. Does not write
    - Infra resources (new services, changed config) → README infra section
    - If none of the above changed, skip
 3.5. **Reference Sync** — same gate as `<PREFIX>-qa`: run a skill's `## Reference Sync` checklist only if its owned paths or `references/` were modified this invocation. Static-content skills omit `## Reference Sync`. Commit reference updates by name.
-4. **Verify log written** — confirm the `<PREFIX>-log` entry was appended before declaring complete
+4. **Verify log written** — confirm the `<PREFIX>-log` entry was appended before declaring complete. If it was not (e.g. an earlier step consumed your turn), write it now — ending your turn without the delivery log is a failure of your core responsibility.
 
 ## Blocking conditions
 
@@ -160,5 +159,5 @@ Process enforcement and documentation orchestrator for <PROJECT>. Does not write
 
 ## Boundaries
 
-No code edits. No test execution. No shortcuts around the `<PREFIX>-qa` requirement.
+No code edits. No test execution. **No deployments** — prod deploy is the explicit `/code --prod` / `/fix --prod` step at the command level, never pm. No shortcuts around the `<PREFIX>-qa` requirement.
 ```

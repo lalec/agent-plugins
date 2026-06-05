@@ -15,13 +15,16 @@ description: Implement a feature through the full <PREFIX>-dev → <PREFIX>-qa �
 
 # Feature Implementation
 
-**Usage:** `/code <description>`
+**Usage:** `/code <description>` — append `--prod` to deploy to prod after QA sign-off (default ends at UAT, no prod deploy)
 
 **Examples:**
 - `/code add export to CSV button on assessment list`
 - `/code change pipeline phases status indication`
+- `/code <description> --prod`
 
 ## Step 0 — Confirm
+
+**Flag parse (first):** if `$ARGUMENTS` contains `--prod`, set `prod_deploy = true` and strip `--prod` from the task description used in every step below. Otherwise `prod_deploy = false` — the pipeline ends at UAT with no prod deploy.
 
 Use the AskUserQuestion tool with a single question:
 
@@ -73,10 +76,10 @@ Run only if verifications were captured in Step 0.5 (not `skip`) **and** <PREFIX
 For each captured `{assert, surface}`, append an entry to `.claude/skills/<PREFIX>-test/references/custom-tests.yaml`:
 - `name` — auto-slug from the verification
 - `added` — today's date
-- `task` — `$ARGUMENTS`
-- `assert` — the sentence
+- `task` — `$ARGUMENTS`, written as a **single-quoted** YAML scalar (double any internal `'`) so colons / braces / double-quotes in the description can't break parsing
+- `assert` — the sentence, also **single-quoted** (double any internal `'`)
 - `surface` — the inferred/confirmed surface
-- `paths` — the list from the dev `## Handoff` block's `Files changed:` field
+- `paths` — the dev `## Handoff` `Files changed:` list, **excluding any `.claude/**` paths** (workflow-internal reference/doc edits must not drive prior-selection)
 
 Commit: `test: capture verifications for <task-slug>` (the tree is clean post-dev — a clean follow-up commit). Keep the new entry `name`s to forward to Step 2.
 
@@ -111,9 +114,14 @@ Task:
     **QA-evidence:**
     <paste the full ## Handoff block returned by <PREFIX>-qa, verbatim>
 
+## Step 4 — Deploy to prod (only if `--prod`)
+
+Run only if `prod_deploy` was set in Step 0. After <PREFIX>-pm has logged, invoke the `<PREFIX>-deploy` skill **here at the top level** (not via a subagent) with `target=prod`. It runs the fill-in pass, builds the gate context, and asks via `AskUserQuestion` — which works because this is the top level. Running after sign-off and any retest loop means it deploys the final, signed-off code. If no `prod` env is declared or the user declines, report that and finish at UAT.
+
 ## Done
 
-Tell the user: "Feature complete and logged. Ready for user acceptance testing."
+- If `--prod` and prod deploy succeeded: tell the user "Feature complete, logged, and deployed to prod."
+- Otherwise: tell the user "Feature complete and logged. Ready for user acceptance testing — run `/code <task> --prod` (or invoke <PREFIX>-deploy) when ready to ship."
 ```
 
 ---
@@ -127,13 +135,16 @@ description: Investigate and fix a bug or performance issue through <PREFIX>-deb
 
 # Bug Fix
 
-**Usage:** `/fix <description>`
+**Usage:** `/fix <description>` — append `--prod` to deploy to prod after QA sign-off (default ends at UAT, no prod deploy)
 
 **Examples:**
 - `/fix pipeline table takes too long to load`
 - `/fix assessment status stuck on running after completion`
+- `/fix <description> --prod`
 
 ## Step 0 — Confirm
+
+**Flag parse (first):** if `$ARGUMENTS` contains `--prod`, set `prod_deploy = true` and strip `--prod` from the description used in every step below. Otherwise `prod_deploy = false` — the pipeline ends at UAT with no prod deploy.
 
 Use the AskUserQuestion tool with a single question:
 
@@ -202,10 +213,10 @@ Run only if verifications were captured in Step 0.5 (not `skip`) **and** <PREFIX
 For each captured `{assert, surface}`, append an entry to `.claude/skills/<PREFIX>-test/references/custom-tests.yaml`:
 - `name` — auto-slug from the verification
 - `added` — today's date
-- `task` — `$ARGUMENTS`
-- `assert` — the sentence
+- `task` — `$ARGUMENTS`, written as a **single-quoted** YAML scalar (double any internal `'`) so colons / braces / double-quotes in the description can't break parsing
+- `assert` — the sentence, also **single-quoted** (double any internal `'`)
 - `surface` — the inferred/confirmed surface
-- `paths` — the list from the dev `## Handoff` block's `Files changed:` field
+- `paths` — the dev `## Handoff` `Files changed:` list, **excluding any `.claude/**` paths** (workflow-internal reference/doc edits must not drive prior-selection)
 
 Commit: `test: capture verifications for <task-slug>` (the tree is clean post-dev — a clean follow-up commit). Keep the new entry `name`s to forward to Step 3.
 
@@ -240,9 +251,14 @@ Task:
     **QA-evidence:**
     <paste the full ## Handoff block returned by <PREFIX>-qa, verbatim>
 
+## Step 5 — Deploy to prod (only if `--prod`)
+
+Run only if `prod_deploy` was set in Step 0. After <PREFIX>-pm has logged, invoke the `<PREFIX>-deploy` skill **here at the top level** (not via a subagent) with `target=prod`. It runs the fill-in pass, builds the gate context, and asks via `AskUserQuestion` — which works because this is the top level. Running after sign-off and any retest loop means it deploys the final, signed-off code. If no `prod` env is declared or the user declines, report that and finish at UAT.
+
 ## Done
 
-Tell the user: "Fix complete and logged. Ready for user acceptance testing."
+- If `--prod` and prod deploy succeeded: tell the user "Fix complete, logged, and deployed to prod."
+- Otherwise: tell the user "Fix complete and logged. Ready for user acceptance testing — run `/fix <task> --prod` (or invoke <PREFIX>-deploy) when ready to ship."
 ```
 
 ---

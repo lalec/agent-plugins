@@ -44,11 +44,17 @@ Then:
 
 **Read-free step — do NOT read `custom-tests.yaml`, `test-commands.md`, or any reference file here.**
 
-**(a) Capture verifications.** Ask the user in prose (not AskUserQuestion):
+**(a) Capture verifications.** From the task (`$ARGUMENTS`, with any `--prod` already stripped), infer 2–3 **candidate verifications** — plain one-line statements of what must be true after the change — and propose them with the AskUserQuestion tool (this stays read-free — do not read any reference file):
 
-> "What should be verified before this ships? One verification per line; blank to finish; `skip` for none."
+- question: "What should be verified before this ships?"
+- header: "Verify"
+- multiSelect: true
+- options:
+  - one per inferred candidate — label: a short tag (the endpoint/element + expected result); description: the full one-line verification followed by its surface (`api` / `ui` / `data`)
+  - a final option — label: "Nothing to verify"; description: "Refactor / docs / no behavior change"
+- The automatic "Other" field lets the user type their own one-line verification.
 
-For each verification, infer its `surface` from the wording — **ui** ("page", "button", "renders", "screenshot"), **api** ("endpoint", "returns", "status code"), or **data** ("row", "record", "stored", "status in"). Only if a sentence is genuinely ambiguous, use AskUserQuestion with options **UI · API · Data** to resolve that one. Hold the captured `{assert, surface}` pairs in context — **do not write or commit anything yet**. If the user answers `skip`, capture nothing and continue.
+For every option the user selects (and any "Other" text), take the one-line verification and its `surface` — already known for the proposed ones; for a custom line, infer `surface` from the wording (**ui**: page/button/renders/screenshot · **api**: endpoint/returns/status · **data**: row/record/stored). Hold the `{assert, surface}` pairs in context — **do not write or commit anything yet**. If only "Nothing to verify" is chosen (or nothing is selected), capture nothing and continue.
 
 **(b) Regression flag.** Use the AskUserQuestion tool:
 
@@ -164,11 +170,17 @@ Then:
 
 **Read-free step — do NOT read `custom-tests.yaml`, `test-commands.md`, or any reference file here.**
 
-**(a) Capture verifications.** Ask the user in prose (not AskUserQuestion):
+**(a) Capture verifications.** From the task (`$ARGUMENTS`, with any `--prod` already stripped), infer 2–3 **candidate verifications** — plain one-line statements of what must be true after the change — and propose them with the AskUserQuestion tool (this stays read-free — do not read any reference file):
 
-> "What should be verified before this ships? One verification per line; blank to finish; `skip` for none."
+- question: "What should be verified before this ships?"
+- header: "Verify"
+- multiSelect: true
+- options:
+  - one per inferred candidate — label: a short tag (the endpoint/element + expected result); description: the full one-line verification followed by its surface (`api` / `ui` / `data`)
+  - a final option — label: "Nothing to verify"; description: "Refactor / docs / no behavior change"
+- The automatic "Other" field lets the user type their own one-line verification.
 
-For each verification, infer its `surface` from the wording — **ui** ("page", "button", "renders", "screenshot"), **api** ("endpoint", "returns", "status code"), or **data** ("row", "record", "stored", "status in"). Only if a sentence is genuinely ambiguous, use AskUserQuestion with options **UI · API · Data** to resolve that one. Hold the captured `{assert, surface}` pairs in context — **do not write or commit anything yet**. If the user answers `skip`, capture nothing and continue. (A bug's verification becomes its never-regress-again invariant.)
+For every option the user selects (and any "Other" text), take the one-line verification and its `surface` — already known for the proposed ones; for a custom line, infer `surface` from the wording (**ui**: page/button/renders/screenshot · **api**: endpoint/returns/status · **data**: row/record/stored). Hold the `{assert, surface}` pairs in context — **do not write or commit anything yet**. If only "Nothing to verify" is chosen (or nothing is selected), capture nothing and continue. (A bug's verification becomes its never-regress-again invariant.)
 
 **(b) Regression flag.** Use the AskUserQuestion tool:
 

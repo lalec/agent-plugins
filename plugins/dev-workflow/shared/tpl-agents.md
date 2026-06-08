@@ -129,6 +129,7 @@ Use `Status: blocked` if review or tests reported anything that can't be signed 
 name: <PREFIX>-pm
 description: Process enforcement and documentation gate for <PROJECT>. Invoked after <PREFIX>-qa sign-off. Verifies review and test phases happened, writes the delivery log, and triggers docs update if API/schema/architecture changed.
 color: orange
+model: sonnet
 ---
 
 # <PREFIX>-pm

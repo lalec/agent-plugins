@@ -86,6 +86,7 @@ Present to the user as a checklist before changing anything:
 - [ ] `<PREFIX>-dev.md` step 4 does not pass `target=non-prod`
 - [ ] `<PREFIX>-dev.md` step 4 still contains the trailing "If a gate is declined or skipped" clause — unreachable once gates are inline
 - [ ] `<PREFIX>-pm.md` **has** a prod-deploy step (step 1.5 / `target=prod`) — superseded by the top-level `/code|/fix --prod` step (the deploy gate's `AskUserQuestion` can't reach the user from a subagent); must be removed
+- [ ] `<PREFIX>-pm.md` frontmatter lacks `model: sonnet` — pm's work is mechanical close-out (verify evidence → log → docs), so Opus is overkill (~4× the cost); dev/qa stay on Opus
 - [ ] `<PREFIX>-dev.md` step 7 (Hand off) does not require a structured `## Handoff` block
 - [ ] `<PREFIX>-qa.md` step 2 (Address findings) does not contain "You do not edit code"
 - [ ] `<PREFIX>-qa.md` step 6 (Hand off) does not require a structured `## Handoff` block
@@ -148,6 +149,7 @@ Each step is idempotent — re-running the upgrade is safe.
 - **Add `## Preconditions` section to every domain skill SKILL.md** that has a `## Architecture` section but no `## Preconditions` section: insert the block from `../../shared/tpl-domain-skill.md § Domain skill stub` (the `## Preconditions — Verify Before Writing References` block, verbatim) immediately after the `## Architecture` section's content and before the next section (which may be `## Visual Decisions`, `## Quality Checklist`, or other). Domain skills are identified by the presence of `## Architecture` — lifecycle skills don't have it. Idempotent — skip any skill that already contains `## Preconditions`.
 - **Replace `<PREFIX>-deploy/SKILL.md` `## Deployment` section** with the version from `../../shared/tpl-lifecycle.md § tosk-deploy/SKILL.md` (Caller contract + Fill-in pass + inline gate with context block). Preserve `references/deploy-config.yaml` content as-is. Idempotent — skip if `## Deployment` already contains "Caller contract".
 - **Update `<PREFIX>-dev.md` step 4** to pass `target=non-prod` and drop the trailing "If a gate is declined or skipped" clause. Use the wording from `../../shared/tpl-agents.md § tosk-dev` step 4. Idempotent — skip if step 4 already contains "target=non-prod".
+- **Set `<PREFIX>-pm.md` to `model: sonnet`**: add `model: sonnet` to the frontmatter (from `../../shared/tpl-agents.md § tosk-pm`) — mechanical close-out doesn't need Opus. Idempotent — skip if a `model:` line already exists.
 - **Remove `<PREFIX>-pm.md` prod-deploy step + harden the log**: delete the `1.5. Deploy to prod` step (any step referencing `<PREFIX>-deploy` / `target=prod`) and renumber; add the "defining deliverable is the delivery log" framing to the title block, the "core, non-negotiable job" note on the Write-delivery-log step, the step-4 hard-gate wording, and "No deployments" to `## Boundaries` — all from `../../shared/tpl-agents.md § tosk-pm`. Idempotent — skip if pm has no `target=prod` and `## Boundaries` already contains "No deployments".
 - **Replace `<PREFIX>-dev.md` step 7 (Hand off)** with the structured `## Handoff` block version from `../../shared/tpl-agents.md § tosk-dev` step 7. Update step 6 (Commit) to handle the no-git-repo case. Idempotent — skip if step 7 already contains "Status: complete | blocked".
 - **Replace `<PREFIX>-qa.md` step 2 (Address findings)** with the no-self-patch version from `../../shared/tpl-agents.md § tosk-qa` step 2. Idempotent — skip if step 2 already contains "You do not edit code".
@@ -192,6 +194,7 @@ Run these verification checks on the upgrade-affected items:
 - `<PREFIX>-deploy/SKILL.md` `## Deployment` contains the strings "Caller contract", "Fill-in pass", and the inline gate context block fields (`env:`, `url:`, `command:`, `trigger:`, `commit:`, `branch:`)
 - `<PREFIX>-dev.md` step 4 contains "target=non-prod" and does not contain "If a gate is declined"
 - `<PREFIX>-pm.md` contains **no** prod-deploy step (no `target=prod`) and its `## Boundaries` says "No deployments"
+- `<PREFIX>-pm.md` frontmatter contains `model: sonnet`
 - `<PREFIX>-dev.md` contains the strings "## Handoff" and "Status: complete | blocked" (under the new layout these live in `## Response Requirements`, not step 7)
 - `<PREFIX>-qa.md` step 2 contains "You do not edit code"
 - `<PREFIX>-qa.md` contains "## Handoff" and "Status: signed-off | blocked" (under the new layout these live in `## Response Requirements`, not step 6)

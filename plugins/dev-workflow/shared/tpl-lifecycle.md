@@ -1322,11 +1322,11 @@ If the prompt names no changed paths and no new verifications (a bare smoke requ
 
 ## Smoke
 
-Always-run baseline: service/endpoint reachability + log check. Curl templates and run commands: `references/test-commands.md § Smoke`.
+Always-run baseline: service/endpoint reachability + log check. Curl templates and run commands: `references/test-commands.md § Smoke`. Smoke is liveness only — don't add a check for an endpoint already covered by an Integration/E2E verification in `custom-tests.yaml`.
 
 ## Functional Feature Tests
 
-Per-task verifications captured up-front by `/code` and `/fix` and accumulated in `references/custom-tests.yaml`. This skill resolves *how* to verify each one at runtime — read `references/custom-tests.md` for the schema, the execution protocol (surface → tool → pass criterion, including the ui screenshot rule), and the prior-selection rule before running this tier.
+Per-task verifications captured up-front by `/code` and `/fix` and accumulated in `references/custom-tests.yaml`. This skill resolves *how* to verify each one at runtime — read `references/custom-tests.md` for the schema, the execution protocol (type → tool → pass criterion, including the UX/E2E screenshot rule), and the prior-selection rule before running this tier.
 
 ## Regression
 
@@ -1343,8 +1343,8 @@ Full broad suite — `references/test-commands.md § Regression` (hand-authored)
 
 Verify before finishing any `<PREFIX>-test` invocation that touches API handlers or test infrastructure:
 - [ ] `references/test-commands.md` Smoke / Regression / Functional Feature Subjects match current handlers, endpoints, and run scripts
-- [ ] `references/custom-tests.yaml` verifications reflect current behavior; stale `surface`/`paths` corrected
-- [ ] `references/custom-tests.md` execution protocol matches the surfaces in use
+- [ ] `references/custom-tests.yaml` verifications reflect current behavior; stale `type`/`paths` corrected
+- [ ] `references/custom-tests.md` execution protocol matches the types in use
 - [ ] `references/sync-checklist.md` trigger rules reflect current API surface and test tooling
 
 ## References
@@ -1371,7 +1371,7 @@ Verify before finishing any `<PREFIX>-test` invocation that touches API handlers
 
 ## Update `references/custom-tests.yaml` when:
 
-- [ ] A functional feature entry's `assert`, `surface`, or `paths` no longer matches current behavior
+- [ ] A functional feature entry's `assert`, `type`, or `paths` no longer matches current behavior
 - [ ] A captured verification is permanently obsolete (feature removed) — delete the entry
 ```
 
@@ -1389,7 +1389,7 @@ Verify before finishing any `<PREFIX>-test` invocation that touches API handlers
 
 ## Functional Feature Subjects
 
-<!-- Data-store query snippets used to pick representative subjects when executing a `surface: data` verification.
+<!-- Data-store query snippets used to pick representative subjects when executing an `Integration` verification's query driver (or an E2E verification's confirmation query).
      Fill in the query pattern for this stack, e.g.:
      # resp = table.scan(Limit=50); items = resp.get("Items", [])
      # subjects = db.query(Model).filter(Model.status.in_([...])).limit(3).all()
@@ -1400,7 +1400,8 @@ Verify before finishing any `<PREFIX>-test` invocation that touches API handlers
 ```yaml
 # Functional Feature Tests captured by /code and /fix.
 # <PREFIX>-test resolves each entry's concrete target at runtime from
-# surface + task + project context (deploy-config.yaml, test-commands.md).
+# type + task + project context (deploy-config.yaml, test-commands.md).
+# Entries are atomic + named so a future optional `story` grouping can be added without reshaping them.
 # Schema + execution protocol: references/custom-tests.md
 tests: []
 ```
@@ -1420,35 +1421,34 @@ tests:
     added: YYYY-MM-DD
     task: '<the /code or /fix invocation that captured this>'
     assert: '<one sentence: what must be true>'
-    surface: ui | api | data         # resolved at capture
+    type: UX | Integration | E2E     # UX=frontend · Integration=backend (api/data) · E2E=full journey
     paths: ["<changed path/glob>"]   # from dev's `Files changed:` (minus .claude/**); drives prior-selection
 ```
 
 `task` and `assert` are **single-quoted** (double any internal `'`): both routinely contain colons,
-braces, or double-quotes — e.g. `returns {"version": "0.1.0"}` — which break unquoted *and*
-double-quoted YAML. Single quotes survive all of those.
+braces, or double-quotes — e.g. an assert quoting a JSON fragment like `{"key": "value"}` — which
+break unquoted *and* double-quoted YAML. Single quotes survive all of those.
 
-`surface` and `paths` are the only persisted signals — both stable. The concrete target
+`type` and `paths` are the only persisted signals — both stable. The concrete target
 (url / endpoint / query) is re-derived every run, never stored, so route changes can't go stale.
 
 ## Execution (per verification, every run)
 
-1. Read `surface`, `assert`, `task`, `paths`.
+1. Read `type`, `assert`, `task`, `paths`.
 2. Resolve the concrete target deterministically:
-   - **ui** → component url from `<PREFIX>-deploy/references/deploy-config.yaml`
-   - **api** → endpoint from `test-commands.md`
-   - **data** → subject query from `test-commands.md § Functional Feature Subjects`
+   - **UX / E2E** → component url from `<PREFIX>-deploy/references/deploy-config.yaml`
+   - **Integration** → endpoint from `test-commands.md`, or subject query from `test-commands.md § Functional Feature Subjects` — whichever the assert names
 3. Execute and check the predicate:
 
-| surface | tool | pass criterion |
+| type | how to run | pass criterion |
 |---|---|---|
-| ui | `agent-browser` to the resolved url; assert the predicate | predicate holds **and** a screenshot of the live UI was saved |
-| api | curl/wget the resolved endpoint | HTTP 2xx **and** body satisfies the verification |
-| data | the project's data-store query pattern | result row(s) satisfy the verification |
+| UX | `agent-browser` to the resolved url; check the UI | predicate holds **and** a screenshot of the live UI was saved |
+| Integration | curl/wget the resolved endpoint **or** run the data-store query — whichever the assert names | HTTP 2xx and body satisfies, or result row(s) satisfy, the verification |
+| E2E | `agent-browser`: perform the UI action, then confirm the backend effect | UI predicate holds **and** a screenshot was saved **and** the backend effect is confirmed |
 
-**ui screenshot rule:** every ui entry must take a screenshot of the actual UI at the moment of
-verification — the screenshot is the evidence; DOM injection or console inspection is not a
-substitute. After screenshots, run `open <paths>` via Bash so the user sees them immediately.
+**Screenshot rule (UX and E2E):** every UX and E2E entry must take a screenshot of the actual UI at
+the moment of verification — the screenshot is the evidence; DOM injection or console inspection is
+not a substitute. After screenshots, run `open <paths>` via Bash so the user sees them immediately.
 
 **Running-stack rule:** every verification runs against the actually-running deployed target
 resolved above (the live url / endpoint / datastore). If that target is unreachable — typically the

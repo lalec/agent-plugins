@@ -50,11 +50,11 @@ Then:
 - header: "Verify"
 - multiSelect: true
 - options:
-  - one per inferred candidate — label: a short tag (the endpoint/element + expected result); description: the full one-line verification followed by its surface (`api` / `ui` / `data`)
+  - one per inferred candidate — label: a short tag (the endpoint/element + expected result); description: the full one-line verification followed by its type (`UX` / `Integration` / `E2E`)
   - a final option — label: "Nothing to verify"; description: "Refactor / docs / no behavior change"
 - The automatic "Other" field lets the user type their own one-line verification.
 
-For every option the user selects (and any "Other" text), take the one-line verification and its `surface` — already known for the proposed ones; for a custom line, infer `surface` from the wording (**ui**: page/button/renders/screenshot · **api**: endpoint/returns/status · **data**: row/record/stored). Hold the `{assert, surface}` pairs in context — **do not write or commit anything yet**. If only "Nothing to verify" is chosen (or nothing is selected), capture nothing and continue.
+For every option the user selects (and any "Other" text), take the one-line verification and its `type` — already known for the proposed ones; for a custom line, infer `type` from the wording (**UX** (frontend only) · **Integration** (backend: endpoint or stored data) · **E2E** (a UI action with a backend effect)). Hold the `{assert, type}` pairs in context — **do not write or commit anything yet**. If only "Nothing to verify" is chosen (or nothing is selected), capture nothing and continue.
 
 **(b) Regression flag.** Use the AskUserQuestion tool:
 
@@ -79,12 +79,12 @@ Task:
 
 Run only if verifications were captured in Step 0.5 (not `skip`) **and** <PREFIX>-dev returned `Status: complete`. If dev blocked, skip — nothing is written.
 
-For each captured `{assert, surface}`, append an entry to `.claude/skills/<PREFIX>-test/references/custom-tests.yaml`:
+For each captured `{assert, type}`, append an entry to `.claude/skills/<PREFIX>-test/references/custom-tests.yaml`:
 - `name` — auto-slug from the verification
 - `added` — today's date
 - `task` — `$ARGUMENTS`, written as a **single-quoted** YAML scalar (double any internal `'`) so colons / braces / double-quotes in the description can't break parsing
 - `assert` — the sentence, also **single-quoted** (double any internal `'`)
-- `surface` — the inferred/confirmed surface
+- `type` — the inferred/confirmed type
 - `paths` — the dev `## Handoff` `Files changed:` list, **excluding any `.claude/**` paths** (workflow-internal reference/doc edits must not drive prior-selection)
 
 Commit: `test: capture verifications for <task-slug>` (the tree is clean post-dev — a clean follow-up commit). Keep the new entry `name`s to forward to Step 2.
@@ -176,11 +176,11 @@ Then:
 - header: "Verify"
 - multiSelect: true
 - options:
-  - one per inferred candidate — label: a short tag (the endpoint/element + expected result); description: the full one-line verification followed by its surface (`api` / `ui` / `data`)
+  - one per inferred candidate — label: a short tag (the endpoint/element + expected result); description: the full one-line verification followed by its type (`UX` / `Integration` / `E2E`)
   - a final option — label: "Nothing to verify"; description: "Refactor / docs / no behavior change"
 - The automatic "Other" field lets the user type their own one-line verification.
 
-For every option the user selects (and any "Other" text), take the one-line verification and its `surface` — already known for the proposed ones; for a custom line, infer `surface` from the wording (**ui**: page/button/renders/screenshot · **api**: endpoint/returns/status · **data**: row/record/stored). Hold the `{assert, surface}` pairs in context — **do not write or commit anything yet**. If only "Nothing to verify" is chosen (or nothing is selected), capture nothing and continue. (A bug's verification becomes its never-regress-again invariant.)
+For every option the user selects (and any "Other" text), take the one-line verification and its `type` — already known for the proposed ones; for a custom line, infer `type` from the wording (**UX** (frontend only) · **Integration** (backend: endpoint or stored data) · **E2E** (a UI action with a backend effect)). Hold the `{assert, type}` pairs in context — **do not write or commit anything yet**. If only "Nothing to verify" is chosen (or nothing is selected), capture nothing and continue. (A bug's verification becomes its never-regress-again invariant.)
 
 **(b) Regression flag.** Use the AskUserQuestion tool:
 
@@ -222,12 +222,12 @@ Task:
 
 Run only if verifications were captured in Step 0.5 (not `skip`) **and** <PREFIX>-dev returned `Status: complete`. If dev blocked, skip — nothing is written.
 
-For each captured `{assert, surface}`, append an entry to `.claude/skills/<PREFIX>-test/references/custom-tests.yaml`:
+For each captured `{assert, type}`, append an entry to `.claude/skills/<PREFIX>-test/references/custom-tests.yaml`:
 - `name` — auto-slug from the verification
 - `added` — today's date
 - `task` — `$ARGUMENTS`, written as a **single-quoted** YAML scalar (double any internal `'`) so colons / braces / double-quotes in the description can't break parsing
 - `assert` — the sentence, also **single-quoted** (double any internal `'`)
-- `surface` — the inferred/confirmed surface
+- `type` — the inferred/confirmed type
 - `paths` — the dev `## Handoff` `Files changed:` list, **excluding any `.claude/**` paths** (workflow-internal reference/doc edits must not drive prior-selection)
 
 Commit: `test: capture verifications for <task-slug>` (the tree is clean post-dev — a clean follow-up commit). Keep the new entry `name`s to forward to Step 3.

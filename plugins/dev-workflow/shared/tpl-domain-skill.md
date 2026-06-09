@@ -189,7 +189,7 @@ components:
     verify: local | cloud:<env_name>
     local:                            # optional — populated whenever the component can be run locally
       run: "<cmd>"                    # how to start the local server / process
-      url: "<url>"                    # where it listens (e.g. http://localhost:4321)
+      url: "<url>"                    # where it listens (e.g. http://localhost:3000)
       health_path: "<path>"           # optional, default "/" — appended to url for HTTP 2xx/3xx verification
     envs:
       <env_name>:                     # e.g. dev, test, staging, prod

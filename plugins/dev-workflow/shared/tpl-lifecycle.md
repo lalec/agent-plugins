@@ -1234,6 +1234,7 @@ Verify before finishing any <PREFIX>-design invocation:
 ---
 name: <PREFIX>-deploy
 description: Deploy authority for <PROJECT>. Invoke for every change touching deployed code. Reads references/deploy-config.yaml, runs the right deploy command per affected component/env, respects gates, verifies the result is reachable, and reports env + url so <PREFIX>-log can record the deploy.
+disable-model-invocation: true   # explicit-invoke only — runs via the <PREFIX>-dev deploy step or /code|/fix --prod, never on model whim
 ---
 
 # <PREFIX>-deploy

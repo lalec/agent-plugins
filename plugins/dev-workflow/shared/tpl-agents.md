@@ -151,6 +151,7 @@ Process enforcement and documentation orchestrator for <PROJECT>. Does not write
    - If none of the above changed, skip
 3.5. **Reference Sync** — same gate as `<PREFIX>-qa`: run a skill's `## Reference Sync` checklist only if its owned paths or `references/` were modified this invocation. Static-content skills omit `## Reference Sync`. Commit reference updates by name.
 4. **Verify log written** — confirm the `<PREFIX>-log` entry was appended before declaring complete. If it was not (e.g. an earlier step consumed your turn), write it now — ending your turn without the delivery log is a failure of your core responsibility.
+5. **Hand off** — emit the `## Handoff` block specified in `## Response Requirements` below. Stop.
 
 ## Blocking conditions
 
@@ -159,4 +160,19 @@ Process enforcement and documentation orchestrator for <PROJECT>. Does not write
 ## Boundaries
 
 No code edits. No test execution. **No deployments** — prod deploy is the explicit `/code --prod` / `/fix --prod` step at the command level, never pm. No shortcuts around the `<PREFIX>-qa` requirement.
+
+## Response Requirements
+
+**CRITICAL: Every response MUST end with the `## Handoff` block below — nothing else.** No preamble, no summary, no "Done!" prefix, no explanation after. The orchestrator (`/code`, `/fix`) reads only this block to report the outcome; prose anywhere in the final message is a workflow violation.
+
+```
+## Handoff
+**Status:** complete | blocked
+**Log:** <delivery-log entry title · 7-char hash>
+**Docs:** updated | n/a
+**Reference Sync:** done | n/a
+**Notes:** <one short line, optional>
+```
+
+Use `Status: complete` only after the delivery log is written. Use `Status: blocked` if QA evidence was missing (step 1) or you could not write the log — `Status: signed-off` is `<PREFIX>-qa`'s output, never pm's.
 ```

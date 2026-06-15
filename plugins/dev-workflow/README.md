@@ -1,6 +1,6 @@
 # dev-workflow
 
-A multi-agent delivery workflow for Claude Code. Two commands — `/dev-workflow:install` and `/dev-workflow:upgrade` — bootstrap a full AI-assisted dev pipeline on any project: agents, domain skills, enforcement hooks, slash commands, and a living roadmap.
+A multi-agent delivery workflow for Claude Code. It runs your plan through a team of agents instead of you driving each step manually: one builds, another reviews and tests, a third ships and logs it — each gating the next, so nothing reaches prod unreviewed or undocumented. The agents use lifecycle skills that handle each step of the delivery process and domain skills that learn your stack on install and improve as the code changes, with hooks that keep the process from being skipped and commands that let you guide it where it matters.
 
 > Agent and skill names are prefixed with a name you choose during setup (e.g. `myapp`). Examples below use `myapp`.
 >
@@ -12,18 +12,17 @@ A multi-agent delivery workflow for Claude Code. Two commands — `/dev-workflow
 
 | Component | What it does |
 |---|---|
-| `myapp-dev` | Implements features. Loads domain skills, writes code, deploys non-prod, syncs reference docs, appends roadmap entries. Returns a structured `## Handoff` block. |
-| `myapp-qa` | Reviews and tests. Gates on `myapp-review` + `myapp-test` before sign-off. Routes code-fix requests back to `myapp-dev` (never self-patches). |
-| `myapp-pm` | Process gate. Verifies QA via the handoff block, deploys prod (if declared), writes delivery log, updates docs, advances roadmap status. |
-| 7 lifecycle skills | `log`, `review`, `debug`, `deploy`, `test`, `skill`, `docs` — one per delivery concern |
-| Domain skills | One per source directory — own their paths, carry reference files, and define quality checklists (tests, lint, type check) that `myapp-dev` runs before deploying |
-| 8 hooks | Enforce skill loading, block bad installs, guard pre-handoff, warn on missing ref-sync |
-| `/code`, `/fix` | Full pipeline: dev → qa → pm with confirmation step. Parses handoff blocks; re-runs qa with `mode=retest` after dev fixes. |
-| `/design` | Generate 2–3 HTML variants, open in browser, route chosen direction to `/code` *(conditional on design skill)* |
-| `/roadmap` | Read `docs/roadmap.md`, rank by priority, pick next item to work |
-| `/wrap` | Close-out for ad-hoc work outside the `/code` or `/fix` pipelines — runs `myapp-log` + `myapp-docs` + `myapp-skill` reference sync |
-| `docs/roadmap.md` | Source of truth for open scope — auto-updated by agents |
-| `docs/project-log.md` | Delivery history |
+| `myapp-dev` | **The builder.** Loads the right domain skills, writes the code, runs each skill's quality checks, deploys non-prod, syncs reference docs — then hands off a structured report, so QA always tests a live stack. |
+| `myapp-qa` | **The gatekeeper.** Reviews the code and runs the test tiers before signing off. Routes any required fix back to `myapp-dev` instead of patching it itself. |
+| `myapp-pm` | **The closer.** Confirms QA actually ran, ships prod when asked, writes the delivery log, refreshes docs, and advances the roadmap — the audit trail writes itself. |
+| 7 lifecycle skills | `log`, `review`, `debug`, `deploy`, `test`, `skill`, `docs` — one per delivery concern, shared by every agent. |
+| Domain skills | One per source directory, generated from your actual structure. Each owns its paths, carries reference docs, and defines the lint/type/test checks `myapp-dev` runs before deploy — and improves itself as the code evolves. |
+| 8 hooks | Make the workflow self-enforcing: skills must load before edits, bad installs are blocked, handoffs are gated, ref-sync drift is flagged. |
+| `/code`, `/fix` | Drive the full pipeline (dev → qa → pm) from one line — confirm, capture verifications, auto-retest after fixes. Add `--prod` to ship after sign-off. |
+| `/design` | Generate 2–3 HTML variants, open them in the browser, route the winner to `/code` *(if a design skill is present)*. |
+| `/roadmap` | Rank open roadmap items by priority and pick the next thing to work on. |
+| `/wrap` | Close out ad-hoc work done outside `/code`/`/fix` — runs `myapp-log` + `myapp-docs` + `myapp-skill` reference sync. |
+| Living docs | `docs/roadmap.md` (open scope), `docs/project-log.md` (delivery history), `docs/workflow.md` (pipeline map) — all kept current by the agents. |
 
 ---
 
@@ -77,19 +76,19 @@ The upgrade is idempotent. It captures your existing prefix and skills, presents
 
 ### Implement a feature
 ```
-/code add CSV export to the assessment list
+/code <describe the feature>
 ```
 Runs: `myapp-dev` → `myapp-qa` → `myapp-pm`
 
 ### Fix a bug
 ```
-/fix pipeline table takes too long to load
+/fix <describe the bug or regression>
 ```
 Runs: `myapp-debug` → `myapp-dev` → `myapp-qa` → `myapp-pm`
 
 ### Design a UI feature *(if design skill installed)*
 ```
-/design redesign the onboarding flow
+/design <describe the UI to design>
 ```
 Generates 2–3 HTML variants, opens in browser, routes chosen direction to `/code`.
 
@@ -121,23 +120,6 @@ Close-out for changes made outside the `/code`/`/fix` pipelines — manual data 
 | `post-commit.sh` | Bash (post) | Reminds to run `myapp-log` after every commit |
 
 All path→skill ownership lives in one file: `.claude/hooks/governed-paths.conf`. Edit there to add or change ownership — hooks pick it up automatically.
-
----
-
-## Roadmap format
-
-`docs/roadmap.md` entries follow this structure:
-
-```
-### Entry title
-**Category:** improvement | dogfood | integration | tech-debt
-**Priority:** high | medium | low
-**Status:** open | in-progress | done · YYYY-MM-DD
-**Added:** YYYY-MM-DD HH:MM
-```
-
-- `myapp-dev` appends new entries autonomously during implementation
-- `myapp-pm` flips status to `in-progress` or `done` after delivery
 
 ---
 

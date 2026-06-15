@@ -1331,7 +1331,7 @@ Per-task verifications captured up-front by `/code` and `/fix` and accumulated i
 
 ## Regression
 
-Full broad suite — `references/test-commands.md § Regression` (hand-authored) plus every verification in `custom-tests.yaml`. Run only when the caller passes `regression_mode: full`.
+Full broad suite — `references/test-commands.md § Regression` (hand-authored) plus every verification in `custom-tests.yaml`. Run only when the caller passes `regression_mode: full`. The hand-authored part holds broad invariants *not yet* captured per-task; retire a hand-authored flow only once a `custom-tests.yaml` entry covers that journey — don't duplicate a check that already runs as a typed verification.
 
 ## Rules
 

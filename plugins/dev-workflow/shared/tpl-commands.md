@@ -44,7 +44,11 @@ Then:
 
 **Read-free step — do NOT read `custom-tests.yaml`, `test-commands.md`, or any reference file here.**
 
-**(a) Capture verifications.** From the task (`$ARGUMENTS`, with any `--prod` already stripped), infer 2–3 **candidate verifications** — plain one-line statements of what must be true after the change — and propose them with the AskUserQuestion tool (this stays read-free — do not read any reference file):
+**(a) Capture verifications.** Produce 2–3 **candidate verifications** — plain one-line statements of what must be true after the change — from whichever source applies:
+- **A plan exists** (the current session has a just-approved plan with a *Verification* / *Acceptance* section): translate each of its lines into a one-line what-must-hold assertion and use those as the candidates. A plan's lines describe *how it's proven*; restate each as *what must hold* so it reads as a regression invariant.
+- **No plan** (e.g. `/code` invoked first thing in a fresh context): infer the candidates from the task (`$ARGUMENTS`, with any `--prod` already stripped) — exactly as before. This is the default fallback whenever no plan is in context.
+
+Propose them with the AskUserQuestion tool (the plan, if any, is already in context — this stays read-free, do not read any reference file):
 
 - question: "What should be verified before this ships?"
 - header: "Verify"
@@ -170,7 +174,11 @@ Then:
 
 **Read-free step — do NOT read `custom-tests.yaml`, `test-commands.md`, or any reference file here.**
 
-**(a) Capture verifications.** From the task (`$ARGUMENTS`, with any `--prod` already stripped), infer 2–3 **candidate verifications** — plain one-line statements of what must be true after the change — and propose them with the AskUserQuestion tool (this stays read-free — do not read any reference file):
+**(a) Capture verifications.** Produce 2–3 **candidate verifications** — plain one-line statements of what must be true after the change — from whichever source applies:
+- **A plan exists** (the current session has a just-approved plan with a *Verification* / *Acceptance* section): translate each of its lines into a one-line what-must-hold assertion and use those as the candidates. A plan's lines describe *how it's proven*; restate each as *what must hold* so it reads as a regression invariant.
+- **No plan** (e.g. `/code` invoked first thing in a fresh context): infer the candidates from the task (`$ARGUMENTS`, with any `--prod` already stripped) — exactly as before. This is the default fallback whenever no plan is in context.
+
+Propose them with the AskUserQuestion tool (the plan, if any, is already in context — this stays read-free, do not read any reference file):
 
 - question: "What should be verified before this ships?"
 - header: "Verify"

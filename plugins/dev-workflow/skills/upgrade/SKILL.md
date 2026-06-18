@@ -206,7 +206,7 @@ Run these verification checks on the upgrade-affected items:
 - `<PREFIX>-qa.md` step 2 contains "You do not edit code"
 - `<PREFIX>-qa.md` contains "## Handoff" and "Status: signed-off | blocked" (under the new layout these live in `## Response Requirements`, not step 6)
 - `<PREFIX>-pm.md` step 1 contains `**QA-evidence:**` and does **not** contain `PROJECT_ENCODED=`
-- `.claude/commands/code.md` and `fix.md` parse `--prod` in Step 0 and end with a top-level "Deploy to prod (only if `--prod`)" step invoking `<PREFIX>-deploy target=prod`; their Step 0.5 capture proposes 2–3 candidate verifications via AskUserQuestion (not a prose prompt); their persist step writes `task`/`assert` **single-quoted** and excludes `.claude/**` from `paths`
+- `.claude/commands/code.md` and `fix.md` parse `--prod` in Step 0 and end with a top-level "Deploy to prod (only if `--prod`)" step invoking `<PREFIX>-deploy target=prod`; their Step 0.5 capture proposes 2–3 candidate verifications via AskUserQuestion (not a prose prompt), sourced from the session plan's *Verification* section when one exists and inferred from the task otherwise; their persist step writes `task`/`assert` **single-quoted** and excludes `.claude/**` from `paths`
 - `<PREFIX>-qa.md` contains a `## Invocation modes` section listing `mode: initial` and `mode: retest`
 - `.claude/commands/code.md` Step 2 contains `mode=retest` and Step 3 contains `**QA-evidence:**`
 - `.claude/commands/fix.md` Step 3 contains `mode=retest` and Step 4 contains `**QA-evidence:**`

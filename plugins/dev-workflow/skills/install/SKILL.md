@@ -285,7 +285,7 @@ Also create `docs/workflow.md` if not present — generate with real content usi
 | `<PREFIX>-qa` | Code review (`<PREFIX>-review`) + tests (`<PREFIX>-test`) → sign-off → hand off to `<PREFIX>-pm` |
 | `<PREFIX>-pm` | Verify QA phases ran → write delivery log (`<PREFIX>-log`) → update docs if needed |
 
-Prod deploy is **not** an agent step — it runs at the command top level only when `/code` / `/fix` is invoked with `--prod` (so the `<PREFIX>-deploy` `AskUserQuestion` gate reaches the user), after QA sign-off, on the final code.
+Prod deploy is **not** an agent step — it runs at the command top level only when `/code` / `/fix` is invoked with `--prod` (so the `<PREFIX>-deploy` `AskUserQuestion` gate reaches the user), after QA sign-off, on the final code. The `<PREFIX>-deploy` skill carries **no** `disable-model-invocation` frontmatter — the dev step and the command must be able to invoke it via the Skill tool; prod safety comes from its `user_confirm` gate, not a frontmatter gate.
 
 ## Skills
 

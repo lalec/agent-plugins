@@ -1233,8 +1233,7 @@ Verify before finishing any <PREFIX>-design invocation:
 ```markdown
 ---
 name: <PREFIX>-deploy
-description: Deploy authority for <PROJECT>. Invoke for every change touching deployed code. Reads references/deploy-config.yaml, runs the right deploy command per affected component/env, respects gates, verifies the result is reachable, and reports env + url so <PREFIX>-log can record the deploy.
-disable-model-invocation: true   # explicit-invoke only — runs via the <PREFIX>-dev deploy step or /code|/fix --prod, never on model whim
+description: Deploy authority for <PROJECT> — single source of truth for how it deploys. Invoked by the <PREFIX>-dev deploy step (target=non-prod) and the /code|/fix --prod prod step (target=prod); not triggered autonomously. Reads references/deploy-config.yaml, runs the right deploy command per affected component/env, respects gates, verifies the result is reachable, and reports env + url so <PREFIX>-log can record the deploy.
 ---
 
 # <PREFIX>-deploy
@@ -1249,7 +1248,7 @@ Read `references/deploy-config.yaml` before any deploy action.
 - `target: non-prod` → deploy only to the **first** env in `deploy-config.yaml` whose name is not `prod` (declaration order). If no non-prod env exists for a component, return silently for that component.
 - `target: prod` → deploy only to the env named `prod`. If `prod` is not declared (pre-launch component), return silently.
 
-Never deploy across the boundary regardless of caller request. `<PREFIX>-dev` always passes `non-prod` (mid-pipeline, so `<PREFIX>-qa` tests a running stack). `target: prod` is passed only by the top-level `/code --prod` / `/fix --prod` command step **after** QA sign-off — never by a subagent, because the prod gate below needs `AskUserQuestion` and that only reaches the user at the top level.
+Never deploy across the boundary regardless of caller request. `<PREFIX>-dev` always passes `non-prod` (mid-pipeline, so `<PREFIX>-qa` tests a running stack). `target: prod` is passed only by the top-level `/code --prod` / `/fix --prod` command step **after** QA sign-off — never by a subagent, because the prod gate below needs `AskUserQuestion` and that only reaches the user at the top level. If `target: prod` is ever requested from a context where `AskUserQuestion` can't reach the user (i.e. invoked inside a subagent), refuse and return without deploying — prod requires the top-level command.
 
 **Fill-in pass** (before any deploy action, for the resolved target env):
 - Required per env: `deploy`, `url`.

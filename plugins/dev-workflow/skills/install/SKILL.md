@@ -206,11 +206,11 @@ Create these files (skip if already present, offer to overwrite if stale):
 - **Trigger mechanism** (a workflow file, CI config, Makefile target): read it for env names, job triggers, and deploy commands. If it accepts parameters that select an environment, those parameters are env names. If it triggers a CD pipeline, that pipeline action is the deploy command; set `trigger: ci`. **If the same trigger file fires deploys for multiple components** (e.g. a single `deploy.yml` with `deploy-backend` + `deploy-frontend` jobs gated by `paths:` or `if:` conditions), still derive one `deploy:` entry per component, but emit the line `# TODO: split into deploy-<component>.yml — see tpl-domain-skill.md § deploy-config.yaml schema rules` above the first shared component block in the generated yaml. The flag travels into the repo as a visible reminder; it does not block the install.
 - **Script file** (shell, Python, etc.): `deploy: "./<script>"` + `trigger: manual`. Read the script for any env-conditional branching to split into multiple envs.
 - **Platform config file** (any config that names a cloud target or embeds a deploy CLI invocation): extract the deploy command from the config itself; extract the URL if present.
-- **Run script in project manifest** (a `dev` or `start` entry in package.json, Pipfile, Procfile, pyproject.toml, etc.): use as `local.run`. Read the command for port flags to populate `local.url`.
+- **Run script in project manifest** (a `dev` or `start` entry in package.json, Pipfile, Procfile, pyproject.toml, etc.): use as `envs.local.run` (a serve-env). Read the command for port flags to populate `envs.local.url`.
 - **IaC files**: read for env names (variable files, workspace names, environment variable definitions). IaC files rarely contain the deploy command themselves — pair with the CI/CD entry that invokes them.
 - **README "Deploy" / "Deployment" section** with fenced commands: use as a last resort when no programmatic source is present.
 
-**`local.url`**: do not use a preset port table. Instead:
+**`envs.local.url`**: do not use a preset port table. Instead:
 1. Look for an explicit port in the dev run command (flags like `-p`, `--port`, `--listen`, `--host`).
 2. Look for a port in the framework's own config file (e.g. a `port` or `server.port` field).
 3. If still not found, ask: "What port does the local dev server run on for `<component>`?"
@@ -221,9 +221,9 @@ Create these files (skip if already present, offer to overwrite if stale):
 - `frontend` component if the Frontend category is present
 - `backend` component if the Backend category is present
 - Single-component projects (FE-only or BE-only) collapse to one component
-- Default verify target per component: `local` for `frontend`; `cloud:<first-non-prod-env>` for `backend` if any non-prod env was detected, else `local`
-- **Frontend with no own dev server**: if a Frontend category exists with no independent local dev server detected (no FE-specific dev/start script in the project manifest, no FE framework dev-server config), set `verify: cloud:<env>` and omit the `local:` block. If a Backend category also exists and serves the frontend's static assets, instead share the backend's `local:` block (one URL, two components).
-- Populate the `local:` block whenever the component can be run locally (typical for FE; optional for BE if a local run command was detected). Required when `verify: local`.
+- Default `verify:` per component: `local` for `frontend`; the first non-prod ship-env for `backend` if one was detected, else `local`
+- **Frontend with no own dev server**: if a Frontend category exists with no independent local dev server detected (no FE-specific dev/start script in the project manifest, no FE framework dev-server config) and a Backend category serves the frontend's static assets, share the backend's `envs.local` serve-env (one URL, two components). Only when nothing serves the frontend locally set `verify: <ship-env>` and omit `envs.local`.
+- Populate an `envs.local` serve-env (`run` + `url`) for **every component that can run locally** — frontends and backends alike. It is the zero-cost non-prod target typed verifications resolve to when no cloud non-prod env exists; a locally-runnable component must never be left with no non-prod env. Required when `verify: local`.
 
 **Propose** the populated YAML to the user. Wait for confirmation or edits. Prompt for missing values explicitly (e.g. "I couldn't find a prod URL for the backend — what is it?"). Never write placeholder text like `<fill in>` into the yaml.
 
@@ -268,6 +268,9 @@ Also create `docs/workflow.md` if not present — generate with real content usi
   <PREFIX>-dev ── domain skills ── implement ── <PREFIX>-deploy(non-prod) ── Reference Sync
       │
       ▼
+  (top level) ensure verification stack — start the serve-env if a UX/E2E target is down
+      │
+      ▼
   <PREFIX>-qa  ── <PREFIX>-review ── <PREFIX>-test ── sign-off
       │
       ▼
@@ -296,7 +299,7 @@ Prod deploy is **not** an agent step — it runs at the command top level only w
 | `<PREFIX>-log` | Appends delivery log entries to `docs/project-log.md` |
 | `<PREFIX>-review` | Code review reception, reviewer dispatch, verification gates |
 | `<PREFIX>-debug` | Systematic debugging — four-phase root cause investigation |
-| `<PREFIX>-deploy` | Deploy authority — caller-driven env selection (`target=non-prod` from `<PREFIX>-dev`, `target=prod` from `<PREFIX>-pm`); reads `references/deploy-config.yaml`, fills missing values, gates prod inline via `AskUserQuestion`, verifies reachability |
+| `<PREFIX>-deploy` | Deploy authority — caller-driven env selection (`target=non-prod` from `<PREFIX>-dev`, `target=prod` from the `/code\|/fix --prod` command step); reads `references/deploy-config.yaml` (unified env schema: `run:` serve-envs / `deploy:` ship-envs), fills missing values, gates prod inline via `AskUserQuestion`, verifies reachability |
 | `<PREFIX>-test` | Smoke (always) · per-task verifications via `custom-tests.yaml` · on-demand regression |
 | `<PREFIX>-skill` | Meta-skill — skill system governance and path ownership |
 | `<PREFIX>-docs` | Documentation sync — README and workflow.md |
@@ -464,7 +467,7 @@ Walk the checklist before declaring done:
 - [ ] `docs/roadmap.md` exists (even as a stub)
 - [ ] `docs/project-log.md` exists
 - [ ] `docs/workflow.md` exists (even as a stub)
-- [ ] `.claude/skills/<PREFIX>-deploy/references/deploy-config.yaml` exists and parses as valid YAML. If any IaC/CI/CD/Build/Deployment categories were discovered or any component can be run locally, the file has at least one component, every component with `verify: local` has a `local:` block with both `run` and `url` populated, and there is no placeholder text. If the project has no deploy mechanism and no local run command, the file contains `components: {}` plus an explanatory leading comment.
+- [ ] `.claude/skills/<PREFIX>-deploy/references/deploy-config.yaml` exists and parses as valid YAML. If any IaC/CI/CD/Build/Deployment categories were discovered or any component can be run locally, the file has at least one component; every env declares exactly one of `run:`/`deploy:` plus a `url`; every locally-runnable component has at least one non-prod env (`envs.local` serve-env or a cloud non-prod ship-env); there is no top-level `local:` block, no `cloud:` prefix in `verify:`, and no placeholder text. If the project has no deploy mechanism and no local run command, the file contains `components: {}` plus an explanatory leading comment.
 - [ ] No domain-skill SKILL.md contains a `## Deployment` section (deploy logic lives only in `<PREFIX>-deploy/SKILL.md`)
 - [ ] If any IaC/CI/CD/Build/Deployment categories were discovered, `governed-paths.conf` `DEPLOY_PATHS` is non-empty and contains every path from those categories (regardless of which skill owns each path in `PATH_MAP`); otherwise `DEPLOY_PATHS=''` and the deploy-drift check is skipped silently
 - [ ] If any IaC/CI/CD/Build/Deployment categories were discovered, `governed-paths.conf` `PATH_MAP` has a `<PREFIX>-deploy` entry covering those paths

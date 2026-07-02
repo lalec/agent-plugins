@@ -1245,20 +1245,19 @@ Single source of truth for *how* <PROJECT> deploys. Agents and other skills dele
 Read `references/deploy-config.yaml` before any deploy action.
 
 **Caller contract.** Caller passes `target`:
-- `target: non-prod` → deploy only to the **first** env in `deploy-config.yaml` whose name is not `prod` (declaration order). If no non-prod env exists for a component, return silently for that component.
+- `target: non-prod` → deploy only to the **first** non-prod env **with a `deploy:` command** (declaration order). Serve-envs (`run:`) are never deployed — they are started at the command top level, not here. If a component has no non-prod ship-env, return silently for that component.
 - `target: prod` → deploy only to the env named `prod`. If `prod` is not declared (pre-launch component), return silently.
 
 Never deploy across the boundary regardless of caller request. `<PREFIX>-dev` always passes `non-prod` (mid-pipeline, so `<PREFIX>-qa` tests a running stack). `target: prod` is passed only by the top-level `/code --prod` / `/fix --prod` command step **after** QA sign-off — never by a subagent, because the prod gate below needs `AskUserQuestion` and that only reaches the user at the top level. If `target: prod` is ever requested from a context where `AskUserQuestion` can't reach the user (i.e. invoked inside a subagent), refuse and return without deploying — prod requires the top-level command.
 
 **Fill-in pass** (before any deploy action, for the resolved target env):
-- Required per env: `deploy`, `url`.
-- Required for `verify: local`: `local.run`, `local.url`.
+- Required per ship-env: `deploy`, `url`. Required per serve-env: `run`, `url`.
 - If any required field is missing or empty, batch every gap into a single `AskUserQuestion`. Apply the answers back to `deploy-config.yaml` and commit with `chore(deploy-config): fill <env> values` before proceeding.
 - Never invent values; never write placeholder text like `<fill in>`.
 
-**Per affected component:**
-- `verify: local` → check the `local.url` (suffixed by `local.health_path` if set, else `/`) returns HTTP 2xx/3xx. If not reachable, **do not auto-start it** — when this skill is invoked from the `<PREFIX>-dev` subagent, `AskUserQuestion` (and a long-running server process) can't be driven from there. Report `local stack not running — start with \`local.run\`` and return without deploying; the caller surfaces it and the user starts the server, then re-runs.
-- `verify: cloud:<env>` → run `envs.<env>.deploy`, wait for it to finish, then confirm `envs.<env>.url` (suffixed by `envs.<env>.health_path` if set, else `/`) returns HTTP 2xx/3xx.
+**Per affected component**, resolve `verify:` to its named env:
+- `verify:` names a **serve-env** (`run:`) → check its `url` (suffixed by `health_path` if set, else `/`) returns HTTP 2xx/3xx. If not reachable, **do not auto-start it** — when this skill is invoked from the `<PREFIX>-dev` subagent, `AskUserQuestion` (and a long-running server process) can't be driven from there. Report `<env> not running — start with envs.<env>.run` and return without deploying; the caller surfaces it and the user (or the command's ensure-stack step) starts it, then re-runs.
+- `verify:` names a **ship-env** (`deploy:`) → run its `deploy`, wait for it to finish, then confirm its `url` (suffixed by `health_path` if set, else `/`) returns HTTP 2xx/3xx.
 
 **Gates** (per env):
 - `gate: auto` → run the deploy command directly. Default for any env not named `prod`.
@@ -1436,7 +1435,7 @@ break unquoted *and* double-quoted YAML. Single quotes survive all of those.
 
 1. Read `type`, `assert`, `task`, `paths`.
 2. Resolve the concrete target deterministically:
-   - **UX / E2E** → component url from `<PREFIX>-deploy/references/deploy-config.yaml`
+   - **UX / E2E** → the component's **first non-prod env url** from `<PREFIX>-deploy/references/deploy-config.yaml` (declaration order) — **never `envs.prod.url`**: QA runs before the prod deploy, so prod carries the old code. No non-prod env declared → report the verification **blocked** (`no non-prod env for <component> — add one with run: or deploy: to deploy-config.yaml`).
    - **Integration** → endpoint from `test-commands.md`, or subject query from `test-commands.md § Functional Feature Subjects` — whichever the assert names
 3. Execute and check the predicate:
 
@@ -1452,9 +1451,10 @@ not a substitute. After screenshots, run `open <paths>` via Bash so the user see
 
 **Running-stack rule:** every verification runs against the actually-running deployed target
 resolved above (the live url / endpoint / datastore). If that target is unreachable — typically the
-local server isn't started — report the verification **blocked** (`target not running — start with
-deploy-config \`local.run\``). **Never** substitute an in-process test runner (FastAPI `TestClient`,
-supertest, an imported app handler, etc.): an in-process pass does not prove the running stack works,
+serve-env isn't started — report the verification **blocked** (`target not running — start with
+deploy-config \`envs.<env>.run\``). **Never** substitute an in-process test runner (FastAPI `TestClient`,
+supertest, an imported app handler, etc.), and never count component/unit tests (Vitest, Jest, pytest)
+as satisfying a typed verification: a source-level pass does not prove the running stack works,
 and `<PREFIX>-test`'s job is to test the running stack, not dead code. Blocked is an honest result; a
 faked green is not.
 

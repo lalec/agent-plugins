@@ -181,35 +181,38 @@ This skill's job is to **apply** tokens defined by `<PREFIX>-design`, not to inv
 
 ## § deploy-config.yaml schema
 
-The installer writes `<PREFIX>-deploy/references/deploy-config.yaml` during install (`bootstrap/SKILL.md` Phase 2) by detecting signals across the repo (CI workflows, deploy scripts, package.json scripts, IaC vars, framework configs). Canonical schema:
+The installer writes `<PREFIX>-deploy/references/deploy-config.yaml` during install (`install/SKILL.md § Populate deploy-config.yaml`) by detecting signals across the repo (CI workflows, deploy scripts, package.json scripts, IaC vars, framework configs). Canonical schema:
 
 ~~~yaml
 components:
   <component_name>:                  # e.g. frontend, backend, worker
-    verify: local | cloud:<env_name>
-    local:                            # optional — populated whenever the component can be run locally
-      run: "<cmd>"                    # how to start the local server / process
-      url: "<url>"                    # where it listens (e.g. http://localhost:3000)
-      health_path: "<path>"           # optional, default "/" — appended to url for HTTP 2xx/3xx verification
+    verify: <env_name>                # which env's url proves this component works (e.g. local, dev, prod)
     envs:
-      <env_name>:                     # e.g. dev, test, staging, prod
-        deploy: "<cmd>"               # shell command the skill runs; when trigger: ci, a description of the triggering push/PR
-        trigger: manual | ci          # default: manual
-        url: "<url>"                  # deployed service URL — qa hits this for smoke tests
+      <env_name>:                     # e.g. local, dev, staging, prod — names are free; only "prod" is special
+        run: "<cmd>"                  # serve-env: long-lived command that starts the component here (e.g. a dev server)
+        deploy: "<cmd>"               # ship-env: terminating deploy command; when trigger: ci, a description of the triggering push/PR
+        trigger: manual | ci          # ship-envs only; default: manual
+        url: "<url>"                  # where the component is reachable in this env
         health_path: "<path>"         # optional, default "/" — appended to url for HTTP 2xx/3xx verification
-        gate: auto | user_confirm     # default: user_confirm for env named "prod", auto otherwise
+        gate: auto | user_confirm     # ship-envs only; default: user_confirm for env named "prod", auto otherwise
 ~~~
 
 Rules encoded in the schema:
+- **Every env declares exactly one of `run:` / `deploy:`.** `run:` marks a **serve-env** — a long-lived process started in place (typically `local`, a dev server); it is started only at the command top level, never by a subagent, and is never "deployed". `deploy:` marks a **ship-env** — a terminating command (or CI-push description) run by `<PREFIX>-deploy`.
+- **Env selection is by simple predicate** (declaration order everywhere):
+  - `<PREFIX>-dev` deploy (`target: non-prod`) → first non-prod env **with `deploy:`**; none → silent no-op.
+  - Typed verifications (`<PREFIX>-test` UX/E2E) → first non-prod env's url — **never `prod`**; none → the verification is blocked.
+  - `/code|/fix` pre-QA ensure-stack → first non-prod env **with `run:`** whose url is unreachable → started in background at the top level.
+  - `target: prod` → the env named `prod` only.
 - A component may declare only the envs that currently exist. Omitting `envs.prod` means "cannot deploy to prod yet" — this is how pre-launch components (typically frontends) are represented. Adding `envs.prod` is the GTM flip.
 - `prod` is implicitly `gate: user_confirm` even if the field is omitted. Any other env name defaults to `gate: auto`.
 - `trigger: ci` is the recommended default for prod. `<PREFIX>-deploy` does **not** run the command itself for `trigger: ci` — it gates via `AskUserQuestion`, then describes the push/PR that fires the deploy.
-- The `local:` block is symmetric with `envs.<env>` — both supply a `url` and optional `health_path` resolved when reading `verify`. `verify: local` → `local.url`. `verify: cloud:<env>` → `envs.<env>.url`. Same lookup, two sources.
-- `local:` is required when any component has `verify: local` and may also be present when verify points elsewhere (e.g. backend tested in cloud:test but still runnable locally for ad-hoc work).
+- `verify:` names the env whose `url` (+ optional `health_path`) `<PREFIX>-deploy` checks after acting. Any env name is valid.
+- A component that can run locally should declare an `envs.local` serve-env even when it ships elsewhere — it is the zero-cost non-prod target typed verifications resolve to when no cloud non-prod env exists.
 - `health_path` is optional everywhere. When set, the skill appends it to the base url and checks HTTP 2xx/3xx; when absent, the skill checks the base url itself (effectively `/`).
 - **Prefer one trigger workflow / deploy script per component.** The schema accommodates a monolithic trigger (one `deploy.yml` with multi-job branches keyed off paths or inputs) and per-component triggers (`deploy-<component>.yml`) equally — but only the split shape gets cleanly scoped top-level `paths:` filters and per-component dispatch. When `deploy-config.yaml` shows two or more components sharing the same `deploy:` value, that's a deferred refactor signal: every push has to evaluate cross-component job conditionals, and a tiny path-filter mistake silently bills the whole monolith. Split when adding a new component or when CI runtime starts mattering.
 - There is no top-level `gtm` field. GTM status is implicit: pre-launch components omit `envs.prod`; live components declare it.
-- **Caller-driven env selection.** `<PREFIX>-deploy` is invoked with `target: non-prod` (by `<PREFIX>-dev`) or `target: prod` (by `<PREFIX>-pm`). The skill never deploys across the boundary regardless of caller request. With `target: non-prod`, only the first env whose name is not `prod` is deployed (declaration order); other non-prod envs are out of scope.
+- **Caller-driven targeting.** `<PREFIX>-deploy` is invoked with `target: non-prod` (by `<PREFIX>-dev`) or `target: prod` (by the `/code|/fix --prod` command step). The skill never deploys across the boundary regardless of caller request; env resolution follows the selection predicates above.
 - All consumption logic lives in `<PREFIX>-deploy/SKILL.md § Deployment` — never duplicate it in agents or other skills.
 
 ---

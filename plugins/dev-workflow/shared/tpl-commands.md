@@ -93,6 +93,15 @@ For each captured `{assert, type}`, append an entry to `.claude/skills/<PREFIX>-
 
 Commit: `test: capture verifications for <task-slug>` (the tree is clean post-dev — a clean follow-up commit). Keep the new entry `name`s to forward to Step 2.
 
+## Step 1.7 — Ensure verification stack
+
+Run only if verifications with type `UX` or `E2E` were captured. For each affected component (from the dev `Files changed:` paths), resolve its **first non-prod env** in `.claude/skills/<PREFIX>-deploy/references/deploy-config.yaml`:
+- Env has `deploy:` (ship-env) → nothing to do; <PREFIX>-dev already deployed it.
+- Env has `run:` (serve-env) → curl its `url`; if unreachable, start `run` in the background here at the top level (subagents can't hold a server), then poll the url until HTTP 2xx (up to ~60s). If still unreachable, surface the output and ask the user how to proceed before spawning <PREFIX>-qa.
+- No non-prod env → continue; <PREFIX>-test reports those verifications blocked and Step 2 handles it.
+
+Leave any server you started running — note it under Done.
+
 ## Step 2 — Review & Test (<PREFIX>-qa)
 
 After <PREFIX>-dev completes, parse its `## Handoff` block:
@@ -110,6 +119,7 @@ Task:
 
 After <PREFIX>-qa returns, parse its `## Handoff` block:
 - `Status: signed-off` → continue to Step 3.
+- `Status: blocked` **solely because a typed verification cannot run headless** (auth-gated UI, un-seedable data — `Notes:` names the verification and no code fix is requested) → ask via AskUserQuestion: "Verification `<name>` can't run automatically (`<reason>`). Defer to UAT and continue, or stop?" On **Defer** — carry `UAT-deferred: <names>` into the Step 3 pm prompt so the delivery log records it, and continue. On **Stop** — halt and report.
 - `Status: blocked` with code-fix `Notes:` → re-spawn <PREFIX>-dev with the fix request, then on dev complete re-spawn <PREFIX>-qa with `mode=retest` (review already passed, run tests only) — keep the same `regression_mode`. Repeat until signed-off or user aborts.
 
 ## Step 3 — Log & Docs (<PREFIX>-pm)
@@ -132,6 +142,7 @@ Run only if `prod_deploy` was set in Step 0. After <PREFIX>-pm has logged, invok
 
 - If `--prod` and prod deploy succeeded: tell the user "Feature complete, logged, and deployed to prod."
 - Otherwise: tell the user "Feature complete and logged. Ready for user acceptance testing — run `/code <task> --prod` (or invoke <PREFIX>-deploy) when ready to ship."
+- If a serve-env was started in Step 1.7, tell the user it is still running and where (`<url>`). If any verification was UAT-deferred, list it as an explicit follow-up.
 ```
 
 ---
@@ -240,6 +251,15 @@ For each captured `{assert, type}`, append an entry to `.claude/skills/<PREFIX>-
 
 Commit: `test: capture verifications for <task-slug>` (the tree is clean post-dev — a clean follow-up commit). Keep the new entry `name`s to forward to Step 3.
 
+## Step 2.7 — Ensure verification stack
+
+Run only if verifications with type `UX` or `E2E` were captured. For each affected component (from the dev `Files changed:` paths), resolve its **first non-prod env** in `.claude/skills/<PREFIX>-deploy/references/deploy-config.yaml`:
+- Env has `deploy:` (ship-env) → nothing to do; <PREFIX>-dev already deployed it.
+- Env has `run:` (serve-env) → curl its `url`; if unreachable, start `run` in the background here at the top level (subagents can't hold a server), then poll the url until HTTP 2xx (up to ~60s). If still unreachable, surface the output and ask the user how to proceed before spawning <PREFIX>-qa.
+- No non-prod env → continue; <PREFIX>-test reports those verifications blocked and Step 3 handles it.
+
+Leave any server you started running — note it under Done.
+
 ## Step 3 — Review & Test (<PREFIX>-qa)
 
 After <PREFIX>-dev completes, parse its `## Handoff` block:
@@ -257,6 +277,7 @@ Task:
 
 After <PREFIX>-qa returns, parse its `## Handoff` block:
 - `Status: signed-off` → continue to Step 4.
+- `Status: blocked` **solely because a typed verification cannot run headless** (auth-gated UI, un-seedable data — `Notes:` names the verification and no code fix is requested) → ask via AskUserQuestion: "Verification `<name>` can't run automatically (`<reason>`). Defer to UAT and continue, or stop?" On **Defer** — carry `UAT-deferred: <names>` into the Step 4 pm prompt so the delivery log records it, and continue. On **Stop** — halt and report.
 - `Status: blocked` with code-fix `Notes:` → re-spawn <PREFIX>-dev with the fix request, then on dev complete re-spawn <PREFIX>-qa with `mode=retest` (review already passed, run tests only) — keep the same `regression_mode`. Repeat until signed-off or user aborts.
 
 ## Step 4 — Log & Docs (<PREFIX>-pm)
@@ -279,6 +300,7 @@ Run only if `prod_deploy` was set in Step 0. After <PREFIX>-pm has logged, invok
 
 - If `--prod` and prod deploy succeeded: tell the user "Fix complete, logged, and deployed to prod."
 - Otherwise: tell the user "Fix complete and logged. Ready for user acceptance testing — run `/fix <task> --prod` (or invoke <PREFIX>-deploy) when ready to ship."
+- If a serve-env was started in Step 2.7, tell the user it is still running and where (`<url>`). If any verification was UAT-deferred, list it as an explicit follow-up.
 ```
 
 ---

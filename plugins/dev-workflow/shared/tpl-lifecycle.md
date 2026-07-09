@@ -98,6 +98,9 @@ SITUATION?
 ├─ Completed major task/feature   → references/requesting-code-review.md
 ├─ Issuing review findings (you   → references/issuing-findings.md
 │  are the reviewer, e.g. <PREFIX>-qa)
+├─ Reviewing for defect classes   → references/security-review.md
+│  (deps, secrets, injection,
+│  authz/IDOR, headers, dead code)
 └─ About to claim success         → <PREFIX>-debug/references/verification.md
 ```
 
@@ -106,6 +109,7 @@ SITUATION?
 - `references/code-review-reception.md` — feedback reception protocol (read → understand → verify → evaluate → respond → implement)
 - `references/requesting-code-review.md` — code-reviewer subagent dispatch protocol
 - `references/issuing-findings.md` — evidence requirements for review findings (no blocking finding without file:line)
+- `references/security-review.md` — fast per-task security pass: deps/supply-chain, secrets, injection sinks, access-control (IDOR), insecure defaults + headers, dead surface; recon→verify triage; escalate to `/security-review` for deep changes
 - `<PREFIX>-debug/references/verification.md` — completion verification gates (single source of truth — owned by `<PREFIX>-debug`)
 ```
 
@@ -391,6 +395,8 @@ You: [Fix progress indicators]
 
 When **you** are the reviewer producing findings (running `<PREFIX>-qa`, dispatching the code-reviewer subagent, doing a manifest check, lint sweep, schema audit), every blocking finding requires evidence read **in this session**.
 
+For the **defect classes** to inspect during a security pass (dependencies, secrets, injection sinks, access control, insecure defaults, dead surface), see `security-review.md` — the evidence bar below applies to each.
+
 ## Core Principle
 
 **Read before you flag.** A finding that something is missing, wrong, stale, or out-of-sync requires reading the target file *in this session* before issuing the finding. Inferred-from-context findings are hypotheses, not findings — and blocking the pipeline on a hypothesis costs a full re-spawn cycle.
@@ -449,6 +455,52 @@ If you cannot fill in **Evidence** with a fresh citation from this session, the 
 ## Bottom Line
 
 **Findings without evidence are noise.** Cheap to write, expensive to act on. The pipeline cost of one false-positive block is roughly 2 extra agent spawns (~$0.30–$0.60 and 3 minutes wall-clock) — far more than one extra Read or grep.
+````
+
+`references/security-review.md`:
+
+````markdown
+# Security Review
+
+The fast, deterministic, per-task security pass — the defect classes coding agents ship (and rate as safe) plus the cheap whole-tree checks a diff-scoped reviewer misses. **Not** a replacement for the built-in `/security-review` (deep, diff-aware, multi-file SAST): run that periodically and escalate to it for complex auth/crypto/multi-file logic. This pass is grep- and audit-command-cheap, so run it every task — agent-written code degrades in security across iterations and models over-trust their own output.
+
+## Principle — recon → verify, evidence over artifact
+
+Deterministic first (grep + the project's audit tool), then reason. For every candidate:
+
+1. RECON — locate the candidate (grep / audit output / route file).
+2. VERIFY — confirm a **reachable, exploitable path** (trace untrusted input → sink; confirm the endpoint is actually served). A static-shell match, a scanner hit, or a pattern alone is **not** a finding.
+3. Fix the underlying **enabler**, not the literal string the scanner matched.
+
+A verified finding blocks; an unverified one is `Suspected: <claim> — verifying`, advisory only. Use the `issuing-findings.md` Finding/Evidence/Severity format — no blocking finding without a fresh `file:line` read in this session.
+
+## Checklist (skip rows that don't apply to this project)
+
+### A. Dependencies & supply chain
+- Run the project's audit on the whole tree — `npm audit` / `pnpm audit` / `pip-audit` / `cargo audit` / `osv-scanner` (recognition aids, not a whitelist). **Block** on high/critical, or any vuln the task introduced/touched; note unrelated lower-severity debt without blocking (same policy as pre-existing test failures).
+- Every newly-added dependency: confirm the package **actually exists** on its registry and the name is not a typosquat or model hallucination (slopsquatting).
+- Flag unused / redundant dependencies — each is attack surface.
+
+### B. Secrets & sensitive data
+- No hardcoded secrets, API keys, tokens, or connection strings in source; no committed `.env`.
+- Secrets / PII do not leak into logs, error responses, or client-visible output.
+
+### C. Input → sink (injection & output-encoding)
+- Untrusted input reaching a SQL / OS-command / HTML-DOM / template / deserialization (`pickle`, `yaml.load`) / `eval` sink is parameterized or sanitized at the sink.
+- Output is encoded for its context (HTML, attribute, JSON-LD, URL). Verify the sink is reachable before flagging.
+
+### D. Access control
+- Every new endpoint / mutation enforces **object-level authorization** — the caller may act on *this specific resource*, not merely that they are authenticated. Guards against IDOR and missing function-level authz (the authn↔authz confusion agents ship).
+
+### E. Insecure defaults & transport (web-facing only)
+- Hosting config sets the standard response headers: `Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`. The fix lands in the hosting config owned by `<PREFIX>-deploy`. (When a static host can't inject per-request nonces, an inline-script `unsafe-inline` allowance is a documented tradeoff — not a bug — where there is no reachable sink; skip deprecated `X-XSS-Protection`, CSP supersedes it.)
+- CORS is not `*` combined with credentials; cookies set `Secure` + `HttpOnly` + `SameSite`; TLS verification is not disabled (`verify=False`, `rejectUnauthorized: false`, `InsecureSkipVerify`); debug mode and verbose stack traces are off in production.
+
+### F. Dead / unused surface
+- Genuinely-unused endpoints, exports, and dependencies are attack surface — flag for removal, evidenced by a usage grep returning zero callers.
+
+## Escalate
+For complex authentication, cryptography, or multi-file logic changes, hand off to the built-in `/security-review` (diff-aware deep reasoning across ~25 vulnerability classes) rather than reasoning it through here.
 ````
 
 (Verification gates content lives in `<PREFIX>-debug/references/verification.md` — `<PREFIX>-review` references it instead of carrying its own copy.)

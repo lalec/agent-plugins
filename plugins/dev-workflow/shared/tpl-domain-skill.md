@@ -48,7 +48,7 @@ For Frontend skills with the Visual Decisions block: this Preconditions rule is 
 <DESIGN_DELEGATION>
 ## Quality Checklist
 
-Run before proceeding to deploy:
+Run before proceeding to deploy. Every command here must be **non-interactive** (`CI=1`, `--yes`/`--no-input`, explicit timeout) — an interactive prompt inside a subagent stalls the whole pipeline until a watchdog kills the agent.
 
 <!-- Fill in: quality rules for this domain — e.g.
 - New module → new test file covering auth, not-found, error, and happy-path cases
@@ -195,6 +195,11 @@ components:
         url: "<url>"                  # where the component is reachable in this env
         health_path: "<path>"         # optional, default "/" — appended to url for HTTP 2xx/3xx verification
         gate: auto | user_confirm     # ship-envs only; default: user_confirm for env named "prod", auto otherwise
+        stack:                        # serve-envs only, optional — how to compose a verifiable local stack
+          env:                        #   env-var overrides applied to `run` (e.g. point the frontend at the local backend, not prod)
+            <VAR>: "<value>"
+          seed: "<cmd>"               #   optional one-shot command that seeds test data before verification
+          auth: "<strategy>"          #   optional note: how headless verification authenticates (test user creds env vars, bypass token, "none needed")
 ~~~
 
 Rules encoded in the schema:
@@ -209,6 +214,7 @@ Rules encoded in the schema:
 - `trigger: ci` is the recommended default for prod. `<PREFIX>-deploy` does **not** run the command itself for `trigger: ci` — it gates via `AskUserQuestion`, then describes the push/PR that fires the deploy.
 - `verify:` names the env whose `url` (+ optional `health_path`) `<PREFIX>-deploy` checks after acting. Any env name is valid.
 - A component that can run locally should declare an `envs.local` serve-env even when it ships elsewhere — it is the zero-cost non-prod target typed verifications resolve to when no cloud non-prod env exists.
+- **Composed local stack (`stack:`).** A serve-env's plain `run` often starts a component wired to prod (frontend pointing at the prod API, no auth session, no data) — headless verification against it silently degrades to nothing. When that's the case, declare `stack:` on the serve-env: `env:` overrides that wire components to each other locally (e.g. the frontend's API-base-URL var pointing at the local backend), an optional `seed:` command for test data, and an `auth:` strategy for headless login. The command's ensure-stack step applies `stack:` when starting the env; `<PREFIX>-test` then has a target it can actually verify. If a component's local verification is impossible even with overrides (e.g. hard dependency on a cloud-only service), leave `stack:` out — typed verifications will report blocked, which is the honest state.
 - `health_path` is optional everywhere. When set, the skill appends it to the base url and checks HTTP 2xx/3xx; when absent, the skill checks the base url itself (effectively `/`).
 - **Prefer one trigger workflow / deploy script per component.** The schema accommodates a monolithic trigger (one `deploy.yml` with multi-job branches keyed off paths or inputs) and per-component triggers (`deploy-<component>.yml`) equally — but only the split shape gets cleanly scoped top-level `paths:` filters and per-component dispatch. When `deploy-config.yaml` shows two or more components sharing the same `deploy:` value, that's a deferred refactor signal: every push has to evaluate cross-component job conditionals, and a tiny path-filter mistake silently bills the whole monolith. Split when adding a new component or when CI runtime starts mattering.
 - There is no top-level `gtm` field. GTM status is implicit: pre-launch components omit `envs.prod`; live components declare it.
@@ -236,6 +242,8 @@ Substitute:
 
 Pipeline: `/code` or `/fix` → <PREFIX>-dev → <PREFIX>-qa → <PREFIX>-pm. Details in `docs/workflow.md`.
 
+Pipeline-shaped work started mid-conversation (a feature or fix that needs review and testing) routes through `/code` or `/fix` — never spawn the pipeline agents ad hoc; the commands own the capture, gating, and close-out steps the agents can't do. For small iterative rounds (pixel nudges, copy, hotfixes), use `/tweak` — its close-out is batched and enforced at push time.
+
 ## Skills
 
 Path→skill ownership is defined in `.claude/hooks/governed-paths.conf` — edit that file to add or change path ownership. Both `skill-guard.sh` and `path-coverage-check.sh` source it automatically.
@@ -243,6 +251,10 @@ Path→skill ownership is defined in `.claude/hooks/governed-paths.conf` — edi
 ## Roadmap
 
 `docs/roadmap.md` is the source of truth for open items.
+
+## Secrets
+
+Never ask for or accept secret values through chat — they become permanent transcript content. When a secret is needed, name the variable and where it goes, and have the user place it directly (edit `.env` themselves, use a `! <command>` shell escape, or a secret manager). Verify presence afterward (`grep -c '^VAR=' .env`), never echo values.
 ```
 
 **Linting commands:** Embed in the relevant domain skill's `## Quality Checklist`, not in CLAUDE.md. `<PREFIX>-dev` step 3 delegates to these checklists. The hook `pre-handoff-check.sh` enforces lint at handoff time independently via its own `<LINT_CMD>` substitution.

@@ -17,11 +17,13 @@ A multi-agent delivery workflow for Claude Code. It runs your plan through a tea
 | `myapp-pm` | **The closer.** Confirms QA actually ran, ships prod when asked, writes the delivery log, refreshes docs, and advances the roadmap — the audit trail writes itself. |
 | 7 lifecycle skills | `log`, `review`, `debug`, `deploy`, `test`, `skill`, `docs` — one per delivery concern, shared by every agent. |
 | Domain skills | One per source directory, generated from your actual structure. Each owns its paths, carries reference docs, and defines the lint/type/test checks `myapp-dev` runs before deploy — and improves itself as the code evolves. |
-| 8 hooks | Make the workflow self-enforcing: skills must load before edits, bad installs are blocked, handoffs are gated, ref-sync drift is flagged. |
-| `/code`, `/fix` | Drive the full pipeline (dev → qa → pm) from one line — confirm, capture verifications, auto-retest after fixes. Add `--prod` to ship after sign-off. |
+| 9 hooks | Make the workflow self-enforcing: skills must load before edits, bad installs are blocked, handoffs are gated, ref-sync drift is flagged, and nothing pushes without a delivery-log close-out. |
+| `/code`, `/fix` | Drive the full pipeline (dev → qa → pm) from one line — confirm, capture verifications, auto-retest after fixes, then close out with a push + evidence-backed scorecard. Add `--prod` to ship after sign-off, `--no-push` to keep it local. |
+| `/tweak` | The sanctioned lightweight lane for iterative rounds — pixel nudges, copy, small hotfixes — verified inline (screenshots/curl), with one batched close-out enforced at push time. |
+| `/revert` | Sanctioned rollback: `git revert` (never reset), scoped re-verification, and a logged reversal. |
 | `/design` | Generate 2–3 HTML variants, open them in the browser, route the winner to `/code` *(if a design skill is present)*. |
 | `/roadmap` | Rank open roadmap items by priority and pick the next thing to work on. |
-| `/wrap` | Close out ad-hoc work done outside `/code`/`/fix` — runs `myapp-log` + `myapp-docs` + `myapp-skill` reference sync. |
+| `/wrap` | Close out ad-hoc work done outside `/code`/`/fix` — reviews the diff when source changed, then runs `myapp-log` + `myapp-docs` + `myapp-skill` reference sync. |
 | Living docs | `docs/roadmap.md` (open scope), `docs/project-log.md` (delivery history), `docs/workflow.md` (pipeline map) — all kept current by the agents. |
 
 ---
@@ -86,6 +88,18 @@ Runs: `myapp-dev` → `myapp-qa` → `myapp-pm`
 ```
 Runs: `myapp-debug` → `myapp-dev` → `myapp-qa` → `myapp-pm`
 
+### Iterate on something small
+```
+/tweak <describe the visual/copy/hotfix round>
+```
+Top-level, inline-verified iteration — no subagent ceremony. The close-out (review + log + docs + ref-sync) is batched at exit; the `close-out-gate` hook blocks `git push` until it runs.
+
+### Roll something back
+```
+/revert <commit or description of what to undo>
+```
+`git revert` (never reset), re-runs the affected verifications, logs the reversal.
+
 ### Design a UI feature *(if design skill installed)*
 ```
 /design <describe the UI to design>
@@ -110,13 +124,14 @@ Close-out for changes made outside the `/code`/`/fix` pipelines — manual data 
 
 | Hook | Fires on | Blocks if |
 |---|---|---|
-| `skill-guard.sh` | Edit / Write | Editing an owned path without the owning skill loaded |
+| `skill-guard.sh` | Edit / Write | Editing an owned path without the owning skill loaded (markers scoped per agent) |
 | `path-coverage-check.sh` | Write | New file in a governed root with no matching PATH_MAP entry |
 | `dependency-guard.sh` | Bash | `pnpm add` / `pip install` without `myapp-skill` loaded |
 | `package-edit-guard.sh` | Edit | Adding packages to `package.json` directly without `myapp-skill` |
-| `pre-handoff-check.sh` | Skill | Invoking `myapp-qa` with uncommitted changes, lint errors, or type errors |
-| `ref-sync-check.sh` | Bash (post) | Warns after commit if governed source paths changed without reference updates, or if deploy-mechanism paths changed without `deploy-config.yaml` updates. Path patterns sourced from `governed-paths.conf`. |
-| `skill-mark.sh` | Skill (post) | Records loaded skills to session marker (used by all guards) |
+| `pre-handoff-check.sh` | Skill + Task/Agent | Invoking or spawning `myapp-qa` with uncommitted changes, lint errors, or type errors |
+| `close-out-gate.sh` | Bash | `git push` while commits since the last delivery-log entry touch governed/deploy paths (`CLOSEOUT_OVERRIDE=1` escape hatch) |
+| `ref-sync-check.sh` | Bash (post) | Warns after commit on reference-worthy drift — structural changes or `REF_WATCH` matches — without reference updates, or deploy-mechanism drift without `deploy-config.yaml` updates. Path patterns sourced from `governed-paths.conf`. |
+| `skill-mark.sh` | Skill (post) | Records loaded skills to an agent-scoped session marker (used by all guards) |
 | `post-commit.sh` | Bash (post) | Reminds to run `myapp-log` after every commit |
 
 All path→skill ownership lives in one file: `.claude/hooks/governed-paths.conf`. Edit there to add or change ownership — hooks pick it up automatically.

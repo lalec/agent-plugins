@@ -41,7 +41,7 @@ No confirmation needed — these are absent, not stale.
 
 Read `../../shared/tpl-agents.md` and `../../shared/tpl-commands.md` now.
 
-- **Missing commands** — if `.claude/commands/` is absent or any of `code.md`, `fix.md`, `roadmap.md`, `wrap.md` are missing: create `.claude/commands/` if needed, then create each missing command file from the corresponding template in `tpl-commands.md`, substituting `<PREFIX>` and `<PROJECT>`. Announce what was created.
+- **Missing commands** — if `.claude/commands/` is absent or any of `code.md`, `fix.md`, `tweak.md`, `revert.md`, `roadmap.md`, `wrap.md` are missing: create `.claude/commands/` if needed, then create each missing command file from the corresponding template in `tpl-commands.md`, substituting `<PREFIX>` and `<PROJECT>`. Announce what was created.
 - **Missing docs stubs** — create `docs/roadmap.md` and `docs/project-log.md` if absent (same stubs as install Phase 2).
 - **Design command** — if a frontend/design domain skill is detected and `.claude/commands/design.md` is missing: create it from `tpl-commands.md § /design`.
 
@@ -120,6 +120,28 @@ Present to the user as a checklist before changing anything:
 - [ ] `<PREFIX>-test/references/custom-tests.md` Execution resolves UX/E2E to a bare "component url" (no first-non-prod-env rule, prod not excluded) **or** its Running-stack rule lacks the component/unit-test ban ("never count component/unit tests…") — superseded by the current `tosk-test` template
 - [ ] `<PREFIX>-qa.md` step 5 (Sign off) lacks the blocked-verification mapping (a blocked verification → `Status: blocked`; no substitute tests; UAT-deferral is the command's call)
 - [ ] `.claude/commands/code.md` / `fix.md` lack the "Ensure verification stack" pre-QA step (start a serve-env at top level when a UX/E2E target is down) or the UAT-defer branch in the qa-handoff parse
+- [ ] `<PREFIX>-qa.md` handoff lacks the `signed-off-with-deferrals` status, the `Evidence:` field, or the `UAT-deferred:` field — superseded by the three-status vocabulary in `tpl-agents.md § tosk-qa` (kills the blocked→re-issue→pm-bounce churn and the status-laundering it caused)
+- [ ] `<PREFIX>-qa.md` step 2 forbids all edits — superseded by the class split (non-source findings fixed directly + committed by name; source findings still always route to dev)
+- [ ] `<PREFIX>-qa.md` step 1 lacks the per-file diff-read rule (no persisted full-diff files — they truncate and force re-reads)
+- [ ] `<PREFIX>-pm.md` step 1 rejects `signed-off-with-deferrals`, or step 2 lacks the feature-commit hash rule + `UAT-deferred:` carry, or step 2.5 roadmap advancement is best-effort instead of required
+- [ ] `<PREFIX>-dev.md` step 3 lacks the non-interactive rule (`CI=1` / `--yes` / timeouts — an interactive prompt killed a dev agent mid-pipeline)
+- [ ] `.claude/commands/code.md` / `fix.md` lack any of: the "Gate policy" section (risk-split timeouts, never claim consent), `--no-push` flag, entry hygiene + plan shortcut in Step 0, the UAT-only intent rule in Step 0.5, the salvage protocol + no-top-level-edits rule, `stack:`-aware + freshness-aware ensure-stack, the `signed-off-with-deferrals` branch, `Feature commit:` + `UAT-deferred:` in the pm prompt, the "Close out: push + verified scorecard" step, or the evidence-first Done section
+- [ ] `.claude/commands/tweak.md` missing — the sanctioned iterate lane (top-level, inline-verified, batched close-out)
+- [ ] `.claude/commands/revert.md` missing — the sanctioned rollback (`git revert`, scoped re-verify, logged reversal)
+- [ ] `.claude/commands/wrap.md` lacks the conditional Step 0 review (ad-hoc source changes otherwise ship on self-review only)
+- [ ] `<PREFIX>-deploy/SKILL.md` lacks the `## Push policy` section, the `gate: unanswered — parked` timeout return, or the non-prod early exit
+- [ ] `<PREFIX>-test/references/custom-tests.md` lacks the **Freshness rule** (stale target = non-evidence) or the **Evidence trace** rule (per-verification command → observed → verdict lines feeding qa's `Evidence:` field)
+- [ ] `<PREFIX>-log/SKILL.md` Process picks `git log -1` blindly instead of the primary feature commit, or the entry format lacks the `UAT-deferred:` line
+- [ ] `pre-handoff-check.sh` matches only `tool_input.skill` — dead code in the pipeline, where qa is spawned via the Agent/Task tool; needs the `subagent_type` match + the `Task|Agent` matcher in settings.json
+- [ ] `close-out-gate.sh` missing, or settings.json doesn't wire it on PreToolUse Bash
+- [ ] `ref-sync-check.sh` warns on every governed commit (no structural/A-D-R filter, no `REF_WATCH`) — alarm fatigue; 15 ignored warnings in one audited session
+- [ ] `skill-mark.sh` / `skill-guard.sh` / `dependency-guard.sh` / `package-edit-guard.sh` use session-only markers — subagents inherit each other's skill marks; needs the transcript-basename agent scope (all four derivations must match)
+- [ ] Any recorder hook (`ref-sync-check.sh`, `skill-mark.sh`, `post-commit.sh`, or a project-added recorder) can exit non-zero on a success path — successful commands then surface as errors
+- [ ] `pre-handoff-check.sh` contains Gemini remnants (`GEMINI_PROJECT_DIR`, `GEMINI.md`) — Gemini support is dropped
+- [ ] `governed-paths.conf` lacks `REF_WATCH` or the per-skill self-ownership entries (`'^\.claude/skills/<PREFIX>-<name>/:<PREFIX>-<name>'` before the `.claude/skills/` catch-all)
+- [ ] `deploy-config.yaml` serve-envs whose plain `run` starts a component wired to prod (or unusable headless) lack a `stack:` block — QA then has no verifiable target; derive per install § Populate deploy-config.yaml (never invent seed/auth)
+- [ ] `CLAUDE.md` `## Agents` lacks the routing paragraph (pipeline-shaped work → `/code`/`/fix`; iterative rounds → `/tweak`) or `## Secrets` is missing
+- [ ] Domain skill `## Quality Checklist` sections lack the non-interactive rule
 
 ---
 
@@ -172,7 +194,7 @@ Each step is idempotent — re-running the upgrade is safe.
 - **Replace `<PREFIX>-qa.md` step 6 (Hand off)** with the structured `## Handoff` block version from `../../shared/tpl-agents.md § tosk-qa` step 6. Idempotent — skip if step 6 already contains "Status: signed-off | blocked".
 - **Add the blocked-verification mapping to `<PREFIX>-qa.md` step 5 (Sign off)**: extend the step with the sentences from `../../shared/tpl-agents.md § tosk-qa` step 5 — a blocked verification is not clean → `Status: blocked` with the verification + reason in `Notes:`; never substitute component/unit tests; UAT-deferral is the command's user-gated decision. Idempotent — skip if step 5 already contains "UAT-deferral is the command's".
 - **Replace `<PREFIX>-pm.md` step 1 (Verify QA phases)** with the QA-evidence-from-prompt version from `../../shared/tpl-agents.md § tosk-pm` step 1. Idempotent — skip if step 1 already contains `**QA-evidence:**`.
-- **Re-sync `code.md` and `fix.md`** from `../../shared/tpl-commands.md § /code` and `§ /fix` in full (commands are uniform across projects — Rule 3 — so a whole-template re-sync is safe and carries no project-specific content). This delivers, in one pass: the `--prod` flag parse + top-level prod-deploy step; the Step 0.5 capture (the AskUserQuestion proposing 2–3 **candidate verifications** + "Other") + the persist step (added if absent); **single-quoted** `task`/`assert` in the persist step (valid YAML); `.claude/**`-filtered `paths`; the "verification" vocabulary; the "Ensure verification stack" pre-QA step; and the UAT-defer branch in the qa-handoff parse. Substitute `<PREFIX>`/`<PROJECT>`. Idempotent — skip if both files already contain `--prod` **and** `candidate verifications` **and** `Ensure verification stack`.
+- **Re-sync `code.md` and `fix.md`** from `../../shared/tpl-commands.md § /code` and `§ /fix` in full (commands are uniform across projects — Rule 3 — so a whole-template re-sync is safe and carries no project-specific content). This delivers, in one pass: the `--prod`/`--no-push` flag parse + top-level prod-deploy step; the **Gate policy** section (risk-split timeouts); entry hygiene + plan shortcut; the Step 0.5 capture + UAT-only intent rule; the persist step (single-quoted, symbolic asserts, `.claude/**`-filtered `paths`, salvage-tolerant condition); the `stack:`/freshness-aware "Ensure verification stack" step; the salvage protocol + no-top-level-edits rule; the `signed-off-with-deferrals` branch; `Feature commit:`/`UAT-deferred:` in the pm prompt; the "Close out: push + verified scorecard" step; and the evidence-first Done section. Substitute `<PREFIX>`/`<PROJECT>`. Idempotent — skip if both files already contain `Gate policy` **and** `verified scorecard` **and** `signed-off-with-deferrals`.
 - **Add `## Invocation modes` to `<PREFIX>-qa.md`** between the title block and `## Workflow`, from `../../shared/tpl-agents.md § tosk-qa § Invocation modes`. Idempotent — skip if `## Invocation modes` already exists.
 - **Rewrite `.claude/commands/code.md` Steps 2–3** from `../../shared/tpl-commands.md § /code`: Step 2 must parse dev `## Handoff` Status, branch on qa Status, and re-spawn qa with `mode=retest` after a dev fix; Step 3 must pass `**QA-evidence:**` (qa's full handoff block) to pm. Idempotent — skip if Step 3 already contains "QA-evidence" and Step 2 already contains "mode=retest".
 - **Rewrite `.claude/commands/fix.md` Steps 3–4** from `../../shared/tpl-commands.md § /fix` with the same shape (Step 3 = qa branching + retest, Step 4 = QA-evidence to pm). Idempotent — skip if Step 4 already contains "QA-evidence" and Step 3 already contains "mode=retest".
@@ -183,6 +205,23 @@ Each step is idempotent — re-running the upgrade is safe.
 - **Rework `<PREFIX>-test/SKILL.md`**: replace the body with the 3-tier form from `../../shared/tpl-lifecycle.md § tosk-test` — `## Test Plan` tier table, `## Smoke` / `## Functional Feature Tests` / `## Regression` sections, the Rule-5 pointer to `references/custom-tests.md`, and `## References` ↔ `## Reference Sync` listing the four reference files. Delete the `## E2E Browser Tests` section and the `<FRONTEND_PATHS>`→E2E row from `## Test Plan` (its screenshot/`open` rules now live in `custom-tests.md`). Idempotent — skip if `## Test Plan` already lists `Functional Feature` and `Regression` tiers, the body says "per-task verifications", the `## Regression` section carries the "not yet captured" anti-duplication principle, and no `## E2E Browser Tests` section exists.
 - **Update `<PREFIX>-test/references/sync-checklist.md`**: replace the "E2E browser target URL" line with the "Smoke or Regression command no longer matches" line, and add the `## Update references/custom-tests.yaml when:` block from the `tosk-test` template. Idempotent — skip if a `custom-tests.yaml` section already exists.
 - **Add `regression_mode` to `<PREFIX>-qa.md`**: add the `regression_mode` bullets to `## Invocation modes` and update step 3 to forward `regression_mode` + new functional-feature entry names + the dev `Files changed:` paths to `<PREFIX>-test`, from `../../shared/tpl-agents.md § tosk-qa`. Idempotent — skip if `## Invocation modes` already mentions `regression_mode`.
+- **Upgrade `<PREFIX>-qa.md` to the three-status vocabulary**: re-sync step 1 (per-file diff reads), step 2 (source/non-source class split), step 5 (deferral mapping), and the `## Response Requirements` block (`signed-off | signed-off-with-deferrals | blocked` + `Evidence:` + `UAT-deferred:` + the never-relabel rule) from `../../shared/tpl-agents.md § tosk-qa`. Idempotent — skip if the handoff block already contains `signed-off-with-deferrals`.
+- **Upgrade `<PREFIX>-pm.md` for deferrals + feature commit**: re-sync step 1 (accept both signed-off statuses), step 2 (feature-commit hash rule + `UAT-deferred:` carry), and step 2.5 (required roadmap advancement) from `../../shared/tpl-agents.md § tosk-pm`. Idempotent — skip if step 1 already contains `signed-off-with-deferrals`.
+- **Add the non-interactive rule to `<PREFIX>-dev.md` step 3** from `../../shared/tpl-agents.md § tosk-dev`. Idempotent — skip if step 3 already contains "non-interactively".
+- **Create `tweak.md` and `revert.md`** from `../../shared/tpl-commands.md § /tweak` and `§ /revert`, substituting `<PREFIX>`/`<PROJECT>`. Idempotent — skip each file that exists.
+- **Add the conditional Step 0 review to `wrap.md`** from `../../shared/tpl-commands.md § /wrap`. Idempotent — skip if wrap.md contains `## Step 0 — Review`.
+- **Add `## Push policy` + gate parking + non-prod early exit to `<PREFIX>-deploy/SKILL.md`** from `../../shared/tpl-lifecycle.md § tosk-deploy/SKILL.md`. Idempotent — skip if the file contains `## Push policy` and `gate: unanswered — parked`.
+- **Add the Freshness rule + Evidence trace to `<PREFIX>-test/references/custom-tests.md`** from `../../shared/tpl-lifecycle.md § tosk-test` (insert after the Running-stack rule). Idempotent — skip if the file contains "Freshness rule".
+- **Fix `<PREFIX>-log/SKILL.md` hash semantics**: re-sync Process steps 1–2, the entry format (`UAT-deferred:` line), field guidance, and Quality Checklist item 2 from `../../shared/tpl-lifecycle.md § tosk-log/SKILL.md`. Idempotent — skip if Process step 1 contains "primary feature/fix commit".
+- **Rewire `pre-handoff-check.sh`**: replace with the template version (matches `tool_input.skill` OR `tool_input.subagent_type`; no Gemini branches) and add the `Task|Agent` PreToolUse matcher to settings.json. `chmod +x`. Idempotent — skip if the script contains `subagent_type` and settings.json has the matcher.
+- **Create `close-out-gate.sh`** from the template, `chmod +x`, and wire it under the PreToolUse Bash matcher in settings.json. Idempotent — skip if the file exists and is wired.
+- **Replace `ref-sync-check.sh`** with the structural/`REF_WATCH`-filtered version. `chmod +x`. Idempotent — skip if the script contains `REF_WATCH`.
+- **Re-scope the skill markers**: replace `skill-mark.sh`, and the marker derivation in `skill-guard.sh` / `dependency-guard.sh` / `package-edit-guard.sh`, with the agent-scoped template versions (session id + transcript basename — all four derivations identical). `chmod +x` all. Idempotent — skip if `skill-mark.sh` contains `transcript_path`.
+- **Audit recorder exit codes**: `ref-sync-check.sh`, `skill-mark.sh`, `post-commit.sh`, and any project-added recorder hook must end in an unconditional `exit 0`; fix any success path that can exit non-zero (a grep finding nothing must not fail the hook).
+- **Add `REF_WATCH` + self-ownership entries to `governed-paths.conf`**: add the `REF_WATCH='<value>'` line (derive from the category map's Backend/Auth rows, `''` if unclear) and one `'^\.claude/skills/<PREFIX>-<name>/:<PREFIX>-<name>'` entry per installed skill before the `.claude/skills/` catch-all. Idempotent — skip what already exists.
+- **Derive `stack:` blocks in `deploy-config.yaml`** for serve-envs whose plain `run` cannot produce a verifiable target (prod-wired env vars, no headless auth/data) — per `../install/SKILL.md § Populate deploy-config.yaml` (`envs.local.stack`). Propose to the user; never invent seed/auth values. Idempotent — skip envs that already declare `stack:` or verifiably don't need it.
+- **Upsert the CLAUDE.md routing + Secrets sections** from `../../shared/tpl-domain-skill.md § Project file sections` (`## Agents` routing paragraph, `## Secrets`). Idempotent — skip what already exists.
+- **Add the non-interactive rule to every domain skill `## Quality Checklist`** from `../../shared/tpl-domain-skill.md § Domain skill stub`. Idempotent — skip skills that already contain "non-interactive".
 Update `<PREFIX>-skill` skill-manifest.md last: add the `<PREFIX>-deploy` lifecycle skill (with its `deploy-config.yaml` reference). Remove any `## Deployment` / `deploy-config.yaml` mention from the legacy domain owner's entry.
 
 ---
@@ -238,6 +277,22 @@ Run these verification checks on the upgrade-affected items:
 - `<PREFIX>-test/references/custom-tests.md` Execution resolves UX/E2E to the "first non-prod env url" and the Running-stack rule contains "never count component/unit tests"
 - `<PREFIX>-qa.md` step 5 (Sign off) contains "UAT-deferral is the command's" (the blocked-verification mapping)
 - `.claude/commands/code.md` and `fix.md` both contain an "Ensure verification stack" step before the qa step and a "Defer to UAT" branch in the qa-handoff parse
+- `<PREFIX>-qa.md` handoff block declares `signed-off | signed-off-with-deferrals | blocked` with `Evidence:` and `UAT-deferred:` fields; step 2 splits source vs non-source findings; step 1 contains the per-file diff-read rule
+- `<PREFIX>-pm.md` step 1 accepts `signed-off-with-deferrals`; step 2 contains "primary feature/fix commit"; step 2.5 says "required, not best-effort"
+- `<PREFIX>-dev.md` step 3 contains "non-interactively"
+- `.claude/commands/code.md` and `fix.md` contain "Gate policy", "--no-push", "Salvage protocol", "Honor the user's answer", "signed-off-with-deferrals", "Feature commit:", and a "Close out: push + verified scorecard" step
+- `.claude/commands/tweak.md` and `revert.md` exist; `tweak.md` contains "batched close-out"; `revert.md` contains "git revert" and no `git reset`
+- `.claude/commands/wrap.md` contains a conditional `## Step 0 — Review`
+- `<PREFIX>-deploy/SKILL.md` contains `## Push policy`, `gate: unanswered — parked`, and the non-prod early exit
+- `<PREFIX>-test/references/custom-tests.md` contains "Freshness rule" and "Evidence trace"
+- `<PREFIX>-log/SKILL.md` Process step 1 contains "primary feature/fix commit"; entry format has the `UAT-deferred:` line
+- `pre-handoff-check.sh` contains `subagent_type` and no `GEMINI`; settings.json wires it under a `Task|Agent` matcher
+- `close-out-gate.sh` exists, is executable, and is wired under PreToolUse Bash
+- `ref-sync-check.sh` contains `REF_WATCH` and the A/D/R structural filter
+- `skill-mark.sh` and all three marker-checking guards derive the marker from session id + transcript basename (identical derivation in all four scripts)
+- `governed-paths.conf` has a `REF_WATCH` line and per-skill self-ownership entries before the `.claude/skills/` catch-all
+- `CLAUDE.md` `## Agents` contains the `/tweak` routing paragraph and a `## Secrets` section exists
+- Every domain skill `## Quality Checklist` contains "non-interactive"
 - `skill-manifest.md` is current
 
 Report a summary of what was upgraded.

@@ -23,8 +23,8 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
 
 ## Process
 
-1. Run `git log --oneline -1` to get the short hash and commit message
-2. Run `git log -1 --format="%ai"` to get the commit timestamp — extract the `HH:MM` in local time for the date field
+1. Identify the **primary feature/fix commit** for the task — the commit that changed source paths, never workflow bookkeeping (`test:`, `log:`, `docs:`, `chore(deploy-config):` commits). If the invocation prompt names a `Feature commit:` hash, use it; otherwise pick it from `git log --oneline -8`
+2. Run `git log <hash> -1 --format="%ai"` to get that commit's timestamp — extract the `HH:MM` in local time for the date field
 3. Identify which skills were actually invoked this session by scanning the most recent session transcript:
    ```bash
    PROJECT_ENCODED=$(echo "$PWD" | sed 's|/|-|g')
@@ -49,6 +49,7 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
 **Tests:** <what was actually verified>
 **Skills:** <PREFIX>-x · <PREFIX>-y
 **Deployed:** <component> → <env> · <url> (omit line entirely if no deploy happened)
+**UAT-deferred:** <verification names + how confirmed> (omit line entirely if nothing was deferred)
 **Checklist:** <skill> — <what changed> (omit line entirely if nothing to note)
 ~~~
 
@@ -56,15 +57,16 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
 
 - **Title** — short, plain English. Not the raw commit message — rephrase for a human skimming the log.
 - **Body** — 1–3 sentences. Add context beyond the title: *why* it was needed, *what problem* it solves, any non-obvious decisions.
-- **Tests** — be honest. "manual smoke" is a real test. Common values: `lint + type check (clean)`, `manual smoke in browser`, `E2E: <scenario>`, `none`
+- **Tests** — be honest. "manual smoke" is a real test. Common values: `lint + type check (clean)`, `manual smoke in browser`, `E2E: <scenario>`, `none`. If a gate decision was auto-selected on a timeout, say so here — never record it as user-confirmed.
 - **Skills** — only skills confirmed present in the transcript grep output, separated by ` · `. Use `—` if none found.
 - **Deployed** — one line per component deployed this session, taken verbatim from the deploy-owning skill's report (e.g. `backend → test · https://test-api.example.com`). Omit the line entirely when no deploy happened.
+- **UAT-deferred** — verifications QA could not run in any environment, carried from the pipeline (e.g. `login-flow-e2e (user-confirmed)`). These are open follow-ups; omit the line when none.
 - **Checklist** — one `skill — note` per skill whose reference files were updated. Omit the line entirely if nothing was updated.
 
 ## Quality Checklist
 Required steps before writing the log entry:
 1. [ ] Entry is at the top of docs/project-log.md (below the `# Project Log` header)
-2. [ ] HH:MM is included in the date (from `git log -1 --format="%ai"`)
+2. [ ] Hash is the primary feature/fix commit — not a `test:`/`log:`/`docs:` bookkeeping commit — and HH:MM comes from that commit's timestamp
 3. [ ] Skills field is derived from transcript grep, not from memory
 4. [ ] Body is 1–3 sentences, no `What:` label
 5. [ ] `Deployed:` line included when a deploy occurred this session (env + url sourced from the deploy-owning skill's report); omitted otherwise
@@ -1297,7 +1299,7 @@ Single source of truth for *how* <PROJECT> deploys. Agents and other skills dele
 Read `references/deploy-config.yaml` before any deploy action.
 
 **Caller contract.** Caller passes `target`:
-- `target: non-prod` → deploy only to the **first** non-prod env **with a `deploy:` command** (declaration order). Serve-envs (`run:`) are never deployed — they are started at the command top level, not here. If a component has no non-prod ship-env, return silently for that component.
+- `target: non-prod` → deploy only to the **first** non-prod env **with a `deploy:` command** (declaration order). Serve-envs (`run:`) are never deployed — they are started at the command top level, not here. If a component has no non-prod ship-env, return silently for that component. **Early exit:** if no component in the yaml declares a non-prod ship-env at all, report `non-prod: no-op (no non-prod ship-env declared)` immediately — don't walk components one by one.
 - `target: prod` → deploy only to the env named `prod`. If `prod` is not declared (pre-launch component), return silently.
 
 Never deploy across the boundary regardless of caller request. `<PREFIX>-dev` always passes `non-prod` (mid-pipeline, so `<PREFIX>-qa` tests a running stack). `target: prod` is passed only by the top-level `/code --prod` / `/fix --prod` command step **after** QA sign-off — never by a subagent, because the prod gate below needs `AskUserQuestion` and that only reaches the user at the top level. If `target: prod` is ever requested from a context where `AskUserQuestion` can't reach the user (i.e. invoked inside a subagent), refuse and return without deploying — prod requires the top-level command.
@@ -1321,7 +1323,7 @@ Never deploy across the boundary regardless of caller request. `<PREFIX>-dev` al
   - `commit: <git rev-parse --short HEAD>`
   - `branch: <git rev-parse --abbrev-ref HEAD>`
 
-  Pass the block as `AskUserQuestion` context, ask "Deploy to `<env>`?" with options Yes / No. On Yes, run the deploy command. On No, return `gate: declined` and skip. The gate runs **inside this skill's turn** — never return control to the caller before the question is answered. Default for any env named `prod` even if the field is omitted.
+  Pass the block as `AskUserQuestion` context, ask "Deploy to `<env>`?" with options Yes / No. On Yes, run the deploy command. On No, return `gate: declined` and skip. If the question goes unanswered (timeout), return `gate: unanswered — parked` — never proceed, and never treat silence as consent; the caller parks and resumes when the user responds. The gate runs **inside this skill's turn** — never return control to the caller before the question is answered or times out. Default for any env named `prod` even if the field is omitted.
 
 **Triggers** (per env):
 - `trigger: manual` → run the deploy command in this session.
@@ -1330,6 +1332,15 @@ Never deploy across the boundary regardless of caller request. `<PREFIX>-dev` al
 **Pre-launch guard:** if the requested env is not declared in `deploy-config.yaml`, do not attempt the deploy. Declaring a new env (for example, a frontend gaining `envs.prod` at GTM) is an explicit decision — update the yaml first.
 
 **Report:** after any deploy, emit one line per component in the form `<component> → <env> · <url>` so `<PREFIX>-log` can include it in the delivery log entry.
+
+## Push policy
+
+`git push` is a deploy action whenever a CI ship-env fires on push. Callers (the `/code`/`/fix` close-out step, `/tweak` exit, `/revert`) resolve pushability here — raw pushes must not bypass this skill's gates:
+
+1. Read `references/deploy-config.yaml`. If any component declares a ship-env with `trigger: ci` whose deploy fires on a push to the current branch, pushing **is** shipping to that env.
+2. If that env is `prod` (or gated `user_confirm`): push only after the prod gate passed this session, or after an explicit `AskUserQuestion` confirm with the same context block. Unanswered → `gate: unanswered — parked`; never push on silence.
+3. Otherwise pushing is safe — push directly.
+4. **After any CI-coupled push:** watch the CI run to completion (`gh run watch` or the platform equivalent) and verify the deployed env's url/health before reporting "deployed". A push with CI still running is "deploying", not "deployed" — never end a shipping turn without the health check.
 
 ## Reference Sync
 
@@ -1509,6 +1520,17 @@ supertest, an imported app handler, etc.), and never count component/unit tests 
 as satisfying a typed verification: a source-level pass does not prove the running stack works,
 and `<PREFIX>-test`'s job is to test the running stack, not dead code. Blocked is an honest result; a
 faked green is not.
+
+**Freshness rule:** before counting any evidence, confirm the target runs the code under test — a
+serve-env started before the latest commits, or a cloud env deployed earlier, is running **stale**
+code and its 200s prove nothing about this change. Check process start time vs the latest commit, a
+build/version marker, or ask the top level to restart the serve-env. Evidence from a stale target is
+reported as `stale target — non-evidence`, never as a pass.
+
+**Evidence trace:** record one compact line per verification: the exact command or browser action →
+the observed result (HTTP status + relevant body fragment, or the screenshot path — a few lines max)
+→ `pass | fail | blocked`. These lines flow into the qa handoff `Evidence:` field verbatim — they
+are what the user reads instead of re-testing, so concrete observations, not claims.
 
 ## Prior-selection
 

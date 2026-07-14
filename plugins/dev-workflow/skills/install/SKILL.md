@@ -12,17 +12,18 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 **What gets installed:**
 - 3 orchestrator agents: `<PREFIX>-dev`, `<PREFIX>-qa`, `<PREFIX>-pm`
 - 7 lifecycle skills: `<PREFIX>-log`, `<PREFIX>-review`, `<PREFIX>-debug`, `<PREFIX>-deploy`, `<PREFIX>-test`, `<PREFIX>-skill`, `<PREFIX>-docs`
-- 5 slash commands: `/code` + `/fix` + `/design` (conditional on design skill) + `/roadmap` + `/wrap`
+- 7 slash commands: `/code` + `/fix` + `/tweak` + `/revert` + `/design` (conditional on design skill) + `/roadmap` + `/wrap`
 - `docs/roadmap.md` stub — source of truth for open items; tracked by `<PREFIX>-dev` (new entries) and `<PREFIX>-pm` (status updates)
 - Domain skills: one per substantive source dir, derived from discovery (not hardcoded)
-- `.claude/hooks/governed-paths.conf` — single source of truth for path→skill ownership; sourced by skill-guard and path-coverage-check
-- `.claude/hooks/skill-guard.sh` — PreToolUse Edit+Write: blocks edits to owned paths without skill loaded
+- `.claude/hooks/governed-paths.conf` — single source of truth for path→skill ownership (incl. per-skill self-ownership entries), `DEPLOY_PATHS`, and `REF_WATCH`; sourced by skill-guard, path-coverage-check, ref-sync-check, and close-out-gate
+- `.claude/hooks/skill-guard.sh` — PreToolUse Edit+Write: blocks edits to owned paths without skill loaded (agent-scoped markers)
 - `.claude/hooks/path-coverage-check.sh` — PreToolUse Write: blocks new files in governed roots not covered by any pattern
 - `.claude/hooks/dependency-guard.sh` — PreToolUse Bash: blocks `pnpm add` / `pip install` without `<PREFIX>-skill` loaded
 - `.claude/hooks/package-edit-guard.sh` — PreToolUse Edit: blocks direct dependency additions to `package.json` without `<PREFIX>-skill`
-- `.claude/hooks/pre-handoff-check.sh` — PreToolUse Skill: blocks `<PREFIX>-qa` invocation if uncommitted changes exist, lint fails, or typecheck fails
-- `.claude/hooks/ref-sync-check.sh` — PostToolUse Bash: warns after `git commit` if governed source paths or deploy-mechanism paths changed without reference file updates
-- `.claude/hooks/skill-mark.sh` — PostToolUse Skill: records which skills were invoked each session
+- `.claude/hooks/pre-handoff-check.sh` — PreToolUse Skill + Task/Agent: blocks `<PREFIX>-qa` invocation (skill call or subagent spawn) if uncommitted changes exist, lint fails, or typecheck fails
+- `.claude/hooks/close-out-gate.sh` — PreToolUse Bash: blocks `git push` while commits after the last delivery-log entry touch governed/deploy paths (iterate-lane close-out enforcement; `CLOSEOUT_OVERRIDE=1` escape hatch)
+- `.claude/hooks/ref-sync-check.sh` — PostToolUse Bash: warns after `git commit` on reference-worthy drift (structural changes or `REF_WATCH` matches; modify-only cosmetic commits stay silent) and on deploy-mechanism drift without `deploy-config.yaml` updates
+- `.claude/hooks/skill-mark.sh` — PostToolUse Skill: records invoked skills to an agent-scoped session marker
 - `.claude/hooks/post-commit.sh` — PostToolUse Bash: reminds to run `<PREFIX>-log` after every commit
 - `.claude/settings.json` — wires all hooks
 - `CLAUDE.md` workflow sections
@@ -145,8 +146,8 @@ What will be created:
 - 7 lifecycle skills: <PREFIX>-log, <PREFIX>-review, <PREFIX>-debug, <PREFIX>-deploy, <PREFIX>-test, <PREFIX>-skill, <PREFIX>-docs
 - 1 design skill: <PREFIX>-design  ← omit if no frontend category
 - <N> domain skills: <comma-separated list>
-- <N> slash commands: /code, /fix, /roadmap, /wrap[, /design if frontend]
-- 8 hook scripts + governed-paths.conf + settings.json
+- <N> slash commands: /code, /fix, /tweak, /revert, /roadmap, /wrap[, /design if frontend]
+- 9 hook scripts + governed-paths.conf + settings.json
 - CLAUDE.md with workflow sections
 
 <Unresolved questions, if any — e.g. "One question before proceeding: what port does the local dev server run on? (I can see http://host:port in main.py — should I use that?)">
@@ -192,6 +193,8 @@ Create these files (skip if already present, offer to overwrite if stale):
 .claude/skills/<PREFIX>-design/SKILL.md       ← only if a frontend/website domain skill was confirmed in Phase 1c; also create references/design-tokens.md stub
 .claude/commands/code.md          ← from tpl-commands.md § /code, substitute <PROJECT> and <PREFIX>
 .claude/commands/fix.md           ← from tpl-commands.md § /fix, substitute <PROJECT> and <PREFIX>
+.claude/commands/tweak.md         ← from tpl-commands.md § /tweak, substitute <PROJECT> and <PREFIX>
+.claude/commands/revert.md        ← from tpl-commands.md § /revert, substitute <PROJECT> and <PREFIX>
 .claude/commands/roadmap.md       ← from tpl-commands.md § /roadmap, substitute <PROJECT> and <PREFIX>
 .claude/commands/wrap.md          ← from tpl-commands.md § /wrap, substitute <PROJECT> and <PREFIX>
 .claude/commands/design.md        ← from tpl-commands.md § /design (only if a design domain skill was discovered in Phase 1)
@@ -216,6 +219,8 @@ Create these files (skip if already present, offer to overwrite if stale):
 3. If still not found, ask: "What port does the local dev server run on for `<component>`?"
 
 **`health_path`**: optional everywhere. Set when the project exposes a dedicated readiness endpoint (e.g. `/health`, `/_ready`, `/api/health`) — discovered by reading backend route files or framework configs. Omit when the base url itself is a sufficient liveness signal (typical for frontends).
+
+**`envs.local.stack`** (composed local stack — see `tpl-domain-skill.md § deploy-config.yaml schema`): when a component's plain dev-run command starts it wired to prod (e.g. the frontend's API-base-URL env var points at the prod API) or unusable headless (no data, no auth), derive a `stack:` block: find the env var that selects the API base url (framework config, `.env.example`, code) and override it to the local backend's url; record a `seed:` command only if a real one exists (fixtures script, `scripts/seed*`); record the headless `auth:` strategy only if one exists (test-user env vars, local auth bypass). Never invent seed commands or auth strategies — if local verification is genuinely impossible, omit `stack:` and typed verifications will honestly report blocked.
 
 **Determine components** from `CATEGORY_MAP`:
 - `frontend` component if the Frontend category is present
@@ -268,27 +273,34 @@ Also create `docs/workflow.md` if not present — generate with real content usi
   <PREFIX>-dev ── domain skills ── implement ── <PREFIX>-deploy(non-prod) ── Reference Sync
       │
       ▼
-  (top level) ensure verification stack — start the serve-env if a UX/E2E target is down
+  (top level) ensure verification stack — start/restart the serve-env (with its stack: overrides) if a UX/E2E target is down or stale
       │
       ▼
-  <PREFIX>-qa  ── <PREFIX>-review ── <PREFIX>-test ── sign-off
+  <PREFIX>-qa  ── <PREFIX>-review ── <PREFIX>-test ── sign-off (or signed-off-with-deferrals)
       │
       ▼
   <PREFIX>-pm  ── <PREFIX>-log ── docs update
       │
       ▼
   (only with `--prod`) ── <PREFIX>-deploy(prod) at the command top level, after sign-off
+      │
+      ▼
+  (top level) close out — push per <PREFIX>-deploy § Push policy + verified scorecard
 ```
+
+Iterative work (pixel nudges, copy rounds, small hotfixes) uses `/tweak` — top-level, inline-verified, close-out batched at exit and enforced by the `close-out-gate` hook at push time. Rollbacks use `/revert` (git revert + scoped re-verify + logged reversal).
 
 ## Agents
 
 | Agent | Role |
 |---|---|
 | `<PREFIX>-dev` | Design → implement → deploy non-prod → Reference Sync → hand off to `<PREFIX>-qa` |
-| `<PREFIX>-qa` | Code review (`<PREFIX>-review`) + tests (`<PREFIX>-test`) → sign-off → hand off to `<PREFIX>-pm` |
-| `<PREFIX>-pm` | Verify QA phases ran → write delivery log (`<PREFIX>-log`) → update docs if needed |
+| `<PREFIX>-qa` | Code review (`<PREFIX>-review`) + tests (`<PREFIX>-test`) → sign-off (`signed-off` \| `signed-off-with-deferrals` when only unrunnable verifications remain) → hand off to `<PREFIX>-pm` |
+| `<PREFIX>-pm` | Verify QA phases ran → write delivery log (`<PREFIX>-log`, hash = the feature commit) → update docs if needed |
 
 Prod deploy is **not** an agent step — it runs at the command top level only when `/code` / `/fix` is invoked with `--prod` (so the `<PREFIX>-deploy` `AskUserQuestion` gate reaches the user), after QA sign-off, on the final code. The `<PREFIX>-deploy` skill carries **no** `disable-model-invocation` frontmatter — the dev step and the command must be able to invoke it via the Skill tool; prod safety comes from its `user_confirm` gate, not a frontmatter gate.
+
+Gate timeouts split by risk: reversible gates proceed with defaults labeled `auto-selected on timeout — not user-confirmed`; irreversible gates (prod deploy, CI-coupled push) park until the user responds. A timeout is never presented as consent.
 
 ## Skills
 
@@ -318,13 +330,14 @@ All hooks wired in `.claude/settings.json`.
 
 | Hook | Event | Enforces |
 |---|---|---|
-| `skill-guard.sh` | PreToolUse Edit/Write | Owning skill must be loaded before editing governed paths |
+| `skill-guard.sh` | PreToolUse Edit/Write | Owning skill must be loaded before editing governed paths (agent-scoped markers) |
 | `path-coverage-check.sh` | PreToolUse Write | Blocks new files in governed roots with no matching owner |
 | `dependency-guard.sh` | PreToolUse Bash | Requires `<PREFIX>-skill` before adding packages |
 | `package-edit-guard.sh` | PreToolUse Edit | Requires `<PREFIX>-skill` before editing package files directly |
-| `pre-handoff-check.sh` | PreToolUse Skill | Blocks `<PREFIX>-qa` if uncommitted changes or lint fails |
-| `ref-sync-check.sh` | PostToolUse Bash | Warns after commits touching source without reference file updates |
-| `skill-mark.sh` | PostToolUse Skill | Records which skills were invoked each session |
+| `pre-handoff-check.sh` | PreToolUse Skill + Task/Agent | Blocks `<PREFIX>-qa` (skill call or subagent spawn) if uncommitted changes or lint fails |
+| `close-out-gate.sh` | PreToolUse Bash | Blocks `git push` while governed commits lack a delivery-log entry (`CLOSEOUT_OVERRIDE=1` escape) |
+| `ref-sync-check.sh` | PostToolUse Bash | Warns on reference-worthy drift (structural / `REF_WATCH`) and deploy-config drift |
+| `skill-mark.sh` | PostToolUse Skill | Records invoked skills to an agent-scoped session marker |
 | `post-commit.sh` | PostToolUse Bash | Reminds to run `<PREFIX>-log` after every commit |
 
 ## Delivery Log Format
@@ -339,8 +352,12 @@ Each entry in `docs/project-log.md`:
 
 **Tests:** <what was verified>
 **Skills:** <skill-x> · <skill-y>
+**Deployed:** <component> → <env> · <url>  ← omit line if no deploy happened
+**UAT-deferred:** <verification names + how confirmed>  ← omit line if nothing deferred
 **Checklist:** <skill> — <what changed>  ← omit line if nothing updated
 ```
+
+The hash is the primary feature/fix commit, never a `test:`/`log:`/`docs:` bookkeeping commit.
 ```
 
 Substitute `<DOMAIN_SKILL_TABLE>` with a markdown table built from `DOMAIN_SKILLS[]` and `DOMAIN_PATTERNS[]` confirmed in Phase 1c:
@@ -385,12 +402,14 @@ Create `.claude/hooks/governed-paths.conf` from the template in `tpl-skill-guard
 - `<GOVERNED_ROOTS>` → ERE alternation of the paths from `CATEGORY_MAP` belonging to **Frontend, Backend, Database/storage, Auth, Observability, and Third-party SDK** categories (see `tpl-skill-guard.md § How to generate` for an example). **Never use extension globs** (e.g. `.*\.(html|css|js)$`) — these match files outside the project directory (such as `/tmp/`), defeating the guard. Root-level files like `index.html` are owned via explicit `PATH_MAP` entries, not via `GOVERNED_ROOTS`.
 - `<DEPLOY_PATHS>` → ERE alternation of **every path from `CATEGORY_MAP` belonging to IaC, CI/CD, Build tooling, or Deployment scripts/config** (see `tpl-skill-guard.md § How to generate` for an example). Independent of `PATH_MAP` ownership — a path can be in `DEPLOY_PATHS` AND owned by a non-deploy skill (a deployment config file may live under the backend skill's ownership and still belong in `DEPLOY_PATHS`; both are correct). Drift watching and ownership are separate concerns. Set to `''` only if no IaC/CI/CD/Build/Deployment categories were discovered — `ref-sync-check.sh` then silently skips the deploy-drift check.
 - `<PATH_MAP_ENTRIES>` → one `'PATTERN:SKILL'` entry per confirmed domain skill **plus** one entry for `<PREFIX>-deploy` covering the IaC/CI/CD/Build/Deployment paths from `CATEGORY_MAP` (omit the `<PREFIX>-deploy` entry only when no such categories were discovered). Standard catch-alls go at the end (see `tpl-skill-guard.md § How to generate governed-paths.conf`).
+- `<SKILL_SELF_OWNERSHIP_ENTRIES>` → one `'^\.claude/skills/<PREFIX>-<name>/:<PREFIX>-<name>'` entry per installed skill (all lifecycle + domain skills from this run), placed before the `.claude/skills/` catch-all.
+- `<REF_WATCH>` → ERE alternation of reference-worthy source paths derived from `CATEGORY_MAP` (Backend route/handler dirs, schema/model files, Auth paths). Set `''` when nothing clearly reference-worthy is identifiable.
 
 This is the **only** file that should contain path→skill mappings. Do not duplicate patterns in hook scripts.
 
 **Step 2 — Create hook scripts**
 
-Create all 8 hooks from their templates in `tpl-skill-guard.md`. Substitute `<PREFIX>` throughout:
+Create all 9 hooks from their templates in `tpl-skill-guard.md`. Substitute `<PREFIX>` throughout:
 
 | Hook | Template section |
 |---|---|
@@ -399,17 +418,19 @@ Create all 8 hooks from their templates in `tpl-skill-guard.md`. Substitute `<PR
 | `dependency-guard.sh` | § dependency-guard.sh |
 | `package-edit-guard.sh` | § package-edit-guard.sh |
 | `pre-handoff-check.sh` | § pre-handoff-check.sh |
+| `close-out-gate.sh` | § close-out-gate.sh |
 | `ref-sync-check.sh` | § ref-sync-check.sh |
 | `skill-mark.sh` | § skill-mark.sh |
 | `post-commit.sh` | § post-commit.sh |
 
-Make all 8 executable:
+Make all 9 executable:
 ```bash
 chmod +x .claude/hooks/skill-guard.sh
 chmod +x .claude/hooks/path-coverage-check.sh
 chmod +x .claude/hooks/dependency-guard.sh
 chmod +x .claude/hooks/package-edit-guard.sh
 chmod +x .claude/hooks/pre-handoff-check.sh
+chmod +x .claude/hooks/close-out-gate.sh
 chmod +x .claude/hooks/ref-sync-check.sh
 chmod +x .claude/hooks/skill-mark.sh
 chmod +x .claude/hooks/post-commit.sh
@@ -428,9 +449,10 @@ Read `../../shared/tpl-domain-skill.md` § "Project file sections" for the secti
 Upsert the following sections in `CLAUDE.md` (add if missing, replace if present):
 
 - `## Plan Mode` — two bullets: (1) `docs/workflow.md` as the source of truth for the delivery pipeline; (2) "After finalizing a plan, invoke `/code` to hand off to the agent pipeline"
-- `## Agents` — single line: `Pipeline: /code or /fix → <PREFIX>-dev → <PREFIX>-qa → <PREFIX>-pm. Details in docs/workflow.md.`
+- `## Agents` — the pipeline line plus the routing paragraph (pipeline-shaped work → `/code`/`/fix`, iterative rounds → `/tweak`) from the template
 - `## Skills` — "Path→skill ownership is defined in `.claude/hooks/governed-paths.conf` — edit that file to add or change path ownership. Both `skill-guard.sh` and `path-coverage-check.sh` source it automatically."
 - `## Roadmap` — single line: `docs/roadmap.md` is the source of truth for open items.
+- `## Secrets` — the never-through-chat rule from the template
 - `## Linting` — only add if lint commands were discovered in Phase 1; omit entirely if none found (no `<fill in>` stub)
 
 ---
@@ -443,7 +465,7 @@ Walk the checklist before declaring done:
 - [ ] `.claude/skills/` has all 7 lifecycle skills (`<PREFIX>-log`, `-review`, `-debug`, `-deploy`, `-test`, `-skill`, `-docs`) + all confirmed domain skills, all named `<PREFIX>-*`
 - [ ] `.claude/skills/<PREFIX>-skill/references/skill-manifest.md` exists and lists all installed lifecycle and domain skills
 - [ ] `.claude/skills/<PREFIX>-test/references/` has `test-commands.md` (with `## Smoke`, `## Regression`, `## Functional Feature Subjects` headings), `sync-checklist.md`, `custom-tests.md`, and `custom-tests.yaml` (initialized to `tests: []`). `<PREFIX>-test/SKILL.md` has a `## Test Plan` with the three tiers and no `## E2E Browser Tests` section. `custom-tests.md`'s schema uses `type: UX | Integration | E2E` (not `surface`)
-- [ ] `.claude/commands/code.md`, `fix.md`, `roadmap.md`, and `wrap.md` exist (markdown format, `$ARGUMENTS`)
+- [ ] `.claude/commands/code.md`, `fix.md`, `tweak.md`, `revert.md`, `roadmap.md`, and `wrap.md` exist (markdown format, `$ARGUMENTS`)
 - [ ] `.claude/skills/<PREFIX>-debug/` has SKILL.md + `references/systematic-debugging.md`, `references/root-cause-tracing.md`, `references/defense-in-depth.md`, `references/verification.md` + `scripts/find-polluter.sh` (executable) + `scripts/find-polluter.test.md`. SKILL.md contains a `## Read Map` and **no** `## Reference Sync` section (static-content skill).
 - [ ] `.claude/skills/<PREFIX>-review/` has SKILL.md + `references/code-review-reception.md`, `references/requesting-code-review.md`, `references/issuing-findings.md` (no `verification-before-completion.md` — `<PREFIX>-debug` owns that). SKILL.md contains a `## Read Map` and **no** `## Reference Sync` section (static-content skill).
 - [ ] `.claude/agents/<PREFIX>-qa.md` step 3 begins with `Test — invoke` and there is no `## Sign-off criteria` section (tier rules live only in `<PREFIX>-test`)
@@ -453,16 +475,17 @@ Walk the checklist before declaring done:
 - [ ] If `<PREFIX>-design` was created: its SKILL.md description starts with "MUST be invoked" (mandatory invocation language — not the legacy permissive "Use when...")
 - [ ] No leftover `<DESIGN_DELEGATION>` placeholder in any installed skill (frontend skill has it substituted; non-frontend skills have it removed)
 - [ ] No command file contains stale project or prefix references — all use substituted values
-- [ ] `.claude/hooks/governed-paths.conf` exists and has `GOVERNED_ROOTS` (directory prefixes only, no extension globs) + `DEPLOY_PATHS` (alternation of IaC/CI-CD/Build/Deployment paths, or `''` if none) + `PATH_MAP` with one entry per domain skill + standard catch-alls
-- [ ] `.claude/hooks/skill-guard.sh` is executable and sources `governed-paths.conf` — contains NO hardcoded path patterns
+- [ ] `.claude/hooks/governed-paths.conf` exists and has `GOVERNED_ROOTS` (directory prefixes only, no extension globs) + `DEPLOY_PATHS` (alternation of IaC/CI-CD/Build/Deployment paths, or `''` if none) + `REF_WATCH` (reference-worthy paths, or `''`) + `PATH_MAP` with one self-ownership entry per installed skill (before the `.claude/skills/` catch-all), one entry per domain skill, and standard catch-alls
+- [ ] `.claude/hooks/skill-guard.sh` is executable and sources `governed-paths.conf` — contains NO hardcoded path patterns; marker derivation includes the transcript-basename agent scope
 - [ ] `.claude/hooks/path-coverage-check.sh` is executable and sources `governed-paths.conf` — contains NO hardcoded path patterns
-- [ ] `.claude/hooks/dependency-guard.sh` is executable and checks for `<PREFIX>-skill` in session marker
-- [ ] `.claude/hooks/package-edit-guard.sh` is executable and checks for `<PREFIX>-skill` in session marker
-- [ ] `.claude/hooks/pre-handoff-check.sh` is executable, fires on `<PREFIX>-qa`, checks dirty tree + lint + typecheck
-- [ ] `.claude/hooks/ref-sync-check.sh` is executable, sources `governed-paths.conf` — contains NO hardcoded path patterns; warns on `GOVERNED_ROOTS` drift without reference updates AND on `DEPLOY_PATHS` drift without `deploy-config.yaml` updates
-- [ ] `.claude/hooks/skill-mark.sh` is executable
-- [ ] `.claude/hooks/post-commit.sh` is executable and references `<PREFIX>-log`
-- [ ] `.claude/settings.json` exists and wires all 8 hooks across `PreToolUse`/`PostToolUse` + `Edit`/`Write`/`Bash`/`Skill` matchers
+- [ ] `.claude/hooks/dependency-guard.sh` is executable and checks for `<PREFIX>-skill` in the agent-scoped session marker
+- [ ] `.claude/hooks/package-edit-guard.sh` is executable and checks for `<PREFIX>-skill` in the agent-scoped session marker
+- [ ] `.claude/hooks/pre-handoff-check.sh` is executable, matches **both** `tool_input.skill` and `tool_input.subagent_type` for `<PREFIX>-qa`, checks dirty tree + lint + typecheck
+- [ ] `.claude/hooks/close-out-gate.sh` is executable, fires on `git push`, sources `governed-paths.conf`, and honors `CLOSEOUT_OVERRIDE=1`
+- [ ] `.claude/hooks/ref-sync-check.sh` is executable, sources `governed-paths.conf` — contains NO hardcoded path patterns; source-drift warning fires only on structural (A/D/R) changes or `REF_WATCH` matches; deploy-drift check unchanged
+- [ ] `.claude/hooks/skill-mark.sh` is executable and writes to the agent-scoped marker (same derivation as the guards)
+- [ ] `.claude/hooks/post-commit.sh` is executable, references `<PREFIX>-log`, and exits 0 on success paths (recorders never exit non-zero)
+- [ ] `.claude/settings.json` exists and wires all 9 hooks across `PreToolUse`/`PostToolUse` + `Edit`/`Write`/`Bash`/`Skill`/`Task|Agent` matchers
 - [ ] `CLAUDE.md` has `## Plan Mode`, `## Agents`, `## Skills`, and `## Roadmap` sections with correct references
 - [ ] `docs/roadmap.md` exists (even as a stub)
 - [ ] `docs/project-log.md` exists
@@ -478,10 +501,16 @@ Walk the checklist before declaring done:
 - [ ] `<PREFIX>-qa.md` step 2 (Address findings) explicitly forbids self-patching ("You do not edit code") and routes fixes back to `<PREFIX>-dev` via blocked-status return
 - [ ] `<PREFIX>-qa.md` step 6 (Hand off) is a one-line pointer to `## Response Requirements`; the structured `## Handoff` block format (`Status: signed-off | blocked`, Review, Tests, Reference Sync, Notes) lives in a terminal `## Response Requirements` section after `## Boundaries`
 - [ ] `<PREFIX>-pm.md` step 1 (Verify QA evidence) reads `**QA-evidence:**` from the invocation prompt — does **not** grep session jsonl (subagent skill invocations don't reach the parent session)
-- [ ] `.claude/commands/code.md` and `fix.md` parse a `--prod` flag in Step 0 and have a final "Deploy to prod (only if `--prod`)" step that invokes `<PREFIX>-deploy target=prod` at the top level after pm
+- [ ] `.claude/commands/code.md` and `fix.md` parse `--prod` and `--no-push` flags in Step 0 and have a final "Deploy to prod (only if `--prod`)" step that invokes `<PREFIX>-deploy target=prod` at the top level after pm
+- [ ] `.claude/commands/code.md` and `fix.md` contain a "Gate policy" section (reversible → proceed + `auto-selected on timeout — not user-confirmed` label; irreversible → park; never present a timeout as consent) and a final "Close out: push + verified scorecard" step (push via `<PREFIX>-deploy` § Push policy; scorecard facts each checked against reality)
 - [ ] `<PREFIX>-qa.md` has a `## Invocation modes` section with `mode: initial` (default, full pipeline) and `mode: retest` (skip review, run tests only — for re-runs after a dev fix)
-- [ ] `.claude/commands/code.md` Step 2 parses dev `## Handoff` Status, branches on qa Status, and re-spawns qa with `mode=retest` after a dev fix; Step 3 passes the qa handoff verbatim to pm under `**QA-evidence:**`
-- [ ] `.claude/commands/fix.md` Step 3 has the same qa-branching + retest logic; Step 4 passes `**QA-evidence:**` to pm
+- [ ] `<PREFIX>-qa.md` handoff vocabulary is `signed-off | signed-off-with-deferrals | blocked` with an `Evidence:` field and an optional `UAT-deferred:` field; step 2 allows direct fixes for **non-source** findings only; step 5 maps environmental-only blocks to `signed-off-with-deferrals`
+- [ ] `<PREFIX>-pm.md` step 1 accepts both signed-off statuses; step 2 uses the feature commit for the log hash and carries `UAT-deferred:` items
+- [ ] `<PREFIX>-deploy/SKILL.md` contains a `## Push policy` section (CI-coupled push = shipping; post-push CI watch + health check) and its gate returns `gate: unanswered — parked` on timeout
+- [ ] `.claude/commands/code.md` Step 2 parses dev `## Handoff` Status, branches on qa Status (including `signed-off-with-deferrals` → user-gated defer), and re-spawns qa with `mode=retest` after a dev fix; Step 3 passes the qa handoff verbatim to pm under `**QA-evidence:**` plus the `Feature commit:` hash
+- [ ] `.claude/commands/fix.md` Step 3 has the same qa-branching + retest logic; Step 4 passes `**QA-evidence:**` + `Feature commit:` to pm
+- [ ] Both commands contain the salvage protocol (dead subagent → inspect tree, SendMessage/re-spawn with salvage prompt — no top-level role absorption) and the "no top-level governed edits while a subagent runs" rule
+- [ ] `.claude/commands/tweak.md` defines the lane rules (inline verification, no per-commit log) and the mandatory batched close-out at exit; `.claude/commands/revert.md` uses `git revert` (never reset) + scoped re-verify + logged reversal
 - [ ] Both `<PREFIX>-dev.md` and `<PREFIX>-qa.md` end with a `## Response Requirements` section (the **last** section of the file) containing the imperative "Every response MUST end with the `## Handoff` block" — terminal placement leverages prompt-recency so agents reliably emit the block
 - [ ] No placeholder text (`<PROJECT>`, `<PREFIX>`, `<fill in>`, etc.) left in any installed file — prompt the user to fill these in
 

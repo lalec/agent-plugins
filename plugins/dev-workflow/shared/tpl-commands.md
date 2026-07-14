@@ -15,18 +15,28 @@ description: Implement a feature through the full <PREFIX>-dev → <PREFIX>-qa �
 
 # Feature Implementation
 
-**Usage:** `/code <description>` — append `--prod` to deploy to prod after QA sign-off (default ends at UAT, no prod deploy)
+**Usage:** `/code <description>` — append `--prod` to deploy to prod after QA sign-off (default ends at UAT, no prod deploy); append `--no-push` to skip the close-out push.
 
 **Examples:**
 - `/code add export to CSV button on assessment list`
 - `/code change pipeline phases status indication`
 - `/code <description> --prod`
 
+## Gate policy (governs every AskUserQuestion in this command)
+
+If a question times out unanswered, split by risk:
+- **Reversible** (confirm, verification capture, regression flag, UAT-defer): proceed with the recommended default and label every downstream record `auto-selected on timeout — not user-confirmed` (handoffs, delivery log, final report). **Never present a timeout as user consent** — not to a subagent, not in a log, not in the report.
+- **Irreversible** (prod deploy; any push that fires a prod CI deploy): **park** — do not proceed and do not decide. End the turn stating exactly what awaits confirmation and how to resume; on the user's next message, resume from the parked step.
+
 ## Step 0 — Confirm
 
-**Flag parse (first):** if `$ARGUMENTS` contains `--prod`, set `prod_deploy = true` and strip `--prod` from the task description used in every step below. Otherwise `prod_deploy = false` — the pipeline ends at UAT with no prod deploy.
+**Flag parse (first):** if `$ARGUMENTS` contains `--prod`, set `prod_deploy = true`; if it contains `--no-push`, set `no_push = true`. Strip both flags from the task description used in every step below. Default: `prod_deploy = false` (pipeline ends at UAT), `no_push = false`.
 
-Use the AskUserQuestion tool with a single question:
+**Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, tell the user what pre-existing WIP exists and that it stays excluded (dev stages by name); ask only if the WIP overlaps paths this task will touch.
+
+**Plan shortcut:** if the session contains a just-approved plan covering this task, skip the confirmation question — plan approval was the confirmation. Continue to Step 0.5.
+
+Otherwise use the AskUserQuestion tool with a single question:
 
 - question: "Ready to implement: $ARGUMENTS?"
 - header: "Confirm"
@@ -60,6 +70,8 @@ Propose them with the AskUserQuestion tool (the plan, if any, is already in cont
 
 For every option the user selects (and any "Other" text), take the one-line verification and its `type` — already known for the proposed ones; for a custom line, infer `type` from the wording (**UX** (frontend only) · **Integration** (backend: endpoint or stored data) · **E2E** (a UI action with a backend effect)). Hold the `{assert, type}` pairs in context — **do not write or commit anything yet**. If only "Nothing to verify" is chosen (or nothing is selected), capture nothing and continue.
 
+**Honor the user's answer.** A free-text reply that declines automated verification ("I'll verify live", "I'll test by eye") is a decision: record this task as `UAT-only`, capture nothing, and skip Step 1.5 — do not persist synthesized entries against the user's stated intent.
+
 **(b) Regression flag.** Use the AskUserQuestion tool:
 
 - question: "Run full regression after dev as well?"
@@ -79,15 +91,19 @@ Task:
     Complete the full <PREFIX>-dev workflow (domain skills, implement, deploy, Reference Sync).
     Verifications (these must hold when done): <the verifications captured in Step 0.5, or "none">
 
+While the agent runs, do **not** edit governed source files at the top level — concurrent writers make QA's diff unattributable.
+
+**Salvage protocol (applies to every subagent in this command):** if an agent dies without a `## Handoff` (watchdog kill, session limit, API error), do not absorb its role at the top level. Inspect `git status` / `git log` to see what landed, then continue the same agent via SendMessage or re-spawn it with a salvage prompt naming what is already done and which contract steps remain (quality checks, deploy, Reference Sync, commit, handoff). A salvaged completion counts as `Status: complete` for the steps below.
+
 ## Step 1.5 — Persist captured verifications
 
-Run only if verifications were captured in Step 0.5 (not `skip`) **and** <PREFIX>-dev returned `Status: complete`. If dev blocked, skip — nothing is written.
+Run only if verifications were captured in Step 0.5 (not `skip`, not `UAT-only`) **and** <PREFIX>-dev finished — `Status: complete` or a salvaged completion (captured verifications must never be lost to an agent death). If dev blocked, skip — nothing is written.
 
 For each captured `{assert, type}`, append an entry to `.claude/skills/<PREFIX>-test/references/custom-tests.yaml`:
 - `name` — auto-slug from the verification
 - `added` — today's date
 - `task` — `$ARGUMENTS`, written as a **single-quoted** YAML scalar (double any internal `'`) so colons / braces / double-quotes in the description can't break parsing
-- `assert` — the sentence, also **single-quoted** (double any internal `'`)
+- `assert` — the sentence, also **single-quoted** (double any internal `'`). Keep it **symbolic**: reference behavior and configured values ("matches the configured tolerance"), never volatile constants copied from code — those rot within days and QA then wastes a cycle correcting them
 - `type` — the inferred/confirmed type
 - `paths` — the dev `## Handoff` `Files changed:` list, **excluding any `.claude/**` paths** (workflow-internal reference/doc edits must not drive prior-selection)
 
@@ -97,7 +113,8 @@ Commit: `test: capture verifications for <task-slug>` (the tree is clean post-de
 
 Run only if verifications with type `UX` or `E2E` were captured. For each affected component (from the dev `Files changed:` paths), resolve its **first non-prod env** in `.claude/skills/<PREFIX>-deploy/references/deploy-config.yaml`:
 - Env has `deploy:` (ship-env) → nothing to do; <PREFIX>-dev already deployed it.
-- Env has `run:` (serve-env) → curl its `url`; if unreachable, start `run` in the background here at the top level (subagents can't hold a server), then poll the url until HTTP 2xx (up to ~60s). If still unreachable, surface the output and ask the user how to proceed before spawning <PREFIX>-qa.
+- Env has `run:` (serve-env) → start or restart it here at the top level (subagents can't hold a server), applying the env's `stack:` block if declared — env-var overrides that wire the frontend to the local backend, the `seed:` command, the `auth:` strategy (see the deploy-config schema). Then poll the url until HTTP 2xx (up to ~60s). If still unreachable, surface the output and ask the user how to proceed before spawning <PREFIX>-qa.
+  **Freshness:** a server started before dev's commits is running stale code — restart it so QA tests the new code; a green check against a stale server is non-evidence.
 - No non-prod env → continue; <PREFIX>-test reports those verifications blocked and Step 2 handles it.
 
 Leave any server you started running — note it under Done.
@@ -119,30 +136,54 @@ Task:
 
 After <PREFIX>-qa returns, parse its `## Handoff` block:
 - `Status: signed-off` → continue to Step 3.
-- `Status: blocked` **solely because a typed verification cannot run headless** (auth-gated UI, un-seedable data — `Notes:` names the verification and no code fix is requested) → ask via AskUserQuestion: "Verification `<name>` can't run automatically (`<reason>`). Defer to UAT and continue, or stop?" On **Defer** — carry `UAT-deferred: <names>` into the Step 3 pm prompt so the delivery log records it, and continue. On **Stop** — halt and report.
+- `Status: signed-off-with-deferrals` → ask via AskUserQuestion: "QA is clean except these verifications no environment can run: `<UAT-deferred list with reasons>`. Defer to UAT and continue, or stop?" On **Defer** — carry `UAT-deferred: <names> (user-confirmed)` into the Step 3 pm prompt and continue. On timeout — reversible gate: continue, but carry `UAT-deferred: <names> (auto-accepted on timeout — not user-confirmed)`. On **Stop** — halt and report. Never re-spawn qa to relabel its handoff — the deferral status IS the sign-off vocabulary.
 - `Status: blocked` with code-fix `Notes:` → re-spawn <PREFIX>-dev with the fix request, then on dev complete re-spawn <PREFIX>-qa with `mode=retest` (review already passed, run tests only) — keep the same `regression_mode`. Repeat until signed-off or user aborts.
 
 ## Step 3 — Log & Docs (<PREFIX>-pm)
 
-After <PREFIX>-qa signs off, capture its `## Handoff` block verbatim and pass it to pm under `**QA-evidence:**`:
+After <PREFIX>-qa signs off (either signed-off status), capture its `## Handoff` block verbatim and pass it to pm under `**QA-evidence:**`:
 
 Task:
   subagent_type: <PREFIX>-pm
   prompt: |
     Verify QA phases ran. Write delivery log via <PREFIX>-log. Update docs if architectural changes were made.
+    Feature commit: <the dev Handoff `Commit:` hash — the delivery-log hash, not any later bookkeeping commit>
+    UAT-deferred: <names + how confirmed, from Step 2 — omit line if none>
 
     **QA-evidence:**
     <paste the full ## Handoff block returned by <PREFIX>-qa, verbatim>
 
 ## Step 4 — Deploy to prod (only if `--prod`)
 
-Run only if `prod_deploy` was set in Step 0. After <PREFIX>-pm has logged, invoke the `<PREFIX>-deploy` skill **here at the top level** (not via a subagent) with `target=prod`. It runs the fill-in pass, builds the gate context, and asks via `AskUserQuestion` — which works because this is the top level. Running after sign-off and any retest loop means it deploys the final, signed-off code. If no `prod` env is declared or the user declines, report that and finish at UAT.
+Run only if `prod_deploy` was set in Step 0. After <PREFIX>-pm has logged, invoke the `<PREFIX>-deploy` skill **here at the top level** (not via a subagent) with `target=prod`. It runs the fill-in pass, builds the gate context, and asks via `AskUserQuestion` — which works because this is the top level. Running after sign-off and any retest loop means it deploys the final, signed-off code. If no `prod` env is declared or the user declines, report that and finish at UAT. If the gate goes unanswered, the skill returns `gate: unanswered — parked` — park per the Gate policy; never decide a prod deploy on the user's behalf.
+
+## Step 5 — Close out: push + verified scorecard
+
+Runs on every completion, with or without `--prod`.
+
+**(a) Push.** Skip if `no_push` or no remote is configured. Resolve the push policy via the `<PREFIX>-deploy` skill § Push policy: if pushing the current branch fires a prod CI deploy, pushing IS shipping — push only if Step 4 ran and its gate approved; otherwise this is an irreversible gate (ask, park on timeout). If push does not trigger prod, push now.
+
+**(b) Scorecard.** Verify each fact against reality — never echo handoff claims:
+
+| Fact | Evidence |
+|---|---|
+| Committed | `git log --oneline -5` shows the feature + capture + log commits |
+| Pushed | `git rev-list --count @{upstream}..HEAD` → 0, or "not pushed — <reason>" |
+| Deployed | curl the env url/health from the dev handoff (2xx), or "no deployable env" |
+| Logged | new entry present at top of `docs/project-log.md` (grep the title) |
+| Docs | pm handoff `Docs:` field; spot-check the file if `updated` |
+| Ref sync | `Reference Sync:` fields from all three handoffs |
 
 ## Done
 
-- If `--prod` and prod deploy succeeded: tell the user "Feature complete, logged, and deployed to prod."
-- Otherwise: tell the user "Feature complete and logged. Ready for user acceptance testing — run `/code <task> --prod` (or invoke <PREFIX>-deploy) when ready to ship."
-- If a serve-env was started in Step 1.7, tell the user it is still running and where (`<url>`). If any verification was UAT-deferred, list it as an explicit follow-up.
+Report, in this order:
+1. The Step 5 scorecard — each fact with its evidence, any ✗ called out first.
+2. QA's `Evidence:` lines verbatim (verification traces, screenshot paths) — this is what lets the user skip re-testing.
+3. Anything auto-decided on a gate timeout, explicitly labeled.
+4. UAT-deferred verifications as explicit follow-ups.
+5. If a serve-env was started in Step 1.7: it is still running, and where (`<url>`).
+6. If `--prod`: "deployed to prod" only after `<PREFIX>-deploy` confirmed CI completion + health check; otherwise: "ready for UAT — run `/code <task> --prod` (or invoke <PREFIX>-deploy) to ship."
+7. If this is the 2nd+ pipeline run in this session, suggest closing out and starting a fresh session — long sessions degrade quality.
 ```
 
 ---
@@ -156,18 +197,28 @@ description: Investigate and fix a bug or performance issue through <PREFIX>-deb
 
 # Bug Fix
 
-**Usage:** `/fix <description>` — append `--prod` to deploy to prod after QA sign-off (default ends at UAT, no prod deploy)
+**Usage:** `/fix <description>` — append `--prod` to deploy to prod after QA sign-off (default ends at UAT, no prod deploy); append `--no-push` to skip the close-out push.
 
 **Examples:**
 - `/fix pipeline table takes too long to load`
 - `/fix assessment status stuck on running after completion`
 - `/fix <description> --prod`
 
+## Gate policy (governs every AskUserQuestion in this command)
+
+If a question times out unanswered, split by risk:
+- **Reversible** (confirm, verification capture, regression flag, UAT-defer): proceed with the recommended default and label every downstream record `auto-selected on timeout — not user-confirmed` (handoffs, delivery log, final report). **Never present a timeout as user consent** — not to a subagent, not in a log, not in the report.
+- **Irreversible** (prod deploy; any push that fires a prod CI deploy): **park** — do not proceed and do not decide. End the turn stating exactly what awaits confirmation and how to resume; on the user's next message, resume from the parked step.
+
 ## Step 0 — Confirm
 
-**Flag parse (first):** if `$ARGUMENTS` contains `--prod`, set `prod_deploy = true` and strip `--prod` from the description used in every step below. Otherwise `prod_deploy = false` — the pipeline ends at UAT with no prod deploy.
+**Flag parse (first):** if `$ARGUMENTS` contains `--prod`, set `prod_deploy = true`; if it contains `--no-push`, set `no_push = true`. Strip both flags from the description used in every step below. Default: `prod_deploy = false` (pipeline ends at UAT), `no_push = false`.
 
-Use the AskUserQuestion tool with a single question:
+**Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, tell the user what pre-existing WIP exists and that it stays excluded (dev stages by name); ask only if the WIP overlaps paths this task will touch.
+
+**Plan shortcut:** if the session contains a just-approved plan covering this fix, skip the confirmation question — plan approval was the confirmation. Continue to Step 0.5.
+
+Otherwise use the AskUserQuestion tool with a single question:
 
 - question: "Ready to investigate and fix: $ARGUMENTS?"
 - header: "Confirm"
@@ -200,6 +251,8 @@ Propose them with the AskUserQuestion tool (the plan, if any, is already in cont
 - The automatic "Other" field lets the user type their own one-line verification.
 
 For every option the user selects (and any "Other" text), take the one-line verification and its `type` — already known for the proposed ones; for a custom line, infer `type` from the wording (**UX** (frontend only) · **Integration** (backend: endpoint or stored data) · **E2E** (a UI action with a backend effect)). Hold the `{assert, type}` pairs in context — **do not write or commit anything yet**. If only "Nothing to verify" is chosen (or nothing is selected), capture nothing and continue. (A bug's verification becomes its never-regress-again invariant.)
+
+**Honor the user's answer.** A free-text reply that declines automated verification ("I'll verify live", "I'll test by eye") is a decision: record this task as `UAT-only`, capture nothing, and skip Step 2.5 — do not persist synthesized entries against the user's stated intent.
 
 **(b) Regression flag.** Use the AskUserQuestion tool:
 
@@ -237,15 +290,19 @@ Task:
     Complete the full <PREFIX>-dev workflow (domain skills, implement, deploy, Reference Sync).
     Verifications (these must hold when done): <the verifications captured in Step 0.5, or "none">
 
+While the agent runs, do **not** edit governed source files at the top level — concurrent writers make QA's diff unattributable.
+
+**Salvage protocol (applies to every subagent in this command):** if an agent dies without a `## Handoff` (watchdog kill, session limit, API error), do not absorb its role at the top level. Inspect `git status` / `git log` to see what landed, then continue the same agent via SendMessage or re-spawn it with a salvage prompt naming what is already done and which contract steps remain (quality checks, deploy, Reference Sync, commit, handoff). A salvaged completion counts as `Status: complete` for the steps below.
+
 ## Step 2.5 — Persist captured verifications
 
-Run only if verifications were captured in Step 0.5 (not `skip`) **and** <PREFIX>-dev returned `Status: complete`. If dev blocked, skip — nothing is written.
+Run only if verifications were captured in Step 0.5 (not `skip`, not `UAT-only`) **and** <PREFIX>-dev finished — `Status: complete` or a salvaged completion (captured verifications must never be lost to an agent death). If dev blocked, skip — nothing is written.
 
 For each captured `{assert, type}`, append an entry to `.claude/skills/<PREFIX>-test/references/custom-tests.yaml`:
 - `name` — auto-slug from the verification
 - `added` — today's date
 - `task` — `$ARGUMENTS`, written as a **single-quoted** YAML scalar (double any internal `'`) so colons / braces / double-quotes in the description can't break parsing
-- `assert` — the sentence, also **single-quoted** (double any internal `'`)
+- `assert` — the sentence, also **single-quoted** (double any internal `'`). Keep it **symbolic**: reference behavior and configured values ("matches the configured tolerance"), never volatile constants copied from code — those rot within days and QA then wastes a cycle correcting them
 - `type` — the inferred/confirmed type
 - `paths` — the dev `## Handoff` `Files changed:` list, **excluding any `.claude/**` paths** (workflow-internal reference/doc edits must not drive prior-selection)
 
@@ -255,7 +312,8 @@ Commit: `test: capture verifications for <task-slug>` (the tree is clean post-de
 
 Run only if verifications with type `UX` or `E2E` were captured. For each affected component (from the dev `Files changed:` paths), resolve its **first non-prod env** in `.claude/skills/<PREFIX>-deploy/references/deploy-config.yaml`:
 - Env has `deploy:` (ship-env) → nothing to do; <PREFIX>-dev already deployed it.
-- Env has `run:` (serve-env) → curl its `url`; if unreachable, start `run` in the background here at the top level (subagents can't hold a server), then poll the url until HTTP 2xx (up to ~60s). If still unreachable, surface the output and ask the user how to proceed before spawning <PREFIX>-qa.
+- Env has `run:` (serve-env) → start or restart it here at the top level (subagents can't hold a server), applying the env's `stack:` block if declared — env-var overrides that wire the frontend to the local backend, the `seed:` command, the `auth:` strategy (see the deploy-config schema). Then poll the url until HTTP 2xx (up to ~60s). If still unreachable, surface the output and ask the user how to proceed before spawning <PREFIX>-qa.
+  **Freshness:** a server started before dev's commits is running stale code — restart it so QA tests the new code; a green check against a stale server is non-evidence.
 - No non-prod env → continue; <PREFIX>-test reports those verifications blocked and Step 3 handles it.
 
 Leave any server you started running — note it under Done.
@@ -277,30 +335,54 @@ Task:
 
 After <PREFIX>-qa returns, parse its `## Handoff` block:
 - `Status: signed-off` → continue to Step 4.
-- `Status: blocked` **solely because a typed verification cannot run headless** (auth-gated UI, un-seedable data — `Notes:` names the verification and no code fix is requested) → ask via AskUserQuestion: "Verification `<name>` can't run automatically (`<reason>`). Defer to UAT and continue, or stop?" On **Defer** — carry `UAT-deferred: <names>` into the Step 4 pm prompt so the delivery log records it, and continue. On **Stop** — halt and report.
+- `Status: signed-off-with-deferrals` → ask via AskUserQuestion: "QA is clean except these verifications no environment can run: `<UAT-deferred list with reasons>`. Defer to UAT and continue, or stop?" On **Defer** — carry `UAT-deferred: <names> (user-confirmed)` into the Step 4 pm prompt and continue. On timeout — reversible gate: continue, but carry `UAT-deferred: <names> (auto-accepted on timeout — not user-confirmed)`. On **Stop** — halt and report. Never re-spawn qa to relabel its handoff — the deferral status IS the sign-off vocabulary.
 - `Status: blocked` with code-fix `Notes:` → re-spawn <PREFIX>-dev with the fix request, then on dev complete re-spawn <PREFIX>-qa with `mode=retest` (review already passed, run tests only) — keep the same `regression_mode`. Repeat until signed-off or user aborts.
 
 ## Step 4 — Log & Docs (<PREFIX>-pm)
 
-After <PREFIX>-qa signs off, capture its `## Handoff` block verbatim and pass it to pm under `**QA-evidence:**`:
+After <PREFIX>-qa signs off (either signed-off status), capture its `## Handoff` block verbatim and pass it to pm under `**QA-evidence:**`:
 
 Task:
   subagent_type: <PREFIX>-pm
   prompt: |
     Verify QA phases ran. Write delivery log via <PREFIX>-log. Update docs if architectural changes were made.
+    Feature commit: <the dev Handoff `Commit:` hash — the delivery-log hash, not any later bookkeeping commit>
+    UAT-deferred: <names + how confirmed, from Step 3 — omit line if none>
 
     **QA-evidence:**
     <paste the full ## Handoff block returned by <PREFIX>-qa, verbatim>
 
 ## Step 5 — Deploy to prod (only if `--prod`)
 
-Run only if `prod_deploy` was set in Step 0. After <PREFIX>-pm has logged, invoke the `<PREFIX>-deploy` skill **here at the top level** (not via a subagent) with `target=prod`. It runs the fill-in pass, builds the gate context, and asks via `AskUserQuestion` — which works because this is the top level. Running after sign-off and any retest loop means it deploys the final, signed-off code. If no `prod` env is declared or the user declines, report that and finish at UAT.
+Run only if `prod_deploy` was set in Step 0. After <PREFIX>-pm has logged, invoke the `<PREFIX>-deploy` skill **here at the top level** (not via a subagent) with `target=prod`. It runs the fill-in pass, builds the gate context, and asks via `AskUserQuestion` — which works because this is the top level. Running after sign-off and any retest loop means it deploys the final, signed-off code. If no `prod` env is declared or the user declines, report that and finish at UAT. If the gate goes unanswered, the skill returns `gate: unanswered — parked` — park per the Gate policy; never decide a prod deploy on the user's behalf.
+
+## Step 6 — Close out: push + verified scorecard
+
+Runs on every completion, with or without `--prod`.
+
+**(a) Push.** Skip if `no_push` or no remote is configured. Resolve the push policy via the `<PREFIX>-deploy` skill § Push policy: if pushing the current branch fires a prod CI deploy, pushing IS shipping — push only if Step 5 ran and its gate approved; otherwise this is an irreversible gate (ask, park on timeout). If push does not trigger prod, push now.
+
+**(b) Scorecard.** Verify each fact against reality — never echo handoff claims:
+
+| Fact | Evidence |
+|---|---|
+| Committed | `git log --oneline -5` shows the fix + capture + log commits |
+| Pushed | `git rev-list --count @{upstream}..HEAD` → 0, or "not pushed — <reason>" |
+| Deployed | curl the env url/health from the dev handoff (2xx), or "no deployable env" |
+| Logged | new entry present at top of `docs/project-log.md` (grep the title) |
+| Docs | pm handoff `Docs:` field; spot-check the file if `updated` |
+| Ref sync | `Reference Sync:` fields from all three handoffs |
 
 ## Done
 
-- If `--prod` and prod deploy succeeded: tell the user "Fix complete, logged, and deployed to prod."
-- Otherwise: tell the user "Fix complete and logged. Ready for user acceptance testing — run `/fix <task> --prod` (or invoke <PREFIX>-deploy) when ready to ship."
-- If a serve-env was started in Step 2.7, tell the user it is still running and where (`<url>`). If any verification was UAT-deferred, list it as an explicit follow-up.
+Report, in this order:
+1. The Step 6 scorecard — each fact with its evidence, any ✗ called out first.
+2. QA's `Evidence:` lines verbatim (verification traces, screenshot paths) — this is what lets the user skip re-testing.
+3. Anything auto-decided on a gate timeout, explicitly labeled.
+4. UAT-deferred verifications as explicit follow-ups.
+5. If a serve-env was started in Step 2.7: it is still running, and where (`<url>`).
+6. If `--prod`: "deployed to prod" only after `<PREFIX>-deploy` confirmed CI completion + health check; otherwise: "ready for UAT — run `/fix <task> --prod` (or invoke <PREFIX>-deploy) to ship."
+7. If this is the 2nd+ pipeline run in this session, suggest closing out and starting a fresh session — long sessions degrade quality.
 ```
 
 ---
@@ -409,6 +491,74 @@ Use the AskUserQuestion tool:
 
 ---
 
+## § /tweak — tweak.md (Claude Code)
+
+```markdown
+---
+description: Sanctioned lightweight lane for iterative work — pixel nudges, copy rounds, small hotfixes — at the top level, without the full pipeline. Close-out is batched and enforced at push time.
+---
+
+# Iterate
+
+**Usage:** `/tweak <description>` — small, iterative, inline-verified changes. For features and bug fixes that need review depth, use `/code` / `/fix`.
+
+**Examples:**
+- `/tweak nudge the map labels so city names don't overlap`
+- `/tweak reword the pricing card subtitles`
+
+## Lane rules
+
+- Work happens at the top level — no dev/qa/pm subagents. Skill governance still applies: load the owning domain skill before editing (skill-guard enforces this).
+- **Verify inline after every change:** visual change → screenshot via agent-browser and show it; backend change → curl/command with the observed output shown. No unverified iteration rounds.
+- Commit in small named steps. Do **not** write a delivery-log entry per commit — close-out is batched at exit.
+- **Scope guard:** if the work grows into schema/API changes, auth, migrations, or anything needing review depth, stop and route it through `/code` or `/fix` instead.
+
+## Exit — batched close-out (mandatory)
+
+Run when the user says done, or asks to push or deploy. (The `close-out-gate` hook blocks push and deploy until a delivery-log entry covers the burst — iterate freely, but nothing leaves the machine without this.)
+
+1. **Review the burst** — use the `<PREFIX>-review` skill on the accumulated diff since the last delivery-log entry. Fix non-source nits directly; a source finding that needs real review depth → route to `/fix`.
+2. **Log** — one `<PREFIX>-log` entry covering the whole burst (name the commits it spans).
+3. **Docs + references** — use `<PREFIX>-docs` to check staleness; use `<PREFIX>-skill` for reference sync scoped to the affected skills.
+4. **Push + scorecard** — same close-out as `/code` Step 5: push policy via the `<PREFIX>-deploy` skill § Push policy (a push that fires prod CI is an irreversible gate — ask, park on timeout), then the verified scorecard (committed / pushed / logged / docs / ref-sync, each evidence-checked).
+```
+
+---
+
+## § /revert — revert.md (Claude Code)
+
+```markdown
+---
+description: Sanctioned rollback — git revert (never reset), scoped re-verification via <PREFIX>-test, and a logged reversal.
+---
+
+# Revert
+
+**Usage:** `/revert <commit-ish or description of what to undo>`
+
+## Step 0 — Confirm scope
+
+Identify the commits to undo from `git log --oneline` and the delivery log. Present the exact commit list via AskUserQuestion before touching anything. **Never `git reset` shared history** — `git revert` preserves the audit trail (a reset once destroyed a delivery-log commit alongside the target).
+
+## Step 1 — Revert
+
+`git revert` the confirmed commits (newest first). Resolve conflicts; keep revert commits separate from any new work.
+
+## Step 2 — Re-verify
+
+Use the `<PREFIX>-test` skill: Smoke + every `custom-tests.yaml` verification whose `paths` intersect the reverted files. A failure here means the revert is incomplete — fix before proceeding. Retire or amend any captured verification that asserted the now-reverted behavior.
+
+## Step 3 — Log the reversal
+
+Use `<PREFIX>-log`: one entry naming what was reverted and why. Flip any roadmap item the reverted work had closed back to `open`.
+
+## Step 4 — Close out
+
+Push + verified scorecard, same as `/code` Step 5. If the original change was deployed, redeploy the reverted state to the same envs via `<PREFIX>-deploy` (prod requires its gate — park on timeout).
+```
+
+---
+
 ## § /wrap — wrap.md (Claude Code)
 
 ```markdown
@@ -426,6 +576,10 @@ Close-out for changes made **outside** the normal `/code`/`/fix` pipeline — ad
 - `/wrap manually updated database row to fix corrupted state`
 - `/wrap changed configuration value in cloud console`
 - `/wrap ad-hoc script run that imported new dataset`
+
+## Step 0 — Review (conditional)
+
+If commits since the last delivery-log entry touch governed source paths (check `governed-paths.conf` `GOVERNED_ROOTS` against `git diff --name-only`), use the `<PREFIX>-review` skill on that diff first — ad-hoc source changes otherwise ship on self-review only. Fix non-source nits directly; a source finding needing depth → route to `/fix`. Skip this step when only docs/config/data changed.
 
 ## Step 1 — Delivery log
 

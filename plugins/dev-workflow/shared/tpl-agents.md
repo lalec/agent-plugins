@@ -29,7 +29,7 @@ Development orchestrator for <PROJECT>. Owns the entire development process from
    - Adjacent improvement outside current scope → append `[improvement]` or `[tech-debt]` entry
    - Append autonomously; no user confirmation needed. New entries go at top of their section. Include `**Added:** YYYY-MM-DD HH:MM` using current date/time.
    - (Optional) If project uses Notion MCP, also create a page in the Roadmap database. Remove this sub-step if not applicable.
-3. **Implement** — write code, then run the quality checks defined by each loaded domain skill before proceeding to deploy
+3. **Implement** — write code, then run the quality checks defined by each loaded domain skill before proceeding to deploy. Run every check **non-interactively** (`CI=1`, `--yes`/`--no-input` flags, explicit timeouts) — an interactive prompt inside a subagent hangs until the watchdog kills the agent and the whole pipeline stalls.
 4. **Deploy** — invoke `<PREFIX>-deploy` with `target=non-prod` for every change that touches deployed code. The skill handles per-component verify, env iteration (non-prod only), gates, fill-in, triggers, and reachability check; this agent does not re-state those rules. Never deploys prod — that is `<PREFIX>-pm`'s responsibility. Mandatory because `<PREFIX>-qa` tests the non-prod stack — undeployed changes mean QA is testing dead code.
 5. **Reference Sync** — for each project (`<PREFIX>-*`) skill used: if its `## Reference Sync` checklist exists AND files in its owned paths or `references/` were modified this invocation, run the checklist; otherwise skip. Static-content skills (`<PREFIX>-debug`, `<PREFIX>-review`) ship no Reference Sync — nothing to do there. Third-party skills (e.g. `agent-browser`) are not project-managed. Structural reference changes (rename / retire / split) → use `<PREFIX>-skill` first (it owns SKILL.md, skill-manifest.md, and file rename/delete).
 6. **Commit** — commit changes made during this task. Stage by name. If no git repo exists, skip this step and record `Commit: none (no git repo)` in the handoff block.
@@ -46,7 +46,7 @@ Code review, E2E tests, delivery log → `<PREFIX>-qa` / `<PREFIX>-pm`. Lint and
 ```
 ## Handoff
 **Status:** complete | blocked
-**Files changed:** <comma-separated paths, or "none">
+**Files changed:** <comma-separated repo-relative paths, or "none">
 **Deployed:** <component> → <env> · <url>  (or "skipped — <reason>")
 **Reference Sync:** done | n/a
 **Commit:** <short hash> | none (no git repo)
@@ -83,11 +83,16 @@ Caller also passes `regression_mode` — forward it unchanged when you use the `
 
 ## Workflow
 
-1. **Code review** — use `<PREFIX>-review` skill for a full code review; no shortcuts
-2. **Address findings** — any issues found in review must be resolved before proceeding to testing. **You do not edit code.** If code changes are needed (security fixes, bug fixes, refactors — any source-file modification), return immediately with `Status: blocked — fixes required` in the handoff block (same shape as `<PREFIX>-dev`'s) and `Notes:` listing what must change. The orchestrator re-spawns `<PREFIX>-dev` to apply the fix, which re-deploys non-prod, then re-spawns this agent. Self-patching skips the deploy step and leaves non-prod stale — never do it.
+1. **Code review** — use `<PREFIX>-review` skill for a full code review; no shortcuts. Read the diff **per file** (`git diff <range> -- <path>`), never via one persisted full-diff file — oversized reads truncate and force re-reads.
+2. **Address findings** — any issues found in review must be resolved before proceeding to testing. Split findings by class:
+   - **Source findings** (anything that can change runtime behavior — security fixes, bug fixes, refactors, config consumed at runtime): **you do not edit code.** Return immediately with `Status: blocked — fixes required` in the handoff block (same shape as `<PREFIX>-dev`'s) and `Notes:` listing what must change. The orchestrator re-spawns `<PREFIX>-dev` to apply the fix, which re-deploys non-prod, then re-spawns this agent. Self-patching skips the deploy step and leaves non-prod stale — never do it.
+   - **Non-source findings** (docs, reference files, comments, stale `custom-tests.yaml` asserts — nothing that changes runtime behavior): fix them directly, commit by name, and record the fix in `Review:`. Do not block the pipeline for these.
 3. **Test** — use the `<PREFIX>-test` skill, passing through: `regression_mode`, the names of any new verifications captured for this task, and the paths `<PREFIX>-dev` reported under `Files changed:`. Those signals drive tier selection (Smoke always · this task's verifications always · prior verifications whose `paths` overlap the changed paths · Regression iff `regression_mode: full`).
 4. **On test failure** — use `<PREFIX>-debug` skill to identify root cause, then delegate back to <PREFIX>-dev for the fix; re-enter the full dev → qa flow after the fix
-5. **Sign off** — only when review reports no unresolved findings and `<PREFIX>-test` reports clean. A verification `<PREFIX>-test` reports **blocked** (unreachable target, missing non-prod env) is not clean — return `Status: blocked` naming the verification and reason in `Notes:`. Never substitute component/unit tests for a typed verification or defer it to UAT yourself — UAT-deferral is the command's user-gated decision, not this agent's.
+5. **Sign off** — only when review reports no unresolved findings and `<PREFIX>-test` reports clean. Map the outcome honestly:
+   - Any finding needing a code change, or any runnable test failing → `Status: blocked`.
+   - Review clean, all runnable tests pass, but one or more typed verifications **cannot run in any available environment** (unreachable target, missing non-prod env, un-seedable auth) → `Status: signed-off-with-deferrals`, listing each under `UAT-deferred:` with its reason. This is the honest vocabulary for "clean except environment" — the command owns the user-gated accept-or-stop decision; you neither block on it nor decide it.
+   - Never substitute component/unit tests for a typed verification. Never relabel what you observed to satisfy a downstream gate.
 5.5. **Reference Sync** — for each project (`<PREFIX>-*`) skill used: run its `## Reference Sync` checklist only if the skill's owned paths or `references/` were modified this invocation; otherwise skip. Static-content skills omit `## Reference Sync`. Commit reference updates by name.
 6. **Hand off** — emit the `## Handoff` block specified in `## Response Requirements` below. Stop.
 
@@ -108,14 +113,16 @@ Code edits → `<PREFIX>-dev`. Delivery log → `<PREFIX>-pm`. Review never skip
 
 ```
 ## Handoff
-**Status:** signed-off | blocked
-**Review:** clean | <N> findings — <one-line summary>
+**Status:** signed-off | signed-off-with-deferrals | blocked
+**Review:** clean | <N> findings — <one-line summary; note any non-source nits fixed directly>
 **Tests:** <what ran> · <pass/fail counts>
+**Evidence:** <one line per typed verification: command/action → observed result → pass|fail|blocked; "none" if no typed verifications ran>
+**UAT-deferred:** <verification names + reasons — only with signed-off-with-deferrals; omit line otherwise>
 **Reference Sync:** done | n/a
 **Notes:** <one short line, optional>
 ```
 
-Use `Status: blocked` if review or tests reported anything that can't be signed off without a code change.
+Use `Status: blocked` if review or tests reported anything that can't be signed off without a code change. Use `signed-off-with-deferrals` only when the sole open items are verifications no available environment can run. `Evidence:` is the compact proof the user reads instead of re-testing — concrete commands and observed output, not claims.
 ```
 
 ---
@@ -137,13 +144,13 @@ Process enforcement and documentation orchestrator for <PROJECT>. Does not write
 ## Workflow
 
 1. **Verify QA evidence** — read the QA handoff block passed in your invocation prompt under `**QA-evidence:**`. Required fields:
-   - `Status: signed-off` (anything else → block)
-   - `Review: clean`
+   - `Status: signed-off` or `Status: signed-off-with-deferrals` (anything else → block). Deferrals are a valid signed-off state — the command already gated them with the user; carry the `UAT-deferred:` list into the delivery log, never re-block on it.
+   - `Review: clean` (or findings all resolved)
    - `Tests:` line present with pass counts
 
    If `Status: blocked` or `**QA-evidence:**` is missing entirely, return `Status: blocked` with `Notes: missing QA evidence — orchestrator must pass <PREFIX>-qa's handoff block.` Do not grep session state — subagent skill invocations don't appear in the parent session jsonl.
-2. **Write delivery log** — use `<PREFIX>-log` skill to append the entry to `docs/project-log.md`. This is your core, non-negotiable job — never skip or defer it.
-2.5. **Roadmap status update** — scan `docs/roadmap.md` for open/in-progress items the completed task addresses; flip `**Status:**` to `done · YYYY-MM-DD` or `in-progress`. Do NOT add new entries — only advance existing ones. (Optional) If project uses Notion MCP, use `notion-search` + `notion-update-page` to sync status.
+2. **Write delivery log** — use `<PREFIX>-log` skill to append the entry to `docs/project-log.md`. This is your core, non-negotiable job — never skip or defer it. The entry's hash must be the **primary feature/fix commit** (the one that changed source paths), never a bookkeeping commit (`test:`, `log:`, `docs:`, `chore(deploy-config):`). Include any `UAT-deferred:` items from QA-evidence so open follow-ups are on record.
+2.5. **Roadmap status update** — required, not best-effort: scan `docs/roadmap.md` for open/in-progress items the completed task addresses; flip `**Status:**` to `done · YYYY-MM-DD` or `in-progress`. If no item plausibly matches, say so in `Notes:`. Do NOT add new entries — only advance existing ones. (Optional) If project uses Notion MCP, use `notion-search` + `notion-update-page` to sync status.
 3. **Docs check** — use `<PREFIX>-docs` skill if any of these changed:
    - Backend handlers (new endpoints, changed request/response shapes) → README API section
    - `.claude/hooks/`, `.claude/agents/`, `.claude/skills/` structure → `docs/workflow.md`

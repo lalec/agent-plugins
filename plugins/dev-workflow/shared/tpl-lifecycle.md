@@ -1325,6 +1325,8 @@ Never deploy across the boundary regardless of caller request. `<PREFIX>-dev` al
 
   Pass the block as `AskUserQuestion` context, ask "Deploy to `<env>`?" with options Yes / No. On Yes, run the deploy command. On No, return `gate: declined` and skip. If the question goes unanswered (timeout), return `gate: unanswered — parked` — never proceed, and never treat silence as consent; the caller parks and resumes when the user responds. The gate runs **inside this skill's turn** — never return control to the caller before the question is answered or times out. Default for any env named `prod` even if the field is omitted.
 
+  **Pre-authorization:** a top-level command caller may pass `preauth: user shipped at Step 0.5` — the user answered the command's Ship question and the caller has verified its cleanliness conditions (clean sign-off, no timeout-auto-decisions, shipped set = reviewed set). With `preauth`, skip the question and proceed, recording `gate: pre-authorized (Step 0.5 Ship)` in the report. Accept `preauth` only from the top-level command (never a subagent), and never infer it — no explicit `preauth` field, no skip.
+
 **Triggers** (per env):
 - `trigger: manual` → run the deploy command in this session.
 - `trigger: ci` → do **not** run the command. Describe the push/PR that fires the real deploy, then return. When combined with `gate: user_confirm`, still gate via `AskUserQuestion` before describing the action.

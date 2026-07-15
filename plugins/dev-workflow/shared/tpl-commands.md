@@ -15,7 +15,7 @@ description: Implement a feature through the full <PREFIX>-dev → <PREFIX>-qa �
 
 # Feature Implementation
 
-**Usage:** `/code <description>` — append `--prod` to deploy to prod after QA sign-off (default ends at UAT, no prod deploy); append `--no-push` to skip the close-out push.
+**Usage:** `/code <description>` — the Step 0.5 gate asks whether to ship after sign-off. `--prod` pre-answers Ship; `--no-push` pre-answers Hold and skips the close-out push.
 
 **Examples:**
 - `/code add export to CSV button on assessment list`
@@ -25,12 +25,12 @@ description: Implement a feature through the full <PREFIX>-dev → <PREFIX>-qa �
 ## Gate policy (governs every AskUserQuestion in this command)
 
 If a question times out unanswered, split by risk:
-- **Reversible** (confirm, verification capture, regression flag, UAT-defer): proceed with the recommended default and label every downstream record `auto-selected on timeout — not user-confirmed` (handoffs, delivery log, final report). **Never present a timeout as user consent** — not to a subagent, not in a log, not in the report.
-- **Irreversible** (prod deploy; any push that fires a prod CI deploy): **park** — do not proceed and do not decide. End the turn stating exactly what awaits confirmation and how to resume; on the user's next message, resume from the parked step.
+- **Reversible** (confirm, verification capture, regression flag, ship choice, UAT-defer): proceed with the recommended default and label every downstream record `auto-selected on timeout — not user-confirmed` (handoffs, delivery log, final report). **Never present a timeout as user consent** — not to a subagent, not in a log, not in the report.
+- **Irreversible** (prod deploy; any push that fires a prod CI deploy): **park** — do not proceed and do not decide. End the turn stating exactly what awaits confirmation and how to resume; on the user's next message, resume from the parked step. Park only after actually asking at the moment of the irreversible action — never skip the ask because an earlier, unrelated gate timed out; the user may have returned.
 
 ## Step 0 — Flags + entry hygiene
 
-**Flag parse (first):** if `$ARGUMENTS` contains `--prod`, set `prod_deploy = true`; if it contains `--no-push`, set `no_push = true`. Strip both flags from the task description used in every step below. Default: `prod_deploy = false` (pipeline ends at UAT), `no_push = false`.
+**Flag parse (first):** if `$ARGUMENTS` contains `--prod`, set `ship_mode = prod`; if it contains `--no-push`, set `ship_mode = hold` and `no_push = true`. Strip both flags from the task description used in every step below. If neither flag is present, `ship_mode` is decided by the Ship question in the Step 0.5 gate.
 
 **Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it in the close-out step — the pre-handoff gate blocks the qa spawn on any dirty tree, so deferring the stash just moves the failure mid-pipeline. If the WIP overlaps paths this task will touch, ask the user how to proceed instead of stashing.
 
@@ -66,17 +66,25 @@ Then ask everything in **one AskUserQuestion call** (up to three questions) — 
    - options:
      - label: "No (Recommended)" — description: "Smoke + this task's verifications + prior verifications for the same files"
      - label: "Yes" — description: "Everything above + the full regression suite (all prior verifications + broad checks)"
+4. **Ship** (omit when `--prod` or `--no-push` already decided it):
+   - question: "Ship after QA sign-off?"
+   - header: "Ship"
+   - options:
+     - label: "Ship (Recommended)" — description: "After a clean sign-off, deploy/push to prod at close-out without asking again. On projects where push fires prod CI, shipping = prod deploy."
+     - label: "Hold at UAT" — description: "End committed but not pushed/deployed; ship later with --prod or by asking"
 
 Branch on the answers:
 - Confirm = **No, cancel** → tell the user it was cancelled and stop (discard the other answers).
 - Confirm = **Other / custom input** → incorporate the comment, restate the updated description, and re-ask the full gate once.
-- Timeout → Gate policy: reversible — proceed on the recommended defaults, labeled `auto-selected on timeout — not user-confirmed`.
+- Timeout → Gate policy: reversible — proceed on the recommended defaults, **except Ship, whose timeout default is always Hold** (shipping needs a real answer; holding is free to reverse), labeled `auto-selected on timeout — not user-confirmed`.
 
 For every Verify option the user selects (and any "Other" text), take the one-line verification and its `type` — already known for the proposed ones; for a custom line, infer `type` from the wording (**UX** (frontend only) · **Integration** (backend: endpoint or stored data) · **E2E** (a UI action with a backend effect)). Hold the `{assert, type}` pairs in context — **do not write or commit anything yet**. If only "Nothing to verify" is chosen (or nothing is selected), capture nothing and continue.
 
 **Honor the user's answer.** A free-text reply that declines automated verification ("I'll verify live", "I'll test by eye") is a decision: record this task as `UAT-only`, capture nothing, and skip Step 1.5 — do not persist synthesized entries against the user's stated intent.
 
 Capture the Regression answer as `regression_mode` = `smart` (No) or `full` (Yes). This answer **binds test scope downstream**: it is forwarded to `<PREFIX>-qa` and `<PREFIX>-test`, and neither may widen it (see `<PREFIX>-test` Rules — a full unit-suite re-run is not a permissible "superset").
+
+Capture the Ship answer as `ship_mode` = `prod` (Ship) or `hold`. A user-answered **Ship** is standing consent for the close-out — but it is conditional, and the conditions are verified mechanically at Step 4: it collapses back to a fresh ask if the run wasn't clean.
 
 ## Step 1 — Implement (<PREFIX>-dev)
 
@@ -149,15 +157,22 @@ Task:
     **QA-evidence:**
     <paste the full ## Handoff block returned by <PREFIX>-qa, verbatim>
 
-## Step 4 — Deploy to prod (only if `--prod`)
+## Step 4 — Deploy to prod (only if `ship_mode: prod`)
 
-Run only if `prod_deploy` was set in Step 0. After <PREFIX>-pm has logged, invoke the `<PREFIX>-deploy` skill **here at the top level** (not via a subagent) with `target=prod`. It runs the fill-in pass, builds the gate context, and asks via `AskUserQuestion` — which works because this is the top level. Running after sign-off and any retest loop means it deploys the final, signed-off code. If no `prod` env is declared or the user declines, report that and finish at UAT. If the gate goes unanswered, the skill returns `gate: unanswered — parked` — park per the Gate policy; never decide a prod deploy on the user's behalf.
+Run only if `ship_mode = prod` (from the `--prod` flag or the Step 0.5 Ship answer). After <PREFIX>-pm has logged, invoke the `<PREFIX>-deploy` skill **here at the top level** (not via a subagent) with `target=prod`. It runs the fill-in pass, builds the gate context, and gates via `AskUserQuestion` — which works because this is the top level. Running after sign-off and any retest loop means it deploys the final, signed-off code.
+
+**Pre-authorization.** If the user answered **Ship** at the Step 0.5 gate (not a timeout default), pass `preauth: user shipped at Step 0.5` to the skill **only when all of these hold** — verified now, not assumed:
+- QA status is `signed-off`, or `signed-off-with-deferrals` where the deferral was **user-confirmed** (not auto-accepted on timeout);
+- no gate in this run was auto-decided on timeout;
+- the commits being shipped are exactly the reviewed set (nothing landed after QA's sign-off except the capture/log commits).
+
+When any condition fails — or Ship was a timeout default — the skill gates normally (ask; on no answer it returns `gate: unanswered — parked` → park per the Gate policy; never decide a prod deploy on the user's behalf). If no `prod` env is declared or the user declines, report that and finish at UAT.
 
 ## Step 5 — Close out: push + verified scorecard
 
-Runs on every completion, with or without `--prod`.
+Runs on every completion, regardless of `ship_mode`.
 
-**(a) Push.** Skip if `no_push` or no remote is configured. Resolve the push policy via the `<PREFIX>-deploy` skill § Push policy: if pushing the current branch fires a prod CI deploy, pushing IS shipping — push only if Step 4 ran and its gate approved; otherwise this is an irreversible gate (ask, park on timeout). If push does not trigger prod, push now.
+**(a) Push.** Skip if `no_push` or no remote is configured. Resolve the push policy via the `<PREFIX>-deploy` skill § Push policy: if pushing the current branch fires a prod CI deploy, pushing IS shipping — push only if Step 4 ran and its gate (or pre-authorization) approved; otherwise ask now (irreversible gate — ask at this moment even if an earlier gate timed out; park only if this ask goes unanswered). If push does not trigger prod, push now.
 
 **(b) Scorecard.** Verify each fact against reality — never echo handoff claims:
 
@@ -180,7 +195,7 @@ Report, in this order:
 3. Anything auto-decided on a gate timeout, explicitly labeled.
 4. UAT-deferred verifications as explicit follow-ups.
 5. If a serve-env was started in Step 1.7: it is still running, and where (`<url>`).
-6. If `--prod`: "deployed to prod" only after `<PREFIX>-deploy` confirmed CI completion + health check; otherwise: "ready for UAT — run `/code <task> --prod` (or invoke <PREFIX>-deploy) to ship."
+6. If shipped (`ship_mode: prod`): "deployed to prod" only after `<PREFIX>-deploy` confirmed CI completion + health check. If held (`ship_mode: hold`): "held at UAT per your Ship answer — say ship (or re-run with `--prod`) when ready." If parked: state exactly what awaits your confirmation.
 7. If this is the 2nd+ pipeline run in this session, suggest closing out and starting a fresh session — long sessions degrade quality.
 ```
 
@@ -195,7 +210,7 @@ description: Investigate and fix a bug or performance issue through <PREFIX>-deb
 
 # Bug Fix
 
-**Usage:** `/fix <description>` — append `--prod` to deploy to prod after QA sign-off (default ends at UAT, no prod deploy); append `--no-push` to skip the close-out push.
+**Usage:** `/fix <description>` — the Step 0.5 gate asks whether to ship after sign-off. `--prod` pre-answers Ship; `--no-push` pre-answers Hold and skips the close-out push.
 
 **Examples:**
 - `/fix pipeline table takes too long to load`
@@ -205,12 +220,12 @@ description: Investigate and fix a bug or performance issue through <PREFIX>-deb
 ## Gate policy (governs every AskUserQuestion in this command)
 
 If a question times out unanswered, split by risk:
-- **Reversible** (confirm, verification capture, regression flag, UAT-defer): proceed with the recommended default and label every downstream record `auto-selected on timeout — not user-confirmed` (handoffs, delivery log, final report). **Never present a timeout as user consent** — not to a subagent, not in a log, not in the report.
-- **Irreversible** (prod deploy; any push that fires a prod CI deploy): **park** — do not proceed and do not decide. End the turn stating exactly what awaits confirmation and how to resume; on the user's next message, resume from the parked step.
+- **Reversible** (confirm, verification capture, regression flag, ship choice, UAT-defer): proceed with the recommended default and label every downstream record `auto-selected on timeout — not user-confirmed` (handoffs, delivery log, final report). **Never present a timeout as user consent** — not to a subagent, not in a log, not in the report.
+- **Irreversible** (prod deploy; any push that fires a prod CI deploy): **park** — do not proceed and do not decide. End the turn stating exactly what awaits confirmation and how to resume; on the user's next message, resume from the parked step. Park only after actually asking at the moment of the irreversible action — never skip the ask because an earlier, unrelated gate timed out; the user may have returned.
 
 ## Step 0 — Flags + entry hygiene
 
-**Flag parse (first):** if `$ARGUMENTS` contains `--prod`, set `prod_deploy = true`; if it contains `--no-push`, set `no_push = true`. Strip both flags from the description used in every step below. Default: `prod_deploy = false` (pipeline ends at UAT), `no_push = false`.
+**Flag parse (first):** if `$ARGUMENTS` contains `--prod`, set `ship_mode = prod`; if it contains `--no-push`, set `ship_mode = hold` and `no_push = true`. Strip both flags from the description used in every step below. If neither flag is present, `ship_mode` is decided by the Ship question in the Step 0.5 gate.
 
 **Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it in the close-out step — the pre-handoff gate blocks the qa spawn on any dirty tree, so deferring the stash just moves the failure mid-pipeline. If the WIP overlaps paths this task will touch, ask the user how to proceed instead of stashing.
 
@@ -246,17 +261,25 @@ Then ask everything in **one AskUserQuestion call** (up to three questions) — 
    - options:
      - label: "No (Recommended)" — description: "Smoke + this task's verifications + prior verifications for the same files"
      - label: "Yes" — description: "Everything above + the full regression suite (all prior verifications + broad checks)"
+4. **Ship** (omit when `--prod` or `--no-push` already decided it):
+   - question: "Ship after QA sign-off?"
+   - header: "Ship"
+   - options:
+     - label: "Ship (Recommended)" — description: "After a clean sign-off, deploy/push to prod at close-out without asking again. On projects where push fires prod CI, shipping = prod deploy."
+     - label: "Hold at UAT" — description: "End committed but not pushed/deployed; ship later with --prod or by asking"
 
 Branch on the answers:
 - Confirm = **No, cancel** → tell the user the fix was cancelled and stop (discard the other answers).
 - Confirm = **Other / custom input** → incorporate the comment, restate the updated description, and re-ask the full gate once.
-- Timeout → Gate policy: reversible — proceed on the recommended defaults, labeled `auto-selected on timeout — not user-confirmed`.
+- Timeout → Gate policy: reversible — proceed on the recommended defaults, **except Ship, whose timeout default is always Hold** (shipping needs a real answer; holding is free to reverse), labeled `auto-selected on timeout — not user-confirmed`.
 
 For every Verify option the user selects (and any "Other" text), take the one-line verification and its `type` — already known for the proposed ones; for a custom line, infer `type` from the wording (**UX** (frontend only) · **Integration** (backend: endpoint or stored data) · **E2E** (a UI action with a backend effect)). Hold the `{assert, type}` pairs in context — **do not write or commit anything yet**. If only "Nothing to verify" is chosen (or nothing is selected), capture nothing and continue.
 
 **Honor the user's answer.** A free-text reply that declines automated verification ("I'll verify live", "I'll test by eye") is a decision: record this task as `UAT-only`, capture nothing, and skip Step 2.5 — do not persist synthesized entries against the user's stated intent.
 
 Capture the Regression answer as `regression_mode` = `smart` (No) or `full` (Yes). This answer **binds test scope downstream**: it is forwarded to `<PREFIX>-qa` and `<PREFIX>-test`, and neither may widen it (see `<PREFIX>-test` Rules — a full unit-suite re-run is not a permissible "superset").
+
+Capture the Ship answer as `ship_mode` = `prod` (Ship) or `hold`. A user-answered **Ship** is standing consent for the close-out — but it is conditional, and the conditions are verified mechanically at Step 5: it collapses back to a fresh ask if the run wasn't clean.
 
 ## Step 1 — Investigate (<PREFIX>-debug)
 
@@ -346,15 +369,22 @@ Task:
     **QA-evidence:**
     <paste the full ## Handoff block returned by <PREFIX>-qa, verbatim>
 
-## Step 5 — Deploy to prod (only if `--prod`)
+## Step 5 — Deploy to prod (only if `ship_mode: prod`)
 
-Run only if `prod_deploy` was set in Step 0. After <PREFIX>-pm has logged, invoke the `<PREFIX>-deploy` skill **here at the top level** (not via a subagent) with `target=prod`. It runs the fill-in pass, builds the gate context, and asks via `AskUserQuestion` — which works because this is the top level. Running after sign-off and any retest loop means it deploys the final, signed-off code. If no `prod` env is declared or the user declines, report that and finish at UAT. If the gate goes unanswered, the skill returns `gate: unanswered — parked` — park per the Gate policy; never decide a prod deploy on the user's behalf.
+Run only if `ship_mode = prod` (from the `--prod` flag or the Step 0.5 Ship answer). After <PREFIX>-pm has logged, invoke the `<PREFIX>-deploy` skill **here at the top level** (not via a subagent) with `target=prod`. It runs the fill-in pass, builds the gate context, and gates via `AskUserQuestion` — which works because this is the top level. Running after sign-off and any retest loop means it deploys the final, signed-off code.
+
+**Pre-authorization.** If the user answered **Ship** at the Step 0.5 gate (not a timeout default), pass `preauth: user shipped at Step 0.5` to the skill **only when all of these hold** — verified now, not assumed:
+- QA status is `signed-off`, or `signed-off-with-deferrals` where the deferral was **user-confirmed** (not auto-accepted on timeout);
+- no gate in this run was auto-decided on timeout;
+- the commits being shipped are exactly the reviewed set (nothing landed after QA's sign-off except the capture/log commits).
+
+When any condition fails — or Ship was a timeout default — the skill gates normally (ask; on no answer it returns `gate: unanswered — parked` → park per the Gate policy; never decide a prod deploy on the user's behalf). If no `prod` env is declared or the user declines, report that and finish at UAT.
 
 ## Step 6 — Close out: push + verified scorecard
 
-Runs on every completion, with or without `--prod`.
+Runs on every completion, regardless of `ship_mode`.
 
-**(a) Push.** Skip if `no_push` or no remote is configured. Resolve the push policy via the `<PREFIX>-deploy` skill § Push policy: if pushing the current branch fires a prod CI deploy, pushing IS shipping — push only if Step 5 ran and its gate approved; otherwise this is an irreversible gate (ask, park on timeout). If push does not trigger prod, push now.
+**(a) Push.** Skip if `no_push` or no remote is configured. Resolve the push policy via the `<PREFIX>-deploy` skill § Push policy: if pushing the current branch fires a prod CI deploy, pushing IS shipping — push only if Step 5 ran and its gate (or pre-authorization) approved; otherwise ask now (irreversible gate — ask at this moment even if an earlier gate timed out; park only if this ask goes unanswered). If push does not trigger prod, push now.
 
 **(b) Scorecard.** Verify each fact against reality — never echo handoff claims:
 
@@ -377,7 +407,7 @@ Report, in this order:
 3. Anything auto-decided on a gate timeout, explicitly labeled.
 4. UAT-deferred verifications as explicit follow-ups.
 5. If a serve-env was started in Step 2.7: it is still running, and where (`<url>`).
-6. If `--prod`: "deployed to prod" only after `<PREFIX>-deploy` confirmed CI completion + health check; otherwise: "ready for UAT — run `/fix <task> --prod` (or invoke <PREFIX>-deploy) to ship."
+6. If shipped (`ship_mode: prod`): "deployed to prod" only after `<PREFIX>-deploy` confirmed CI completion + health check. If held (`ship_mode: hold`): "held at UAT per your Ship answer — say ship (or re-run with `--prod`) when ready." If parked: state exactly what awaits your confirmation.
 7. If this is the 2nd+ pipeline run in this session, suggest closing out and starting a fresh session — long sessions degrade quality.
 ```
 

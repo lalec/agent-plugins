@@ -1397,6 +1397,7 @@ Full broad suite — `references/test-commands.md § Regression` (hand-authored)
 ## Rules
 
 - Run tests after every significant change before closing the task.
+- **Never re-run domain unit/lint suites** — those are `<PREFIX>-dev`'s Quality Checklist gates, already run before handoff. This skill's tiers are Smoke, Functional Feature, and Regression only; a full unit suite is not an acceptable "superset" substitute for the selected tier set — it re-proves what dev proved and overrides the caller's `regression_mode`.
 - Never start automated actions against live targets without explicit user confirmation.
 - Use representative placeholder inputs for smoke tests; live/real targets require explicit opt-in.
 - In the `/code`/`/fix` pipeline this skill runs inside the `<PREFIX>-qa` subagent and **must not** ask the user interactively — resolve each verification deterministically; if a target cannot be resolved, report that verification as blocked rather than prompting. Interactive disambiguation is allowed only when this skill is invoked directly at top level (see `references/custom-tests.md`).

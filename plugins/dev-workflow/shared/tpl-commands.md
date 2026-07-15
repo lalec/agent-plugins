@@ -28,59 +28,55 @@ If a question times out unanswered, split by risk:
 - **Reversible** (confirm, verification capture, regression flag, UAT-defer): proceed with the recommended default and label every downstream record `auto-selected on timeout — not user-confirmed` (handoffs, delivery log, final report). **Never present a timeout as user consent** — not to a subagent, not in a log, not in the report.
 - **Irreversible** (prod deploy; any push that fires a prod CI deploy): **park** — do not proceed and do not decide. End the turn stating exactly what awaits confirmation and how to resume; on the user's next message, resume from the parked step.
 
-## Step 0 — Confirm
+## Step 0 — Flags + entry hygiene
 
 **Flag parse (first):** if `$ARGUMENTS` contains `--prod`, set `prod_deploy = true`; if it contains `--no-push`, set `no_push = true`. Strip both flags from the task description used in every step below. Default: `prod_deploy = false` (pipeline ends at UAT), `no_push = false`.
 
-**Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, tell the user what pre-existing WIP exists and that it stays excluded (dev stages by name); ask only if the WIP overlaps paths this task will touch.
+**Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it in the close-out step — the pre-handoff gate blocks the qa spawn on any dirty tree, so deferring the stash just moves the failure mid-pipeline. If the WIP overlaps paths this task will touch, ask the user how to proceed instead of stashing.
 
-**Plan shortcut:** if the session contains a just-approved plan covering this task, skip the confirmation question — plan approval was the confirmation. Continue to Step 0.5.
+**Plan shortcut:** if the session contains a just-approved plan covering this task, plan approval was the confirmation — omit the Confirm question from the Step 0.5 gate.
 
-Otherwise use the AskUserQuestion tool with a single question:
-
-- question: "Ready to implement: $ARGUMENTS?"
-- header: "Confirm"
-- options:
-  - label: "Yes, proceed (Recommended)" — description: "Start the full <PREFIX>-dev → <PREFIX>-qa → <PREFIX>-pm pipeline"
-  - label: "No, cancel" — description: "Stop here, do not implement"
-  - label: "Other" — description: "Let the user refine the description"
-
-Then:
-- **Yes** — continue to Step 0.5
-- **No** — tell the user the feature was cancelled and stop
-- **Other / custom input** — incorporate the comment, restate the updated description, and ask again
-
-## Step 0.5 — Capture verifications + regression flag
+## Step 0.5 — Single gate: confirm + capture verifications + regression flag
 
 **Read-free step — do NOT read `custom-tests.yaml`, `test-commands.md`, or any reference file here.**
 
-**(a) Capture verifications.** Produce 2–3 **candidate verifications** — plain one-line statements of what must be true after the change — from whichever source applies:
+First produce 2–3 **candidate verifications** — plain one-line statements of what must be true after the change — from whichever source applies:
 - **A plan exists** (the current session has a just-approved plan with a *Verification* / *Acceptance* section): translate each of its lines into a one-line what-must-hold assertion and use those as the candidates. A plan's lines describe *how it's proven*; restate each as *what must hold* so it reads as a regression invariant.
-- **No plan** (e.g. `/code` invoked first thing in a fresh context): infer the candidates from the task (`$ARGUMENTS`, with any `--prod` already stripped) — exactly as before. This is the default fallback whenever no plan is in context.
+- **No plan** (e.g. `/code` invoked first thing in a fresh context): infer the candidates from the task (`$ARGUMENTS`, with any flags already stripped) — the default fallback whenever no plan is in context.
 
-Propose them with the AskUserQuestion tool (the plan, if any, is already in context — this stays read-free, do not read any reference file):
+Then ask everything in **one AskUserQuestion call** (up to three questions) — one gate interaction instead of three sequential ones, so an AFK timeout costs 60 seconds once, not three times:
 
-- question: "What should be verified before this ships?"
-- header: "Verify"
-- multiSelect: true
-- options:
-  - one per inferred candidate — label: a short tag (the endpoint/element + expected result); description: the full one-line verification followed by its type (`UX` / `Integration` / `E2E`)
-  - a final option — label: "Nothing to verify"; description: "Refactor / docs / no behavior change"
-- The automatic "Other" field lets the user type their own one-line verification.
+1. **Confirm** (omit this question when the plan shortcut applies):
+   - question: "Ready to implement: $ARGUMENTS?"
+   - header: "Confirm"
+   - options:
+     - label: "Yes, proceed (Recommended)" — description: "Start the full <PREFIX>-dev → <PREFIX>-qa → <PREFIX>-pm pipeline"
+     - label: "No, cancel" — description: "Stop here, do not implement"
+2. **Verify**:
+   - question: "What should be verified before this ships?"
+   - header: "Verify"
+   - multiSelect: true
+   - options:
+     - one per inferred candidate — label: a short tag (the endpoint/element + expected result); description: the full one-line verification followed by its type (`UX` / `Integration` / `E2E`)
+     - a final option — label: "Nothing to verify"; description: "Refactor / docs / no behavior change"
+   - The automatic "Other" field lets the user type their own one-line verification.
+3. **Regression**:
+   - question: "Run full regression after dev as well?"
+   - header: "Regression"
+   - options:
+     - label: "No (Recommended)" — description: "Smoke + this task's verifications + prior verifications for the same files"
+     - label: "Yes" — description: "Everything above + the full regression suite (all prior verifications + broad checks)"
 
-For every option the user selects (and any "Other" text), take the one-line verification and its `type` — already known for the proposed ones; for a custom line, infer `type` from the wording (**UX** (frontend only) · **Integration** (backend: endpoint or stored data) · **E2E** (a UI action with a backend effect)). Hold the `{assert, type}` pairs in context — **do not write or commit anything yet**. If only "Nothing to verify" is chosen (or nothing is selected), capture nothing and continue.
+Branch on the answers:
+- Confirm = **No, cancel** → tell the user it was cancelled and stop (discard the other answers).
+- Confirm = **Other / custom input** → incorporate the comment, restate the updated description, and re-ask the full gate once.
+- Timeout → Gate policy: reversible — proceed on the recommended defaults, labeled `auto-selected on timeout — not user-confirmed`.
+
+For every Verify option the user selects (and any "Other" text), take the one-line verification and its `type` — already known for the proposed ones; for a custom line, infer `type` from the wording (**UX** (frontend only) · **Integration** (backend: endpoint or stored data) · **E2E** (a UI action with a backend effect)). Hold the `{assert, type}` pairs in context — **do not write or commit anything yet**. If only "Nothing to verify" is chosen (or nothing is selected), capture nothing and continue.
 
 **Honor the user's answer.** A free-text reply that declines automated verification ("I'll verify live", "I'll test by eye") is a decision: record this task as `UAT-only`, capture nothing, and skip Step 1.5 — do not persist synthesized entries against the user's stated intent.
 
-**(b) Regression flag.** Use the AskUserQuestion tool:
-
-- question: "Run full regression after dev as well?"
-- header: "Regression"
-- options:
-  - label: "No (Recommended)" — description: "Smoke + this task's verifications + prior verifications for the same files"
-  - label: "Yes" — description: "Everything above + the full regression suite (all prior verifications + broad checks)"
-
-Capture the answer as a bare boolean `regression_mode` = `smart` (No) or `full` (Yes).
+Capture the Regression answer as `regression_mode` = `smart` (No) or `full` (Yes). This answer **binds test scope downstream**: it is forwarded to `<PREFIX>-qa` and `<PREFIX>-test`, and neither may widen it (see `<PREFIX>-test` Rules — a full unit-suite re-run is not a permissible "superset").
 
 ## Step 1 — Implement (<PREFIX>-dev)
 
@@ -174,6 +170,8 @@ Runs on every completion, with or without `--prod`.
 | Docs | pm handoff `Docs:` field; spot-check the file if `updated` |
 | Ref sync | `Reference Sync:` fields from all three handoffs |
 
+**(c) Restore stashed WIP.** If pre-existing WIP was stashed at Step 0, `git stash pop` it now and confirm it restored cleanly; report any conflict instead of resolving it silently.
+
 ## Done
 
 Report, in this order:
@@ -210,59 +208,55 @@ If a question times out unanswered, split by risk:
 - **Reversible** (confirm, verification capture, regression flag, UAT-defer): proceed with the recommended default and label every downstream record `auto-selected on timeout — not user-confirmed` (handoffs, delivery log, final report). **Never present a timeout as user consent** — not to a subagent, not in a log, not in the report.
 - **Irreversible** (prod deploy; any push that fires a prod CI deploy): **park** — do not proceed and do not decide. End the turn stating exactly what awaits confirmation and how to resume; on the user's next message, resume from the parked step.
 
-## Step 0 — Confirm
+## Step 0 — Flags + entry hygiene
 
 **Flag parse (first):** if `$ARGUMENTS` contains `--prod`, set `prod_deploy = true`; if it contains `--no-push`, set `no_push = true`. Strip both flags from the description used in every step below. Default: `prod_deploy = false` (pipeline ends at UAT), `no_push = false`.
 
-**Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, tell the user what pre-existing WIP exists and that it stays excluded (dev stages by name); ask only if the WIP overlaps paths this task will touch.
+**Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it in the close-out step — the pre-handoff gate blocks the qa spawn on any dirty tree, so deferring the stash just moves the failure mid-pipeline. If the WIP overlaps paths this task will touch, ask the user how to proceed instead of stashing.
 
-**Plan shortcut:** if the session contains a just-approved plan covering this fix, skip the confirmation question — plan approval was the confirmation. Continue to Step 0.5.
+**Plan shortcut:** if the session contains a just-approved plan covering this fix, plan approval was the confirmation — omit the Confirm question from the Step 0.5 gate.
 
-Otherwise use the AskUserQuestion tool with a single question:
-
-- question: "Ready to investigate and fix: $ARGUMENTS?"
-- header: "Confirm"
-- options:
-  - label: "Yes, proceed (Recommended)" — description: "Run <PREFIX>-debug root cause analysis, then fix through the full pipeline"
-  - label: "No, cancel" — description: "Stop here, do not investigate"
-  - label: "Other" — description: "Let the user refine the description"
-
-Then:
-- **Yes** — continue to Step 0.5
-- **No** — tell the user the fix was cancelled and stop
-- **Other / custom input** — incorporate the comment, restate the updated description, and ask again
-
-## Step 0.5 — Capture verifications + regression flag
+## Step 0.5 — Single gate: confirm + capture verifications + regression flag
 
 **Read-free step — do NOT read `custom-tests.yaml`, `test-commands.md`, or any reference file here.**
 
-**(a) Capture verifications.** Produce 2–3 **candidate verifications** — plain one-line statements of what must be true after the change — from whichever source applies:
+First produce 2–3 **candidate verifications** — plain one-line statements of what must be true after the change — from whichever source applies:
 - **A plan exists** (the current session has a just-approved plan with a *Verification* / *Acceptance* section): translate each of its lines into a one-line what-must-hold assertion and use those as the candidates. A plan's lines describe *how it's proven*; restate each as *what must hold* so it reads as a regression invariant.
-- **No plan** (e.g. `/code` invoked first thing in a fresh context): infer the candidates from the task (`$ARGUMENTS`, with any `--prod` already stripped) — exactly as before. This is the default fallback whenever no plan is in context.
+- **No plan** (e.g. `/fix` invoked first thing in a fresh context): infer the candidates from the task (`$ARGUMENTS`, with any flags already stripped) — the default fallback whenever no plan is in context. (A bug's verification becomes its never-regress-again invariant.)
 
-Propose them with the AskUserQuestion tool (the plan, if any, is already in context — this stays read-free, do not read any reference file):
+Then ask everything in **one AskUserQuestion call** (up to three questions) — one gate interaction instead of three sequential ones, so an AFK timeout costs 60 seconds once, not three times:
 
-- question: "What should be verified before this ships?"
-- header: "Verify"
-- multiSelect: true
-- options:
-  - one per inferred candidate — label: a short tag (the endpoint/element + expected result); description: the full one-line verification followed by its type (`UX` / `Integration` / `E2E`)
-  - a final option — label: "Nothing to verify"; description: "Refactor / docs / no behavior change"
-- The automatic "Other" field lets the user type their own one-line verification.
+1. **Confirm** (omit this question when the plan shortcut applies):
+   - question: "Ready to investigate and fix: $ARGUMENTS?"
+   - header: "Confirm"
+   - options:
+     - label: "Yes, proceed (Recommended)" — description: "Run <PREFIX>-debug root cause analysis, then fix through the full pipeline"
+     - label: "No, cancel" — description: "Stop here, do not investigate"
+2. **Verify**:
+   - question: "What should be verified before this ships?"
+   - header: "Verify"
+   - multiSelect: true
+   - options:
+     - one per inferred candidate — label: a short tag (the endpoint/element + expected result); description: the full one-line verification followed by its type (`UX` / `Integration` / `E2E`)
+     - a final option — label: "Nothing to verify"; description: "Refactor / docs / no behavior change"
+   - The automatic "Other" field lets the user type their own one-line verification.
+3. **Regression**:
+   - question: "Run full regression after dev as well?"
+   - header: "Regression"
+   - options:
+     - label: "No (Recommended)" — description: "Smoke + this task's verifications + prior verifications for the same files"
+     - label: "Yes" — description: "Everything above + the full regression suite (all prior verifications + broad checks)"
 
-For every option the user selects (and any "Other" text), take the one-line verification and its `type` — already known for the proposed ones; for a custom line, infer `type` from the wording (**UX** (frontend only) · **Integration** (backend: endpoint or stored data) · **E2E** (a UI action with a backend effect)). Hold the `{assert, type}` pairs in context — **do not write or commit anything yet**. If only "Nothing to verify" is chosen (or nothing is selected), capture nothing and continue. (A bug's verification becomes its never-regress-again invariant.)
+Branch on the answers:
+- Confirm = **No, cancel** → tell the user the fix was cancelled and stop (discard the other answers).
+- Confirm = **Other / custom input** → incorporate the comment, restate the updated description, and re-ask the full gate once.
+- Timeout → Gate policy: reversible — proceed on the recommended defaults, labeled `auto-selected on timeout — not user-confirmed`.
+
+For every Verify option the user selects (and any "Other" text), take the one-line verification and its `type` — already known for the proposed ones; for a custom line, infer `type` from the wording (**UX** (frontend only) · **Integration** (backend: endpoint or stored data) · **E2E** (a UI action with a backend effect)). Hold the `{assert, type}` pairs in context — **do not write or commit anything yet**. If only "Nothing to verify" is chosen (or nothing is selected), capture nothing and continue.
 
 **Honor the user's answer.** A free-text reply that declines automated verification ("I'll verify live", "I'll test by eye") is a decision: record this task as `UAT-only`, capture nothing, and skip Step 2.5 — do not persist synthesized entries against the user's stated intent.
 
-**(b) Regression flag.** Use the AskUserQuestion tool:
-
-- question: "Run full regression after dev as well?"
-- header: "Regression"
-- options:
-  - label: "No (Recommended)" — description: "Smoke + this task's verifications + prior verifications for the same files"
-  - label: "Yes" — description: "Everything above + the full regression suite (all prior verifications + broad checks)"
-
-Capture the answer as a bare boolean `regression_mode` = `smart` (No) or `full` (Yes).
+Capture the Regression answer as `regression_mode` = `smart` (No) or `full` (Yes). This answer **binds test scope downstream**: it is forwarded to `<PREFIX>-qa` and `<PREFIX>-test`, and neither may widen it (see `<PREFIX>-test` Rules — a full unit-suite re-run is not a permissible "superset").
 
 ## Step 1 — Investigate (<PREFIX>-debug)
 
@@ -372,6 +366,8 @@ Runs on every completion, with or without `--prod`.
 | Logged | new entry present at top of `docs/project-log.md` (grep the title) |
 | Docs | pm handoff `Docs:` field; spot-check the file if `updated` |
 | Ref sync | `Reference Sync:` fields from all three handoffs |
+
+**(c) Restore stashed WIP.** If pre-existing WIP was stashed at Step 0, `git stash pop` it now and confirm it restored cleanly; report any conflict instead of resolving it silently.
 
 ## Done
 

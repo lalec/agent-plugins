@@ -48,7 +48,7 @@ For Frontend skills with the Visual Decisions block: this Preconditions rule is 
 <DESIGN_DELEGATION>
 ## Quality Checklist
 
-Run before proceeding to deploy. Every command here must be **non-interactive** (`CI=1`, `--yes`/`--no-input`, explicit timeout) — an interactive prompt inside a subagent stalls the whole pipeline until a watchdog kills the agent.
+Run before proceeding to deploy. Every command here must be **non-interactive** (`CI=1`, `--yes`/`--no-input`, explicit timeout) — an interactive prompt inside a subagent stalls the whole pipeline until a watchdog kills the agent. A new or changed test file must also pass **standalone** (run just that file in a clean interpreter) — a test that only passes inside the full suite is order-dependent (leaked stubs, import-order luck) and ships a hidden defect for QA to trip over.
 
 <!-- Fill in: quality rules for this domain — e.g.
 - New module → new test file covering auth, not-found, error, and happy-path cases

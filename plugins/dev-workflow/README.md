@@ -23,7 +23,7 @@ A multi-agent delivery workflow for Claude Code. It runs your plan through a tea
 | `/revert` | Sanctioned rollback: `git revert` (never reset), scoped re-verification, and a logged reversal. |
 | `/design` | Generate 2–3 HTML variants, open them in the browser, route the winner to `/code` *(if a design skill is present)*. |
 | `/roadmap` | Rank open roadmap items by priority and pick the next thing to work on. |
-| `/wrap` | Close out ad-hoc work done outside `/code`/`/fix` — reviews the diff when source changed, then runs `myapp-log` + `myapp-docs` + `myapp-skill` reference sync. |
+| `/wrap` | Close out ad-hoc work done outside `/code`/`/fix` — reviews the diff when source changed, runs `myapp-log` + `myapp-docs` + `myapp-skill` reference sync, then pushes per the deploy skill's push policy with a verified scorecard (`--no-push` to skip). |
 | Living docs | `docs/roadmap.md` (open scope), `docs/project-log.md` (delivery history), `docs/workflow.md` (pipeline map) — all kept current by the agents. |
 
 ---

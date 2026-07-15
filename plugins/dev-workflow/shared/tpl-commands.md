@@ -570,7 +570,7 @@ description: Manually trigger post-change close-out — <PREFIX>-log + <PREFIX>-
 
 Close-out for changes made **outside** the normal `/code`/`/fix` pipeline — ad-hoc edits, direct data fixes, manual config changes, or any work where `<PREFIX>-pm` didn't run automatically. The `/code` and `/fix` pipelines run `<PREFIX>-pm` at the end; use `/wrap` only when they didn't.
 
-**Usage:** `/wrap <description of what changed>`
+**Usage:** `/wrap <description of what changed>` — append `--no-push` to skip the close-out push
 
 **Examples:**
 - `/wrap manually updated database row to fix corrupted state`
@@ -598,7 +598,11 @@ Use `<PREFIX>-skill` skill to run the reference sync check:
 
 Scope to affected skills only — do not run a full manifest audit unless something actually changed.
 
+## Step 4 — Push + scorecard
+
+Skip if `--no-push` was passed or no remote is configured. Resolve pushability via the `<PREFIX>-deploy` skill § Push policy: a push that fires a prod CI deploy is an irreversible gate (ask via AskUserQuestion; park on timeout — never push on silence); otherwise push now. Then verify against reality — never claims: committed (`git log --oneline -3`), pushed (`git rev-list --count @{upstream}..HEAD` → 0, or "not pushed — <reason>"), logged (entry at top of `docs/project-log.md`).
+
 ## Done
 
-Tell the user: "Wrapped. Log, docs, and skill references are up to date."
+Tell the user: "Wrapped. Log, docs, and skill references are up to date." — followed by the Step 4 scorecard (committed / pushed / logged, each with its evidence).
 ```

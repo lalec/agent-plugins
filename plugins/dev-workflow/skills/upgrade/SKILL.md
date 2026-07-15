@@ -128,7 +128,7 @@ Present to the user as a checklist before changing anything:
 - [ ] `.claude/commands/code.md` / `fix.md` lack any of: the "Gate policy" section (risk-split timeouts, never claim consent), `--no-push` flag, entry hygiene + plan shortcut in Step 0, the UAT-only intent rule in Step 0.5, the salvage protocol + no-top-level-edits rule, `stack:`-aware + freshness-aware ensure-stack, the `signed-off-with-deferrals` branch, `Feature commit:` + `UAT-deferred:` in the pm prompt, the "Close out: push + verified scorecard" step, or the evidence-first Done section
 - [ ] `.claude/commands/tweak.md` missing — the sanctioned iterate lane (top-level, inline-verified, batched close-out)
 - [ ] `.claude/commands/revert.md` missing — the sanctioned rollback (`git revert`, scoped re-verify, logged reversal)
-- [ ] `.claude/commands/wrap.md` lacks the conditional Step 0 review (ad-hoc source changes otherwise ship on self-review only)
+- [ ] `.claude/commands/wrap.md` lacks the conditional Step 0 review (ad-hoc source changes otherwise ship on self-review only) or the Step 4 push + scorecard (wrapped work otherwise accumulates unpushed commits)
 - [ ] `<PREFIX>-deploy/SKILL.md` lacks the `## Push policy` section, the `gate: unanswered — parked` timeout return, or the non-prod early exit
 - [ ] `<PREFIX>-test/references/custom-tests.md` lacks the **Freshness rule** (stale target = non-evidence) or the **Evidence trace** rule (per-verification command → observed → verdict lines feeding qa's `Evidence:` field)
 - [ ] `<PREFIX>-log/SKILL.md` Process picks `git log -1` blindly instead of the primary feature commit, or the entry format lacks the `UAT-deferred:` line
@@ -209,7 +209,7 @@ Each step is idempotent — re-running the upgrade is safe.
 - **Upgrade `<PREFIX>-pm.md` for deferrals + feature commit**: re-sync step 1 (accept both signed-off statuses), step 2 (feature-commit hash rule + `UAT-deferred:` carry), and step 2.5 (required roadmap advancement) from `../../shared/tpl-agents.md § tosk-pm`. Idempotent — skip if step 1 already contains `signed-off-with-deferrals`.
 - **Add the non-interactive rule to `<PREFIX>-dev.md` step 3** from `../../shared/tpl-agents.md § tosk-dev`. Idempotent — skip if step 3 already contains "non-interactively".
 - **Create `tweak.md` and `revert.md`** from `../../shared/tpl-commands.md § /tweak` and `§ /revert`, substituting `<PREFIX>`/`<PROJECT>`. Idempotent — skip each file that exists.
-- **Add the conditional Step 0 review to `wrap.md`** from `../../shared/tpl-commands.md § /wrap`. Idempotent — skip if wrap.md contains `## Step 0 — Review`.
+- **Re-sync `wrap.md`** from `../../shared/tpl-commands.md § /wrap`: the conditional Step 0 review, the `--no-push` flag, and the Step 4 push + scorecard. Idempotent — skip if wrap.md contains both `## Step 0 — Review` and `## Step 4 — Push + scorecard`.
 - **Add `## Push policy` + gate parking + non-prod early exit to `<PREFIX>-deploy/SKILL.md`** from `../../shared/tpl-lifecycle.md § tosk-deploy/SKILL.md`. Idempotent — skip if the file contains `## Push policy` and `gate: unanswered — parked`.
 - **Add the Freshness rule + Evidence trace to `<PREFIX>-test/references/custom-tests.md`** from `../../shared/tpl-lifecycle.md § tosk-test` (insert after the Running-stack rule). Idempotent — skip if the file contains "Freshness rule".
 - **Fix `<PREFIX>-log/SKILL.md` hash semantics**: re-sync Process steps 1–2, the entry format (`UAT-deferred:` line), field guidance, and Quality Checklist item 2 from `../../shared/tpl-lifecycle.md § tosk-log/SKILL.md`. Idempotent — skip if Process step 1 contains "primary feature/fix commit".
@@ -282,7 +282,7 @@ Run these verification checks on the upgrade-affected items:
 - `<PREFIX>-dev.md` step 3 contains "non-interactively"
 - `.claude/commands/code.md` and `fix.md` contain "Gate policy", "--no-push", "Salvage protocol", "Honor the user's answer", "signed-off-with-deferrals", "Feature commit:", and a "Close out: push + verified scorecard" step
 - `.claude/commands/tweak.md` and `revert.md` exist; `tweak.md` contains "batched close-out"; `revert.md` contains "git revert" and no `git reset`
-- `.claude/commands/wrap.md` contains a conditional `## Step 0 — Review`
+- `.claude/commands/wrap.md` contains a conditional `## Step 0 — Review` and a `## Step 4 — Push + scorecard`
 - `<PREFIX>-deploy/SKILL.md` contains `## Push policy`, `gate: unanswered — parked`, and the non-prod early exit
 - `<PREFIX>-test/references/custom-tests.md` contains "Freshness rule" and "Evidence trace"
 - `<PREFIX>-log/SKILL.md` Process step 1 contains "primary feature/fix commit"; entry format has the `UAT-deferred:` line

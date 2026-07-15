@@ -1236,11 +1236,11 @@ description: Visual authority for <PROJECT>. MUST be invoked before any color, g
 
 # <PREFIX>-design
 
-Visual authority for all <PROJECT> UI decisions. No other skill is permitted to invent visual values. Use `frontend-design` when executing design work.
+Visual authority for all <PROJECT> UI decisions. No other skill is permitted to invent visual values. Use `ui-ux-pro-max` when executing design work.
 
-> **Design skill:** This skill delegates execution to `frontend-design` by default. If you prefer a different design skill, replace `frontend-design` with your chosen skill name in the two lines above and below this note.
+> **Design skill:** This skill delegates execution to `ui-ux-pro-max` by default. If you prefer a different design skill, replace `ui-ux-pro-max` with your chosen skill name in the two lines above and below this note.
 
-When the user asks to explore design alternatives for a specific component, use `frontend-design` to generate variants — but constrain it to the <PROJECT> design system (palette, fonts, surface). Do not propose styles or palettes outside the existing system.
+When the user asks to explore design alternatives for a specific component, use `ui-ux-pro-max` to generate variants — but constrain it to the <PROJECT> design system (palette, fonts, surface). Do not propose styles or palettes outside the existing system.
 
 ## When this skill MUST be invoked
 

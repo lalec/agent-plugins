@@ -148,6 +148,7 @@ Present to the user as a checklist before changing anything:
 - [ ] `governed-paths.conf` `PATH_MAP` lacks the `custom-tests.yaml` EXEMPT entry — the Step 1.5 persist gets skill-gate-blocked on every `/code`/`/fix` run
 - [ ] `.claude/commands/code.md` / `fix.md` lack the Step 0.5 **Ship** question + `ship_mode` (on push-fires-prod-CI projects the pipeline otherwise always ends parked/held and nothing ever ships without a follow-up "please push"), or their prod step doesn't verify the pre-authorization conditions, or the Gate policy lacks the "ask at the moment of the irreversible action — never infer AFK from an earlier timeout" rule
 - [ ] `<PREFIX>-deploy/SKILL.md` gate lacks the **Pre-authorization** clause (`preauth` from the top-level command's Ship answer, verified conditions, `gate: pre-authorized` reporting)
+- [ ] `<PREFIX>-design/SKILL.md` still delegates to `frontend-design` — superseded by `ui-ux-pro-max` as the default design-execution skill (only flag when the delegation names `frontend-design`; a deliberately customized skill name is not a gap)
 
 ---
 
@@ -231,6 +232,7 @@ Each step is idempotent — re-running the upgrade is safe.
 - **Add the no-unit-suite-re-run rule to `<PREFIX>-test/SKILL.md` `## Rules`** from `../../shared/tpl-lifecycle.md § tosk-test`. Idempotent — skip if Rules already contains "Never re-run domain unit".
 - **Add the trust boundary to `<PREFIX>-qa.md` step 3** ("Verify outcomes, not environments" sentence) from `../../shared/tpl-agents.md § tosk-qa`. Idempotent — skip if step 3 already contains "Verify outcomes, not environments".
 - **Add the `custom-tests.yaml` EXEMPT entry to `governed-paths.conf`** (`'^\.claude/skills/<PREFIX>-test/references/custom-tests\.yaml$:EXEMPT'`, placed with the other EXEMPT entries before any self-ownership entry). Idempotent — skip if present.
+- **Migrate the design-execution skill**: in `<PREFIX>-design/SKILL.md`, replace every `frontend-design` reference with `ui-ux-pro-max` (per preflight, warn with the link https://github.com/nextlevelbuilder/ui-ux-pro-max-skill if it isn't installed). Only touch installs that name `frontend-design` — a custom skill name chosen by the user stays. Idempotent — skip if no `frontend-design` reference exists.
 Update `<PREFIX>-skill` skill-manifest.md last: add the `<PREFIX>-deploy` lifecycle skill (with its `deploy-config.yaml` reference). Remove any `## Deployment` / `deploy-config.yaml` mention from the legacy domain owner's entry.
 
 ---
@@ -304,6 +306,7 @@ Run these verification checks on the upgrade-affected items:
 - Every domain skill `## Quality Checklist` contains "non-interactive" and "standalone"
 - `.claude/commands/code.md` and `fix.md` contain "Single gate" (one AskUserQuestion for confirm + verify + regression + Ship), `ship_mode`, the prod-step "Pre-authorization" conditions, and the stash-at-entry wording; their close-out contains "Restore stashed WIP"
 - `<PREFIX>-deploy/SKILL.md` gate contains "Pre-authorization" and `gate: pre-authorized`
+- If `<PREFIX>-design` exists: its SKILL.md contains no `frontend-design` reference (delegates to `ui-ux-pro-max` or a deliberate custom choice)
 - `<PREFIX>-test/SKILL.md` `## Rules` contains "Never re-run domain unit"
 - `<PREFIX>-qa.md` step 3 contains "Verify outcomes, not environments"
 - `governed-paths.conf` `PATH_MAP` contains the `custom-tests\.yaml$:EXEMPT` entry

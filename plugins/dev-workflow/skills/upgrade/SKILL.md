@@ -41,7 +41,7 @@ No confirmation needed — these are absent, not stale.
 
 Read `../../shared/tpl-agents.md` and `../../shared/tpl-commands.md` now.
 
-- **Missing commands** — if `.claude/commands/` is absent or any of `code.md`, `fix.md`, `tweak.md`, `revert.md`, `roadmap.md`, `wrap.md` are missing: create `.claude/commands/` if needed, then create each missing command file from the corresponding template in `tpl-commands.md`, substituting `<PREFIX>` and `<PROJECT>`. Announce what was created.
+- **Missing commands** — if `.claude/commands/` is absent or any of `code.md`, `fix.md`, `pilot.md`, `tweak.md`, `revert.md`, `roadmap.md`, `wrap.md` are missing: create `.claude/commands/` if needed, then create each missing command file from the corresponding template in `tpl-commands.md`, substituting `<PREFIX>` and `<PROJECT>`. Announce what was created.
 - **Missing docs stubs** — create `docs/roadmap.md` and `docs/project-log.md` if absent (same stubs as install Phase 2).
 - **Design command** — if a frontend/design domain skill is detected and `.claude/commands/design.md` is missing: create it from `tpl-commands.md § /design`.
 
@@ -149,6 +149,7 @@ Present to the user as a checklist before changing anything:
 - [ ] `.claude/commands/code.md` / `fix.md` lack the Step 0.5 **Ship** question + `ship_mode` (on push-fires-prod-CI projects the pipeline otherwise always ends parked/held and nothing ever ships without a follow-up "please push"), or their prod step doesn't verify the pre-authorization conditions, or the Gate policy lacks the "ask at the moment of the irreversible action — never infer AFK from an earlier timeout" rule
 - [ ] `<PREFIX>-deploy/SKILL.md` gate lacks the **Pre-authorization** clause (`preauth` from the top-level command's Ship answer, verified conditions, `gate: pre-authorized` reporting)
 - [ ] `<PREFIX>-design/SKILL.md` still delegates to `frontend-design` — superseded by `ui-ux-pro-max` as the default design-execution skill (only flag when the delegation names `frontend-design`; a deliberately customized skill name is not a gap)
+- [ ] `.claude/commands/pilot.md` missing or lacks any of: the "Autonomy contract" section, the single mission gate (Confirm + Ship in one AskUserQuestion), per-task lane routing (`pipeline` / `tweak`), the auto-accepted-deferral labeling, or the mission-report Done section — the autonomous multi-task lane; also `CLAUDE.md` `## Agents` routing paragraph lacks the `/pilot` sentence
 
 ---
 
@@ -216,6 +217,7 @@ Each step is idempotent — re-running the upgrade is safe.
 - **Upgrade `<PREFIX>-pm.md` for deferrals + feature commit**: re-sync step 1 (accept both signed-off statuses), step 2 (feature-commit hash rule + `UAT-deferred:` carry), and step 2.5 (required roadmap advancement) from `../../shared/tpl-agents.md § tosk-pm`. Idempotent — skip if step 1 already contains `signed-off-with-deferrals`.
 - **Add the non-interactive rule to `<PREFIX>-dev.md` step 3** from `../../shared/tpl-agents.md § tosk-dev`. Idempotent — skip if step 3 already contains "non-interactively".
 - **Create `tweak.md` and `revert.md`** from `../../shared/tpl-commands.md § /tweak` and `§ /revert`, substituting `<PREFIX>`/`<PROJECT>`. Idempotent — skip each file that exists.
+- **Create or re-sync `pilot.md`** from `../../shared/tpl-commands.md § /pilot` in full (commands are uniform across projects — Rule 3), substituting `<PREFIX>`/`<PROJECT>`. Also ensure the `CLAUDE.md` `## Agents` routing paragraph carries the `/pilot` sentence (from `../../shared/tpl-domain-skill.md § Project file sections`). Idempotent — skip the file if it already contains "Autonomy contract" and "mission report"; skip the routing sentence if `## Agents` already mentions `/pilot`.
 - **Re-sync `wrap.md`** from `../../shared/tpl-commands.md § /wrap`: the conditional Step 0 review, the `--no-push` flag, and the Step 4 push + scorecard. Idempotent — skip if wrap.md contains both `## Step 0 — Review` and `## Step 4 — Push + scorecard`.
 - **Add `## Push policy` + gate parking + non-prod early exit + the Pre-authorization clause to `<PREFIX>-deploy/SKILL.md`** from `../../shared/tpl-lifecycle.md § tosk-deploy/SKILL.md`. Idempotent — skip if the file contains `## Push policy`, `gate: unanswered — parked`, and `Pre-authorization`.
 - **Add the Freshness rule + Evidence trace to `<PREFIX>-test/references/custom-tests.md`** from `../../shared/tpl-lifecycle.md § tosk-test` (insert after the Running-stack rule). Idempotent — skip if the file contains "Freshness rule".
@@ -293,6 +295,7 @@ Run these verification checks on the upgrade-affected items:
 - `<PREFIX>-dev.md` step 3 contains "non-interactively"
 - `.claude/commands/code.md` and `fix.md` contain "Gate policy", "--no-push", "Salvage protocol", "Honor the user's answer", "signed-off-with-deferrals", "Feature commit:", and a "Close out: push + verified scorecard" step
 - `.claude/commands/tweak.md` and `revert.md` exist; `tweak.md` contains "batched close-out"; `revert.md` contains "git revert" and no `git reset`
+- `.claude/commands/pilot.md` exists and contains "Autonomy contract", "Fly this mission", `max_tasks`, "auto-accepted — pilot run", and a "mission report" Done section; `CLAUDE.md` `## Agents` routing paragraph mentions `/pilot`
 - `.claude/commands/wrap.md` contains a conditional `## Step 0 — Review` and a `## Step 4 — Push + scorecard`
 - `<PREFIX>-deploy/SKILL.md` contains `## Push policy`, `gate: unanswered — parked`, and the non-prod early exit
 - `<PREFIX>-test/references/custom-tests.md` contains "Freshness rule" and "Evidence trace"

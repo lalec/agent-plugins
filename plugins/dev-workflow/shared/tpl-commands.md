@@ -413,6 +413,117 @@ Report, in this order:
 
 ---
 
+## § /pilot — pilot.md (Claude Code)
+
+```markdown
+---
+description: Autonomous multi-task run — decompose a goal into tasks, route each through the right lane (full pipeline or tweak), and work unattended until the goal is met. One up-front gate, no mid-run questions, single batched close-out.
+---
+
+# Pilot
+
+**Usage:** `/pilot <goal>` — a batch of work (e.g. open roadmap items matching a filter) or a target state to reach (improve an area until measurable criteria pass). Flags: `--max-tasks N` caps the run (default 10); `--prod` pre-answers Ship; `--no-push` pre-answers Hold and skips the close-out push.
+
+**Examples:**
+- `/pilot implement all open roadmap items`
+- `/pilot work through the high-priority roadmap items --max-tasks 5`
+- `/pilot improve <area> until <measurable criteria> --prod`
+
+## Autonomy contract
+
+After the single Step 1 gate, the run is unattended until close-out:
+- Reversible decisions are made autonomously with the recommended default and labeled `auto-decided (pilot run — not user-confirmed)` in every downstream record — never presented as user consent.
+- Irreversible actions (prod deploy; any push that fires prod CI) never happen mid-run — they are deferred to close-out, where they gate normally per the `/code` Gate policy (ask at the moment of the action; park on silence).
+- The user may interrupt at any time; on their next message, resume from the current task using the mission state in context.
+
+## Step 0 — Flags + entry hygiene
+
+**Flag parse (first):** `--max-tasks N` → cap the task list at N (default 10); `--prod` → `ship_mode = prod`; `--no-push` → `ship_mode = hold` and `no_push = true`. Strip all flags from the goal used below. If neither ship flag is present, `ship_mode` is decided by the Ship question in Step 1.
+
+**Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it at close-out. If the WIP overlaps paths this mission will touch, ask the user how to proceed instead of stashing.
+
+## Step 1 — Mission plan + single gate
+
+**Decompose.** Build the task list from whichever source applies:
+- **Roadmap-shaped goal** (the goal names the roadmap or matches its items): read `docs/roadmap.md`, select the open items the goal covers, order by priority then dependency.
+- **Target-state goal** ("improve X until Y"): derive 2–3 **success criteria** — measurable checks, each with a command or observable that decides pass/fail — then derive the initial tasks that most plausibly move toward them. The loop re-plans between tasks; the criteria, not the initial list, define done.
+- **Plain batch** (an explicit list of things to do): one task per item.
+
+Cap at `max_tasks`. For each task derive: a one-line description, 1–3 candidate verifications (`{assert, type}` — UX / Integration / E2E, same vocabulary as `/code` Step 0.5), and a **lane**:
+- `pipeline` — features, bug fixes, schema/API/auth changes, anything needing review depth. Default when unsure.
+- `tweak` — small inline-verifiable changes (pixel nudges, copy, config values) per the `/tweak` lane rules.
+
+**Gate.** Ask everything in **one AskUserQuestion call** — the only planned interaction of the run:
+
+1. **Confirm**:
+   - question: "Fly this mission? <goal> — <N> tasks: <numbered task list with lanes and verifications; success criteria if any>"
+   - header: "Confirm"
+   - options:
+     - label: "Launch (Recommended)" — description: "Run all tasks unattended; everything holds at UAT until close-out"
+     - label: "No, cancel" — description: "Stop here"
+   - The automatic "Other" field lets the user reorder, drop, or add tasks and amend verifications or criteria — incorporate, restate the updated plan, and re-ask the full gate once.
+2. **Ship** (omit when `--prod` or `--no-push` already decided it):
+   - question: "Ship after the mission completes clean?"
+   - header: "Ship"
+   - options:
+     - label: "Ship (Recommended)" — description: "If every task signs off clean, deploy/push to prod at close-out without asking again. On projects where push fires prod CI, shipping = prod deploy."
+     - label: "Hold at UAT" — description: "End committed but not pushed/deployed; ship later with /code --prod or by asking"
+
+Timeout → same risk split as the `/code` Gate policy: launch on the recommended defaults labeled `auto-selected on timeout — not user-confirmed`, **except Ship, whose timeout default is always Hold**. Regression scope is fixed at `smart` for every task — a full regression per task would multiply cost across the mission; each task's QA already runs prior verifications for the files it touched.
+
+## Step 2 — The loop
+
+Work the task list in order until: tasks exhausted, all success criteria pass, or `max_tasks` tasks completed. No user gates inside the loop.
+
+**(a) Pipeline lane** — run the `/code` machinery without its interactive steps (`.claude/commands/code.md` holds the exact mechanics; reuse them, replacing every mid-run AskUserQuestion with the autonomous branch below):
+1. Spawn `<PREFIX>-dev` with the task + its verifications (`/code` Step 1 prompt shape). The salvage protocol and the no-top-level-edits rule apply verbatim.
+2. On `Status: complete`, persist the task's verifications exactly as `/code` Step 1.5 (single-quoted scalars, `.claude/**` excluded from `paths`, `test:` commit). On `Status: blocked`, mark the task **failed** with dev's `Notes:` and go to (c).
+3. Ensure the verification stack as `/code` Step 1.7 — except on an unreachable env, don't ask: leave the affected verifications to report blocked and continue (they surface as deferrals below).
+4. Spawn `<PREFIX>-qa` `mode=initial`, `regression_mode: smart`, with the new verification names + changed paths. Branch on its handoff:
+   - `signed-off` → continue to 5.
+   - `signed-off-with-deferrals` → **auto-accept** (no mid-run gate): carry `UAT-deferred: <names> (auto-accepted — pilot run, not user-confirmed)` into the pm prompt and the mission report, then continue to 5.
+   - `blocked` with code-fix `Notes:` → re-spawn `<PREFIX>-dev` with the fix, then `<PREFIX>-qa` `mode=retest`. At most **2 fix cycles per task**; still blocked → mark the task **failed** with qa's notes. If the failure leaves the tree broken (smoke fails), `git revert` the task's commits before moving on. If later tasks depend on this one, stop the loop and go to Step 3.
+5. Spawn `<PREFIX>-pm` with the feature commit, any UAT-deferred line, and the verbatim QA-evidence block (`/code` Step 3 prompt shape).
+
+**(b) Tweak lane** — top-level inline work under the `/tweak` lane rules: load the owning domain skill first, verify every change inline with shown evidence, commit in small named steps. Task exit: use the `<PREFIX>-review` skill on the task's diff (fix non-source nits directly; a source finding needing review depth → reclassify the task to the pipeline lane and run (a)), then one `<PREFIX>-log` entry for the task. **Scope guard:** if the work grows into schema/API/auth/migrations, reclassify to the pipeline lane before continuing.
+
+**(c) Progress + re-plan.** After each task, emit one status line — `task k/N · <title> · <status> · <commit> · <evidence pointer>` — a report, not a question. Then re-plan: drop later tasks the outcome obsoleted, insert a revealed prerequisite (within `max_tasks`), and if success criteria exist, evaluate them with evidence — stop the loop when all pass. Record every plan amendment for the mission report. For roadmap-driven runs, verify pm flipped the item's status.
+
+**Context health:** keep the top level thin — never read source files or heavy references at the top level; work from handoff blocks. If context is clearly degrading (earlier tasks summarized away, repeated re-derivation), finish the current task, then go to Step 3 and list the remaining tasks as resumable — a degraded pilot ships worse code than a fresh session.
+
+## Step 3 — Close out (once per mission)
+
+**(a) Deploy to prod** — only if `ship_mode = prod`. Invoke the `<PREFIX>-deploy` skill **here at the top level** with `target=prod`. Pass `preauth: user shipped at the mission gate` **only when all of these hold** — verified now, not assumed: every completed task is `signed-off` (no deferrals, no failed tasks), Ship was user-answered (not a timeout default), and the commits being shipped are exactly the reviewed set (nothing after the sign-offs except capture/log commits). Otherwise the skill gates normally — the user is often back by close-out; on no answer it returns `gate: unanswered — parked` → park per the `/code` Gate policy. If no `prod` env is declared or the user declines, report that and finish at UAT.
+
+**(b) Push.** Skip if `no_push` or no remote is configured. Resolve via the `<PREFIX>-deploy` skill § Push policy: if pushing fires a prod CI deploy, pushing IS shipping — push only if (a) ran and its gate (or pre-authorization) approved; otherwise ask now (irreversible gate — park on silence). If push does not trigger prod, push now.
+
+**(c) Scorecard.** Verify each fact against reality — never echo handoff claims:
+
+| Fact | Evidence |
+|---|---|
+| Tasks | per task: feature commit in `git log`, QA status, log-entry title grepped in `docs/project-log.md` |
+| Pushed | `git rev-list --count @{upstream}..HEAD` → 0, or "not pushed — <reason>" |
+| Deployed | curl the env url/health (2xx), or "no deployable env" / "held" |
+| Roadmap | roadmap-driven runs: item statuses flipped in `docs/roadmap.md` |
+| Ref sync | `Reference Sync:` fields from the handoffs |
+
+**(d) Restore stashed WIP.** If pre-existing WIP was stashed at Step 0, `git stash pop` it now; report any conflict instead of resolving it silently.
+
+## Done — mission report
+
+Report, in this order:
+1. Goal outcome — met / partial / stopped — with success-criteria evidence if criteria were set.
+2. The task table: task · lane · status (`signed-off` / `deferred` / `failed` / `dropped` / `not-reached`) · commit · log entry.
+3. QA `Evidence:` lines per task, verbatim.
+4. Everything auto-decided, explicitly labeled: gate timeouts, auto-accepted deferrals, plan amendments.
+5. Failed and unreached tasks as follow-ups, with enough state to resume (`/pilot <remaining goal>` re-derives the plan from the roadmap or criteria).
+6. Serve-envs still running and where (`<url>`).
+7. Ship state: "deployed to prod" only after `<PREFIX>-deploy` confirmed CI completion + health check; "held at UAT per your Ship answer"; or parked — state exactly what awaits confirmation.
+8. Recommend a fresh session before the next mission — a completed pilot has consumed most of this one.
+```
+
+---
+
 ## § /design — design.md (Claude Code only)
 
 **Install condition:** Only install if a design domain skill was discovered in Phase 1 (e.g. a `<PREFIX>-design`, `<PREFIX>-frontend`, or `<PREFIX>-ui` skill that owns UI/component paths).

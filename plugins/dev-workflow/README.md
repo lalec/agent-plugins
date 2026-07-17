@@ -19,6 +19,7 @@ A multi-agent delivery workflow for Claude Code. It runs your plan through a tea
 | Domain skills | One per source directory, generated from your actual structure. Each owns its paths, carries reference docs, and defines the lint/type/test checks `myapp-dev` runs before deploy — and improves itself as the code evolves. |
 | 9 hooks | Make the workflow self-enforcing: skills must load before edits, bad installs are blocked, handoffs are gated, ref-sync drift is flagged, and nothing pushes without a delivery-log close-out. |
 | `/code`, `/fix` | Drive the full pipeline (dev → qa → pm) from one line — confirm, capture verifications, auto-retest after fixes, then close out with a push + evidence-backed scorecard. Add `--prod` to ship after sign-off, `--no-push` to keep it local. |
+| `/pilot` | The autonomous multi-task lane — feed it a goal (a roadmap batch, or "improve X until Y"), confirm the mission plan once, and it works task after task unattended: each routed to the full pipeline or the tweak lane, with one batched close-out and a full mission report at the end. |
 | `/tweak` | The sanctioned lightweight lane for iterative rounds — pixel nudges, copy, small hotfixes — verified inline (screenshots/curl), with one batched close-out enforced at push time. |
 | `/revert` | Sanctioned rollback: `git revert` (never reset), scoped re-verification, and a logged reversal. |
 | `/design` | Generate 2–3 HTML variants, open them in the browser, route the winner to `/code` *(if a design skill is present)*. |
@@ -87,6 +88,12 @@ Runs: `myapp-dev` → `myapp-qa` → `myapp-pm`
 /fix <describe the bug or regression>
 ```
 Runs: `myapp-debug` → `myapp-dev` → `myapp-qa` → `myapp-pm`
+
+### Run a whole batch autonomously
+```
+/pilot <goal — e.g. implement all open roadmap items, or improve an area until measurable criteria pass>
+```
+Decomposes the goal into tasks, asks one up-front gate (confirm plan + ship policy), then works unattended: each task routed to the full pipeline or the tweak lane, per-task delivery-log entries, no mid-run questions. Prod deploy and push happen only at the single close-out, gated as usual. `--max-tasks N` caps the run; ends with a mission report of every task, its status, and its evidence.
 
 ### Iterate on something small
 ```

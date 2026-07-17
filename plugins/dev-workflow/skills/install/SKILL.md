@@ -12,7 +12,7 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 **What gets installed:**
 - 3 orchestrator agents: `<PREFIX>-dev`, `<PREFIX>-qa`, `<PREFIX>-pm`
 - 7 lifecycle skills: `<PREFIX>-log`, `<PREFIX>-review`, `<PREFIX>-debug`, `<PREFIX>-deploy`, `<PREFIX>-test`, `<PREFIX>-skill`, `<PREFIX>-docs`
-- 7 slash commands: `/code` + `/fix` + `/tweak` + `/revert` + `/design` (conditional on design skill) + `/roadmap` + `/wrap`
+- 8 slash commands: `/code` + `/fix` + `/pilot` + `/tweak` + `/revert` + `/design` (conditional on design skill) + `/roadmap` + `/wrap`
 - `docs/roadmap.md` stub — source of truth for open items; tracked by `<PREFIX>-dev` (new entries) and `<PREFIX>-pm` (status updates)
 - Domain skills: one per substantive source dir, derived from discovery (not hardcoded)
 - `.claude/hooks/governed-paths.conf` — single source of truth for path→skill ownership (incl. per-skill self-ownership entries), `DEPLOY_PATHS`, and `REF_WATCH`; sourced by skill-guard, path-coverage-check, ref-sync-check, and close-out-gate
@@ -146,7 +146,7 @@ What will be created:
 - 7 lifecycle skills: <PREFIX>-log, <PREFIX>-review, <PREFIX>-debug, <PREFIX>-deploy, <PREFIX>-test, <PREFIX>-skill, <PREFIX>-docs
 - 1 design skill: <PREFIX>-design  ← omit if no frontend category
 - <N> domain skills: <comma-separated list>
-- <N> slash commands: /code, /fix, /tweak, /revert, /roadmap, /wrap[, /design if frontend]
+- <N> slash commands: /code, /fix, /pilot, /tweak, /revert, /roadmap, /wrap[, /design if frontend]
 - 9 hook scripts + governed-paths.conf + settings.json
 - CLAUDE.md with workflow sections
 
@@ -193,6 +193,7 @@ Create these files (skip if already present, offer to overwrite if stale):
 .claude/skills/<PREFIX>-design/SKILL.md       ← only if a frontend/website domain skill was confirmed in Phase 1c; also create references/design-tokens.md stub
 .claude/commands/code.md          ← from tpl-commands.md § /code, substitute <PROJECT> and <PREFIX>
 .claude/commands/fix.md           ← from tpl-commands.md § /fix, substitute <PROJECT> and <PREFIX>
+.claude/commands/pilot.md         ← from tpl-commands.md § /pilot, substitute <PROJECT> and <PREFIX>
 .claude/commands/tweak.md         ← from tpl-commands.md § /tweak, substitute <PROJECT> and <PREFIX>
 .claude/commands/revert.md        ← from tpl-commands.md § /revert, substitute <PROJECT> and <PREFIX>
 .claude/commands/roadmap.md       ← from tpl-commands.md § /roadmap, substitute <PROJECT> and <PREFIX>
@@ -288,7 +289,7 @@ Also create `docs/workflow.md` if not present — generate with real content usi
   (top level) close out — push per <PREFIX>-deploy § Push policy + verified scorecard
 ```
 
-Iterative work (pixel nudges, copy rounds, small hotfixes) uses `/tweak` — top-level, inline-verified, close-out batched at exit and enforced by the `close-out-gate` hook at push time. Rollbacks use `/revert` (git revert + scoped re-verify + logged reversal).
+Iterative work (pixel nudges, copy rounds, small hotfixes) uses `/tweak` — top-level, inline-verified, close-out batched at exit and enforced by the `close-out-gate` hook at push time. Rollbacks use `/revert` (git revert + scoped re-verify + logged reversal). Multi-task autonomous runs (a roadmap batch, a goal to iterate toward) use `/pilot` — it decomposes the goal, gates once up-front, routes each task through the pipeline or the tweak lane, and closes out once at the end.
 
 ## Agents
 
@@ -465,7 +466,7 @@ Walk the checklist before declaring done:
 - [ ] `.claude/skills/` has all 7 lifecycle skills (`<PREFIX>-log`, `-review`, `-debug`, `-deploy`, `-test`, `-skill`, `-docs`) + all confirmed domain skills, all named `<PREFIX>-*`
 - [ ] `.claude/skills/<PREFIX>-skill/references/skill-manifest.md` exists and lists all installed lifecycle and domain skills
 - [ ] `.claude/skills/<PREFIX>-test/references/` has `test-commands.md` (with `## Smoke`, `## Regression`, `## Functional Feature Subjects` headings), `sync-checklist.md`, `custom-tests.md`, and `custom-tests.yaml` (initialized to `tests: []`). `<PREFIX>-test/SKILL.md` has a `## Test Plan` with the three tiers and no `## E2E Browser Tests` section. `custom-tests.md`'s schema uses `type: UX | Integration | E2E` (not `surface`)
-- [ ] `.claude/commands/code.md`, `fix.md`, `tweak.md`, `revert.md`, `roadmap.md`, and `wrap.md` exist (markdown format, `$ARGUMENTS`)
+- [ ] `.claude/commands/code.md`, `fix.md`, `pilot.md`, `tweak.md`, `revert.md`, `roadmap.md`, and `wrap.md` exist (markdown format, `$ARGUMENTS`)
 - [ ] `.claude/skills/<PREFIX>-debug/` has SKILL.md + `references/systematic-debugging.md`, `references/root-cause-tracing.md`, `references/defense-in-depth.md`, `references/verification.md` + `scripts/find-polluter.sh` (executable) + `scripts/find-polluter.test.md`. SKILL.md contains a `## Read Map` and **no** `## Reference Sync` section (static-content skill).
 - [ ] `.claude/skills/<PREFIX>-review/` has SKILL.md + `references/code-review-reception.md`, `references/requesting-code-review.md`, `references/issuing-findings.md` (no `verification-before-completion.md` — `<PREFIX>-debug` owns that). SKILL.md contains a `## Read Map` and **no** `## Reference Sync` section (static-content skill).
 - [ ] `.claude/agents/<PREFIX>-qa.md` step 3 begins with `Test — invoke` and there is no `## Sign-off criteria` section (tier rules live only in `<PREFIX>-test`)

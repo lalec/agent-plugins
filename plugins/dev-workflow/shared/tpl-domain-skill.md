@@ -242,7 +242,7 @@ Substitute:
 
 Pipeline: `/code` or `/fix` → <PREFIX>-dev → <PREFIX>-qa → <PREFIX>-pm. Details in `docs/workflow.md`.
 
-Pipeline-shaped work started mid-conversation (a feature or fix that needs review and testing) routes through `/code` or `/fix` — never spawn the pipeline agents ad hoc; the commands own the capture, gating, and close-out steps the agents can't do. For small iterative rounds (pixel nudges, copy, hotfixes), use `/tweak` — its close-out is batched and enforced at push time.
+Pipeline-shaped work started mid-conversation (a feature or fix that needs review and testing) routes through `/code` or `/fix` — never spawn the pipeline agents ad hoc; the commands own the capture, gating, and close-out steps the agents can't do. For small iterative rounds (pixel nudges, copy, hotfixes), use `/tweak` — its close-out is batched and enforced at push time. For multi-task autonomous runs (a roadmap batch, a goal to iterate toward), use `/pilot` — one up-front gate, per-task lane routing, single batched close-out.
 
 ## Skills
 

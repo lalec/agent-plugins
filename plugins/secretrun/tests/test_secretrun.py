@@ -8,7 +8,6 @@ shape matching. Loads the extension-less `bin/` scripts by path.
 import io
 import json
 import os
-import types
 from importlib.machinery import SourceFileLoader
 
 import pytest
@@ -158,11 +157,11 @@ def test_run_stdin_name_must_be_a_name():
 
 
 # ------------------------------------------------------------------ add ----- #
-def test_add_refuses_non_tty(monkeypatch):
-    monkeypatch.setattr(sr.sys, "stdin", types.SimpleNamespace(isatty=lambda: False))
+def test_add_refuses_when_no_tty(monkeypatch):
+    monkeypatch.setattr(sr, "_tty_available", lambda: False)
     with pytest.raises(sr.SecretrunError) as e:
         sr.cmd_add(["TOK"])
-    assert "interactive" in str(e.value)
+    assert "terminal" in str(e.value)
 
 
 def test_add_rejects_value_on_command_line():

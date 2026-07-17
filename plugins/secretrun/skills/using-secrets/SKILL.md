@@ -54,6 +54,10 @@ type this in their Claude Code prompt (the `!` runs it in their real terminal):
 They will be prompted for the value silently; you never see it. Then use it with
 `secretrun NAME -- cmd` as usual. To store in a cloud backend: `! secretrun add NAME -b aws`.
 
+If `add` reports "no controlling terminal", the `!` bang didn't get a terminal —
+tell the user to run `secretrun add NAME` in a normal terminal window
+(Terminal.app / iTerm) instead. Never work around it by piping or echoing the value.
+
 ## Project manifest
 
 If the project has a committed `.secretrun.json`, it declares the required secret

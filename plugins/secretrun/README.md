@@ -15,16 +15,16 @@ the model's context, or in the Claude Code transcript.
 
 | Channel | How values leak | secretrun's answer |
 |---|---|---|
-| **argv** | `curl -H "Bearer sk-…"` is visible to EDR, `ps`, and the model | The model writes `secretrun NAME -- curl …`; only the NAME is in argv. Verified: `ps -axww` during a run shows no value. |
+| **argv** | `curl -H "Bearer sk-…"` is visible to monitoring tools, `ps`, and the model | The model writes `secretrun NAME -- curl …`; only the NAME is in argv. Verified: `ps -axww` during a run shows no value. |
 | **Context / transcript** | Anything the model reads (`.env`, `echo $KEY`, API errors) persists in plaintext in `~/.claude/projects/*.jsonl` | The value never enters the model's turn: the wrapper resolves it, and masks it out of child output. A guard hook blocks the fishing commands. |
 | **Env inheritance** | Bash/hooks/plugins/MCP all inherit `claude`'s env; one `printenv` dumps everything | Values are never placed in `claude`'s env — only in the short-lived child. `printenv`/`env` dumps are denied. |
 | **Cross-session** | env/settings/transcripts persist across sessions | No secret is ever written to any of those. Storage is Keychain / cloud SM only. |
 
 ---
 
-## How it works (S1 + S2)
+## How it works
 
-**S1 — exec-time injection wrapper + hook guardrails.** `secretrun NAME -- cmd`
+**Exec-time injection wrapper + hook guardrails.** `secretrun NAME -- cmd`
 resolves the secret, runs `cmd` with the value present only in the child's
 environment, and streams the child's merged output through a masker that rewrites
 each value (and its base64 / URL-encoded / JSON-escaped forms) to `[REDACTED:NAME]`.
@@ -39,13 +39,13 @@ Three hooks back it up:
   It never reads real stored values.
 - **`session_env.sh`** (SessionStart) puts `secretrun` on `PATH`.
 
-**S2 — native hardening.** Plugins cannot ship permission rules, so
+**Native hardening.** Plugins cannot ship permission rules, so
 `/secretrun:harden` merges them into your `settings.json`: `permissions.deny` for
 `.env*`, `~/.aws`, `~/.ssh`, `~/.config/gcloud`, `~/.claude/projects`;
 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`; and `cleanupPeriodDays: 7`. Zero ceremony,
 and it pairs with S1.
 
-### Why not a broker? (S3, considered and rejected)
+### Why not a broker? (considered and rejected)
 
 An MCP "secret broker" server was considered and **rejected** for this threat
 model. It adds ceremony per use case (every tool needs a broker-aware call path),
@@ -103,12 +103,15 @@ sibling `edr` plugin).
    } }
    ```
    Run `/secretrun:doctor` to verify every entry resolves.
-4. **Storing secrets.** You (not the model) type it in your terminal:
+4. **Storing secrets.** You (not the model) type the value:
    ```
-   ! secretrun add OPENAI_API_KEY
+   secretrun add OPENAI_API_KEY
    ```
-   The value is entered at a hidden prompt; Claude never sees it. Teammates clone
-   the repo, install the plugin, and `add` their own copy of each named secret.
+   In a real terminal this is a hidden prompt. Inside a Claude Code session
+   (no terminal available) a native macOS hidden-input dialog pops up instead —
+   either way the value goes straight to the backend and Claude never sees it.
+   Teammates clone the repo, install the plugin, and `add` their own copy of
+   each named secret.
 5. **Daily use.** Nothing — the `using-secrets` skill auto-triggers and Claude runs
    `secretrun NAME -- cmd`.
 
@@ -116,7 +119,7 @@ sibling `edr` plugin).
 
 ```
 secretrun NAME [NAME...] [-b BACKEND] [--stdin NAME] -- cmd args...
-secretrun add NAME [-b BACKEND]     # interactive, hidden prompt (TTY only)
+secretrun add NAME [-b BACKEND]     # hidden prompt (TTY) or macOS dialog (no TTY)
 secretrun ls  [-b BACKEND]          # list stored names (never values)
 secretrun rm  NAME [-b BACKEND]
 secretrun check                     # verify .secretrun.json entries resolve
@@ -137,7 +140,7 @@ empty trusted-app list:
 security add-generic-password -s secretrun -a NAME -T "" -w   # then enter value
 ```
 
-### Optional: sandbox (S2, manual)
+### Optional: sandbox
 
 For stronger isolation you can add a `sandbox` block to `settings.json` (review
 first — it can break tools that need network or broad filesystem access):

@@ -42,21 +42,24 @@ Keychain (a project `.secretrun.json` may already declare the backend — see be
   wrapper masks the output. But do not pipe a secret to a network tool you don't
   trust; masking covers output, not deliberate exfiltration.
 
-## Storing a new secret (the user does this, not you)
+## Storing a new secret (the user types the value, never you)
 
-You cannot store a secret — that needs a hidden terminal prompt. Ask the user to
-type this in their Claude Code prompt (the `!` runs it in their real terminal):
+Tell the user a dialog is coming, then run:
 
 ```
-! secretrun add NAME
+secretrun add NAME            # -b aws / -b gcp for a cloud backend
 ```
 
-They will be prompted for the value silently; you never see it. Then use it with
-`secretrun NAME -- cmd` as usual. To store in a cloud backend: `! secretrun add NAME -b aws`.
+On macOS this opens a native hidden-input dialog on the user's screen (Claude
+Code's shell has no terminal, so there is no prompt in-session). The user types
+the value into the dialog; it goes straight from the dialog into the Keychain —
+you never see it. The command blocks until they answer and times out after ~110 s,
+so tell them to expect the dialog *before* running it. "dialog cancelled" or
+"empty value" means nothing was stored — ask the user, don't retry blindly.
 
-If `add` reports "no controlling terminal", the `!` bang didn't get a terminal —
-tell the user to run `secretrun add NAME` in a normal terminal window
-(Terminal.app / iTerm) instead. Never work around it by piping or echoing the value.
+Never work around a failed `add` by piping or echoing the value
+(`echo x | secretrun add` is blocked by the guard hook). If there is no GUI
+either (e.g. SSH), the user runs `secretrun add NAME` in their own terminal.
 
 ## Project manifest
 

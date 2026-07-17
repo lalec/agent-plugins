@@ -157,11 +157,58 @@ def test_run_stdin_name_must_be_a_name():
 
 
 # ------------------------------------------------------------------ add ----- #
-def test_add_refuses_when_no_tty(monkeypatch):
+def test_add_refuses_when_no_tty_and_no_gui(monkeypatch):
     monkeypatch.setattr(sr, "_tty_available", lambda: False)
+    monkeypatch.setattr(sr.sys, "platform", "linux")
     with pytest.raises(sr.SecretrunError) as e:
         sr.cmd_add(["TOK"])
     assert "terminal" in str(e.value)
+
+
+class _FakeProc:
+    def __init__(self, returncode, stdout=b""):
+        self.returncode, self.stdout = returncode, stdout
+
+
+def test_add_uses_gui_dialog_when_no_tty(monkeypatch):
+    monkeypatch.setattr(sr, "_tty_available", lambda: False)
+    monkeypatch.setattr(sr.sys, "platform", "darwin")
+    calls = {}
+
+    def fake_run(cmd, **kw):
+        if cmd[0] == "osascript":
+            calls["osascript"] = cmd
+            return _FakeProc(0, b"hunter2value\n")
+        calls["store"] = (cmd, kw.get("input"))
+        return _FakeProc(0)
+
+    monkeypatch.setattr(sr.subprocess, "run", fake_run)
+    assert sr.cmd_add(["TOK"]) == 0
+    # NAME is an AppleScript argv argument, never spliced into the script source
+    assert calls["osascript"][-1] == "TOK"
+    assert all("TOK" not in part for part in calls["osascript"][1:-1])
+    # value reached the keychain store via stdin, newline stripped, not in argv
+    cmd, stdin = calls["store"]
+    assert stdin == b"hunter2value\nhunter2value\n"
+    assert all(b"hunter2value" not in str(a).encode() for a in cmd)
+
+
+def test_add_gui_cancel_stores_nothing(monkeypatch):
+    monkeypatch.setattr(sr, "_tty_available", lambda: False)
+    monkeypatch.setattr(sr.sys, "platform", "darwin")
+    monkeypatch.setattr(sr.subprocess, "run", lambda *a, **k: _FakeProc(1))
+    with pytest.raises(sr.SecretrunError) as e:
+        sr.cmd_add(["TOK"])
+    assert "cancelled" in str(e.value)
+
+
+def test_add_gui_empty_value_rejected(monkeypatch):
+    monkeypatch.setattr(sr, "_tty_available", lambda: False)
+    monkeypatch.setattr(sr.sys, "platform", "darwin")
+    monkeypatch.setattr(sr.subprocess, "run", lambda *a, **k: _FakeProc(0, b"\n"))
+    with pytest.raises(sr.SecretrunError) as e:
+        sr.cmd_add(["TOK"])
+    assert "empty" in str(e.value)
 
 
 def test_add_rejects_value_on_command_line():

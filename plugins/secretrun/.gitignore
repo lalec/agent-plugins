@@ -1,0 +1,9 @@
+# Code only — secretrun keeps NO runtime state in the repo.
+# Secret values live in Keychain / cloud Secret Manager, never on disk here.
+__pycache__/
+.pytest_cache/
+*.pyc
+.DS_Store
+# never commit real manifests-with-values or settings backups if created here
+*.bak-*
+.secretrun.local.json

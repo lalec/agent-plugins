@@ -35,6 +35,16 @@
       "source": "./plugins/agent-eval",
       "category": "productivity",
       "homepage": "https://github.com/lalec/agent-plugins"
+    },
+    {
+      "name": "secretrun",
+      "description": "Keep secret VALUES out of Claude Code. The model handles secret NAMES only; the secretrun wrapper resolves name→value in its own process (Keychain / AWS / GCP Secret Manager), injects it into the child command's env or stdin, and masks the value out of the child's output — nothing in argv, context, or the transcript. Ships PreToolUse/PostToolUse/SessionStart hooks, a using-secrets skill, and /secretrun:harden + /secretrun:doctor.",
+      "author": {
+        "name": "lalec"
+      },
+      "source": "./plugins/secretrun",
+      "category": "security",
+      "homepage": "https://github.com/lalec/agent-plugins"
     }
   ]
 }

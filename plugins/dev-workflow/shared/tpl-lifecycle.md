@@ -1575,7 +1575,7 @@ These rules apply to **every project (`<PREFIX>-*`) skill**. Third-party skills 
 2. **Reference files must stay current.** When a domain fact changes (schema, API contract, pattern), update the corresponding reference file before finishing.
 3. **No orphaned paths.** Every project directory must be covered by a pattern in `<CONFIG_DIR>/hooks/governed-paths.conf`, owned by exactly one skill.
 4. **skill-manifest.md must stay current.** Whenever a skill is added, removed, or renamed, or a reference file is added or removed, update `<PREFIX>-skill/references/skill-manifest.md` before finishing.
-5. **References ↔ Reference Sync parity.** `## Reference Sync` must enumerate every file in `## References` — one checklist item per file, no omissions, no extras. When a reference file is added or removed, update both sections in the same edit. **Exception:** static-content skills (`<PREFIX>-debug`, `<PREFIX>-review`) ship references that the project does not author and omit `## Reference Sync` entirely — agents skip them in the Reference Sync step.
+5. **References ↔ Reference Sync parity.** `## Reference Sync` must enumerate every file in `## References` — one checklist item per file, no omissions, no extras. When a reference file is added or removed, update both sections in the same edit. **Exception:** static-content skills (`<PREFIX>-debug`, `<PREFIX>-review`) ship references that the project does not author and omit `## Reference Sync` entirely — agents skip them in the Reference Sync step. The exemption is decided by content ownership, not skill name: if such a skill carries a **project-authored** reference (values that drift with the project), it keeps a `## Reference Sync` scoped to exactly those project-authored files — template-shipped references stay out of the checklist.
 6. **Reference files must be named for their content domain, not generically.** Use: `api-schema.md`, `design-tokens.md`, `deploy-config.md`, `aws-resources.md`. Avoid: `resources.md`, `notes.md`, `misc.md`, `reference.md`.
 
 ## When This Fires
@@ -1660,7 +1660,7 @@ Structural changes to reference files (rename, retire, split, add) must be done 
 Verify before finishing any <PREFIX>-skill invocation:
 - [ ] `references/skill-manifest.md` reflects current `<PREFIX>-*` skill inventory (correct skill names, reference file list, no stale entries) — third-party skills are excluded
 - [ ] `governed-paths.conf` patterns match current skill ownership
-- [ ] Each `<PREFIX>-*` skill in `skill-manifest.md` has `## References` and `## Reference Sync` in 1:1 parity (same files, no extras, no omissions) — except static-content skills (`<PREFIX>-debug`, `<PREFIX>-review`) which legitimately omit `## Reference Sync` (see Global Invariant 5)
+- [ ] Each `<PREFIX>-*` skill in `skill-manifest.md` has `## References` and `## Reference Sync` in 1:1 parity (same files, no extras, no omissions) — except static-content skills (`<PREFIX>-debug`, `<PREFIX>-review`) which legitimately omit `## Reference Sync`, or scope it to their project-authored references only (see Global Invariant 5)
 ```
 
 ---

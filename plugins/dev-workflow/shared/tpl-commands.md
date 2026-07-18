@@ -730,7 +730,7 @@ Use `<PREFIX>-docs` skill to check whether project docs need updating based on w
 
 Use `<PREFIX>-skill` skill to run the reference sync check:
 - Verify `governed-paths.conf` matches current directory structure
-- Confirm `## References` and `## Reference Sync` are in 1:1 parity in every `<PREFIX>-*` skill
+- Confirm `## References` and `## Reference Sync` parity per the `<PREFIX>-skill` parity invariant (static-content skills exempt, or scoped to their project-authored references)
 - Confirm `skill-manifest.md` is current
 
 Scope to affected skills only — do not run a full manifest audit unless something actually changed.

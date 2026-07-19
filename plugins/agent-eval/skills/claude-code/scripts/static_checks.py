@@ -31,7 +31,7 @@ except ImportError:
 AGENT_NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 SKILL_NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")  # docs: lowercase + numbers + hyphens
 
-AGENT_VALID_MODELS_PREFIXES = ("sonnet", "opus", "haiku", "inherit", "claude-")
+AGENT_VALID_MODELS_PREFIXES = ("sonnet", "opus", "haiku", "fable", "inherit", "claude-")
 AGENT_VALID_PERMISSION_MODES = {
     "default", "acceptEdits", "auto", "dontAsk", "bypassPermissions", "plan",
 }
@@ -46,10 +46,12 @@ SKILL_VALID_CONTEXT = {"fork"}
 SKILL_VALID_SHELL = {"bash", "powershell"}
 
 # Agents Claude Code ships with — never expected to appear in a project's
-# .claude/agents/ directory. Source: https://code.claude.com/docs/en/sub-agents
-# Built-in subagents section. Refresh when Claude Code adds new built-ins.
+# .claude/agents/ directory. The docs list Explore/Plan/general-purpose;
+# the others exist in practice ("claude" is the current default catch-all).
+# Plugin-provided agents ("plugin-name:agent-name") are exempted by the colon
+# check in S15, not listed here. Refresh when Claude Code adds new built-ins.
 BUILTIN_AGENT_NAMES = {
-    "Explore", "Plan", "general-purpose",
+    "Explore", "Plan", "general-purpose", "claude",
     "statusline-setup", "claude-code-guide",
 }
 
@@ -74,6 +76,7 @@ HOOK_VALID_EVENTS = {
     "TeammateIdle", "InstructionsLoaded", "ConfigChange", "CwdChanged",
     "FileChanged", "WorktreeCreate", "WorktreeRemove", "PreCompact",
     "PostCompact", "Elicitation", "ElicitationResult", "SessionEnd",
+    "MessageDisplay",
 }
 HOOK_VALID_TYPES = {"command", "http", "mcp_tool", "prompt", "agent"}
 
@@ -402,9 +405,9 @@ def _check_skills(skills: List[Dict]) -> List[Dict]:
         if combined > SKILL_DESCRIPTION_CAP:
             long_desc.append(f"{s['dir_name']} ({combined} chars)")
     if long_desc:
-        checks.append(_check("S9", "WARN", "Skill description length",
-                             f"{len(long_desc)} skill(s) exceed {SKILL_DESCRIPTION_CAP} char cap "
-                             f"(description+when_to_use will be truncated): {long_desc}",
+        checks.append(_check("S9", "INFO", "Skill description length",
+                             f"{len(long_desc)} skill(s) exceed the historical {SKILL_DESCRIPTION_CAP} char cap "
+                             f"(current docs no longer state a truncation limit): {long_desc}",
                              value=len(long_desc)))
     else:
         checks.append(_check("S9", "PASS", "Skill description length",
@@ -603,14 +606,17 @@ def _check_hooks(settings_files: List[Dict]) -> List[Dict]:
 # ── Cross-cutting (S15) ──────────────────────────────────────────────────────
 
 def _check_cross_cutting(agents: List[Dict], spawned_undeclared: List[str]) -> List[Dict]:
-    # Filter out Claude Code's built-in agents — they're never expected in
-    # the project's agents/ directory, so flagging them is noise.
-    real_undeclared = [a for a in spawned_undeclared if a not in BUILTIN_AGENT_NAMES]
+    # Filter out Claude Code's built-in agents and plugin-provided agents
+    # ("plugin-name:agent-name") — neither is expected in the project's
+    # agents/ directory, so flagging them is noise.
+    real_undeclared = [a for a in spawned_undeclared
+                       if a not in BUILTIN_AGENT_NAMES and ":" not in a]
     if not real_undeclared:
-        builtins_seen = [a for a in spawned_undeclared if a in BUILTIN_AGENT_NAMES]
+        exempt_seen = [a for a in spawned_undeclared
+                       if a in BUILTIN_AGENT_NAMES or ":" in a]
         detail = "All custom agent types are declared in .claude/agents/"
-        if builtins_seen:
-            detail += f" (built-ins also spawned, ignored: {builtins_seen})"
+        if exempt_seen:
+            detail += f" (built-ins/plugin agents also spawned, ignored: {exempt_seen})"
         return [_check("S15", "PASS", "Spawned agents declared", detail)]
     return [_check("S15", "WARN", "Spawned agents declared",
                    f"{len(real_undeclared)} undeclared custom agent(s): {real_undeclared[:5]} "

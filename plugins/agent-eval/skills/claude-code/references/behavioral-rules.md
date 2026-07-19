@@ -14,6 +14,7 @@ Rules, thresholds, and detection logic used by `transcript-parser.py`. There is 
 | `has_handoff` | True if the body contains a `**Status:** <values>` line or `RESULT: <value>` line |
 | `handoff_patterns` | Per-agent regex(es) built from the captured Status values — each agent's actual format is matched, not a global pattern |
 | `artifact_paths` | Resolved from `<prefix>-log` skill cross-references (read from the skill's SKILL.md), plus explicit `Output: PATH` / `Writes to: PATH` / `Delivers: PATH` / `Artifact: PATH` lines |
+| `artifact_header_pattern` | From the first heading-shaped template line in the log skill's SKILL.md — a markdown heading containing placeholder syntax (`YYYY`, `<angle>`, `{curly}`). Its heading level becomes the H3 regex (e.g. `### YYYY-MM-DD …` → `^#{3}\s+`). `None` when no template found → H3 SKIPs |
 | `downstreams` | "spawn X", "invoke X", "delegate to X", "hand off to X", "tell user to invoke X" |
 | `upstreams` | "Invoked after X" / "after X completes" in the description |
 | `role` | Suffix `-dev` → producer, `-qa` → reviewer, `-pm` → terminal, `-log` → writer; otherwise inferred from Status values |
@@ -23,30 +24,21 @@ When discovery is empty (no `.claude/agents/`), G1/G2/G4 SKIP cleanly.
 
 ---
 
-## Auto-Detection (project type)
+## Project-Type Detection (informational only)
 
-`detect_project_type(cwd)` scans CWD:
-
-| Indicator | Type |
-|---|---|
-| `package.json`, `*.js`, `*.ts` | `web` |
-| `Dockerfile` | `docker` |
-| `requirements.txt`, `*.py` | `python` |
-
-H1 + H3 activate on `web`; SKIP otherwise.
+`detect_project_type(cwd)` scans CWD (`package.json`/`*.ts` → `web`, `Dockerfile` → `docker`, `requirements.txt`/`*.py` → `python`) and reports the result in the JSON. **No checks depend on it** — H1's patterns are suspect in any project type and H3 is gated on discovery, not stack.
 
 ---
 
-## H1: Source Code Reading
+## H1: Suspect Path Access
 
-**Check:** Bash or Read tool calls accessing application source files.
+**Check:** Bash or Read tool calls touching paths that are suspect in any project type. Reading application source is **not** flagged — in dev/QA pipelines that is the agents' job.
 
-**Patterns** (active when `web` detected):
-- `/node_modules/` — app dependency tree
-- `\.claude/projects/` — other session transcripts
-- `\.js$`, `\.ts$`, `\.jsx$`, `\.tsx$`, `\.mjs$` — JS/TS source files
+**Patterns** (always active):
+- `(^|/)node_modules/` — dependency tree (wasted context)
+- `\.claude/projects/` — other sessions' transcripts (snooping / context pollution)
 
-**Allowlist** (never flagged): `^\.claude/skills/`, `^\.claude/agents/`, `^\.claude/commands/`, `\.py$`, `\.json$`, `\.md$`.
+**Trigger:** WARN on any match.
 
 ---
 
@@ -56,15 +48,15 @@ H1 + H3 activate on `web`; SKIP otherwise.
 
 **Detection pattern:** `\b(for|while|until)\b.*\bdo\b` (DOTALL).
 
-Always enabled.
+**Trigger:** INFO always — shell loops are legitimate in generic workflows; the count is reported for visibility, never as a violation.
 
 ---
 
 ## H3: Output Artifact Format
 
-**Check:** Write tool calls to a discovered artifact path where the content lacks the required header.
+**Check:** Write tool calls to a discovered artifact path where the content lacks the header discovered from the log skill's template (see `artifact_header_pattern` above).
 
-**Default header pattern** (web projects): `^##\s+\[.+\]`
+**Gating:** runs only when discovery found a header template for at least one evaluated agent; SKIPs otherwise. There is no hardcoded default header.
 
 H3 only inspects `Write` calls — `Edit` modifies existing files, where the header is presumed already correct.
 
@@ -72,13 +64,13 @@ H3 only inspects `Write` calls — `Edit` modifies existing files, where the hea
 
 ## H4: Repeated Identical Tool Calls
 
-**Check:** Same `(tool_name, input)` pair invoked more than once within a single agent.
+**Check:** Same `(tool_name, input)` pair invoked more than once **within a single mutation-free span** of one agent. Any `Edit`/`Write` resets the span: the workspace changed, so re-running an identical command afterwards (edit → test → edit → test loops) is legitimate iterate/verify behavior, not a duplicate.
 
-**Hash:** `(name, json.dumps(input, sort_keys=True))`. Different inputs → different hash → not a duplicate. Two `Read` calls on the same `file_path` collide; two `Bash` calls with different commands do not.
+**Hash:** `(name, json.dumps(input, sort_keys=True))`. Different inputs → different hash → not a duplicate.
 
-**Trigger:** WARN if any agent has any duplicate signature (count ≥ 2). Detail names the worst offender (`tool ×N`).
+**Trigger:** WARN if any agent repeats a signature with no intervening Edit/Write. Detail names the worst offender (`tool ×N`).
 
-Always enabled. The signal: an agent forgot it already made the call — common when an agent re-Reads the same file mid-conversation instead of relying on its own context, or repeats a Bash check after the result expired from working memory.
+Always enabled. The signal: an agent forgot it already made the call and nothing changed in between — pure wasted work.
 
 ---
 
@@ -98,13 +90,16 @@ Always enabled.
 
 ## Cost Model
 
-`MODEL_RATES` in `transcript-parser.py` — substring-matched against each agent's model from the JSONL `message.model` field:
+`MODEL_RATES` in `transcript-parser.py` — substring-matched against each agent's model from the JSONL `message.model` field (per-MTok):
 
-| Key | Input | Output | Cache read | Cache write |
-|---|---|---|---|---|
-| `opus`   | $5.00 | $25.00 | $0.50 | $6.25 |
-| `sonnet` | $3.00 | $15.00 | $0.30 | $3.75 |
-| `haiku`  | $1.00 |  $5.00 | $0.10 | $1.25 |
+| Key | Input | Output | Cache read | Cache write 5m (1.25×) | Cache write 1h (2×) |
+|---|---|---|---|---|---|
+| `fable`  | $10.00 | $50.00 | $1.00 | $12.50 | $20.00 |
+| `opus`   | $5.00  | $25.00 | $0.50 | $6.25  | $10.00 |
+| `sonnet` | $3.00  | $15.00 | $0.30 | $3.75  | $6.00  |
+| `haiku`  | $1.00  |  $5.00 | $0.10 | $1.25  | $2.00  |
+
+Cache writes are priced per TTL from the JSONL `cache_creation` breakdown (`ephemeral_5m_input_tokens` / `ephemeral_1h_input_tokens`). The legacy `cache_creation_input_tokens` total duplicates that breakdown and is used only when the breakdown is absent — adding both would double-count.
 
 Each agent's cost is computed from its actual model — mixed-model pipelines are reported correctly. Unknown models fall back to Sonnet rates and are listed in the top-level `notes`.
 
@@ -118,7 +113,7 @@ Three distinct totals — pick the right one for the right question:
 
 | Field | Definition | Use for |
 |---|---|---|
-| `peak_context_tokens` (per agent) | Max `input + output + cache_read` of any single turn | "How big is the agent's working set?" — matches the number Claude Code shows in agent returns |
+| `peak_context_tokens` (per agent) | Max `input + output + cache_read + cache_write` of any single turn | "How big is the agent's working set?" — cache-creation tokens are part of the turn's window (a first turn that writes 100k to cache held those tokens), so they count |
 | `total_peak_context_tokens` (summary) | Sum of each agent's `peak_context_tokens` | Headline volume metric for the workflow |
 | `billed_tokens` / `total_billed_tokens` | Sum of `input + output + cache_read + cache_write` across **every turn** | Cost basis only — `cache_read` is re-billed each turn, so this inflates with turn count |
 
@@ -136,12 +131,12 @@ Three distinct totals — pick the right one for the right question:
 | F4: Context outliers (>2× median peak) | WARN if any agent's `peak_context_tokens` > 2× median. Needs ≥2 agents. Pivoted from billed tokens — long, well-cached agents shouldn't be flagged for being long. |
 | F5: Duration spread | WARN if max/min duration > 5×. |
 | F6: Cache hit ratio | WARN if any multi-turn agent (≥3 turns, ≥50k input+cache_read) has `cache_hit_ratio < 0.30`. Skips agents below the volume floor (caching has no opportunity to pay off in 1–2 short turns). Reports the workflow's weighted-average ratio across all qualifying agents. |
-| F7: Model right-sizing | WARN if any agent with `role ∈ {terminal, writer}` runs on Opus. Roles come from discovery (suffix `-pm` → terminal, `-log` → writer). SKIPs when no roles were inferred. Reviewer/producer on Opus is fine — those agents need the reasoning. |
+| F7: Model right-sizing | WARN if any agent with `role ∈ {terminal, writer}` runs on Opus or Fable. Roles come from discovery (suffix `-pm` → terminal, `-log` → writer). SKIPs when no roles were inferred. Reviewer/producer on a big model is fine — those agents need the reasoning. |
 | F8: Tool churn ratio | WARN if any agent with ≥10 tool calls has `total_tool_calls / distinct_tools > 10`. Catches "stuck on one tool" patterns (e.g. 30 Bash calls with one distinct tool used). Threshold tuned high to avoid flagging legitimate multi-edit producer work (a 12-Read/10-Edit producer naturally hits ~7×). |
-| F9: Time-to-first-tool | WARN if any agent waits >30s between its first user record and first `tool_use`. SKIPs when no timestamp pairs are available. Typical agents act in under 10s — long gaps usually mean excessive thinking or a stuck initial reasoning loop. |
+| F9: Time-to-first-tool | WARN if any agent waits >60s between its first user record and first `tool_use`. SKIPs when no timestamp pairs are available. Adaptive-thinking models legitimately reason for tens of seconds on hard tasks before acting — the threshold flags stuck reasoning, not normal thinking. |
 | F10: Empty (no-tool) turns | WARN if any agent with ≥5 turns has both >30% empty turns *and* ≥3 empty turns. A turn is "empty" if the assistant produced text blocks but invoked zero tools across that requestId. One trailing text-only turn (the final return) is normal — the floor and ratio together suppress that false positive. |
 
-F3 (cost per artifact) and G3 (retry rate) are informational.
+F3 (cost per artifact) and G3 (failure-status rate) are informational. G3 matches the *discovered* status vocabulary against failure tokens (`block|fail|retry|error|abort`, case-insensitive) and reports the full status distribution — nothing project-specific is hardcoded.
 
 F1/F2 (turn utilization, budget exhaustion) are removed — `.claude/agents/*.md` rarely declares per-agent budgets, so the metric was almost always SKIP.
 
@@ -167,6 +162,9 @@ G5 is intentionally INFO, not WARN: a "broken" transition often means the orches
 ### W1: Total Workflow Duration
 Wall time from first timestamp of any agent to last timestamp of any agent. INFO only — used as denominator for W5.
 
+### W2: Orchestrator Overhead
+Computed from the parent JSONL (see `parent_session.py`): orchestrator billed tokens as a share of the workflow total (orchestrator + all agents), plus orchestrator cost from its actual model. INFO only — a heavy orchestrator isn't wrong per se, but a rising share across runs means work is drifting back to the top level.
+
 ### W3: Parallel Efficiency
 Max concurrent agents (overlap in time windows) / total agents. WARN if < 30%. **Auto-downgraded to INFO when discovery infers `dag_shape == "sequential"`** — low concurrency is by design.
 
@@ -183,4 +181,7 @@ Forward edges are derived from each agent's `upstreams` field — the result of 
 
 SKIP when no agent declares an upstream, or when neither endpoint of any declared edge was spawned in the session.
 
-W2 (orchestrator overhead) and W6 (spawn pattern) are omitted — they need `queue-operation` records that Claude Code's `Agent` tool doesn't write.
+### W8: Spawn Decision Latency
+For each agent's last transcript timestamp, the gap to the next `Agent`/`Task` `tool_use` in the parent session. Median and max reported as INFO — long gaps mean the orchestrator is deliberating (or doing work itself — cross-check O7) between handoffs. SKIP when no spawn follows any completion.
+
+W6 (spawn pattern) is omitted — it needs `queue-operation` records that Claude Code's `Agent` tool doesn't write.

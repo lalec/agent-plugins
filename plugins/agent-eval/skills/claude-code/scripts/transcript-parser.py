@@ -2,20 +2,24 @@
 """
 agent-eval transcript-parser: parse JSONL transcripts → agent process metrics + checks.
 
-Usage: python3 transcript-parser.py <session-id> <target-name> [--output-dir DIR] [--scan]
+Usage: python3 transcript-parser.py <session-id> <target-name>
+           [--output-dir DIR] [--scan] [--compare BASELINE.json]
 Output: JSON to stdout
 
---scan    When the given session has no agents, scan sibling sessions in
-          ~/.claude/projects/{project-dir}/ for one containing agent JSONL files.
+--scan     When the given session has no agents, scan sibling sessions in
+           ~/.claude/projects/{project-dir}/ for one containing agent JSONL files.
+--compare  Diff this run against a previous run's JSON output — emits a
+           `comparison` section with check regressions and metric deltas.
 
 Designed for instruction-based Claude Code agent pipelines (.claude/agents/*.md).
 Per-agent expectations (handoff format, artifact paths, pipeline position) are
 discovered at runtime from the project's own .claude/agents/*.md files — no
 agent-eval.json required. Per-agent cost is computed from each spawn's actual
-model recorded in agent-{id}.meta.json.
+model recorded in the JSONL records.
 
-W2 and W6 are omitted — they require queue-operation records that Claude Code's
-Agent tool does not produce.
+The parent (orchestrator) session is analyzed too: W2 orchestrator overhead,
+W8 spawn decision latency, O7 top-level source edits after delegation. Only W6
+remains omitted — it needs queue-operation records Claude Code doesn't write.
 """
 
 import json
@@ -27,26 +31,34 @@ import statistics
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from discovery import discover_project, artifact_match, build_handoff_regex
+from discovery import (discover_project, artifact_match, build_handoff_regex,
+                       build_artifact_header_regex)
 from static_checks import run_static_checks
 from orchestration_checks import run_orchestration_checks
+from parent_session import analyze_parent_session
+from comparison import build_comparison
 
 
 # ── Cost rates ───────────────────────────────────────────────────────────────
 # Per-million token rates for current Claude models. Substring-matched against
-# each agent's model from agent-{id}.meta.json. Refresh manually when models
+# each agent's model from the JSONL `message.model`. Cache writes are priced by
+# TTL — 5-minute writes cost 1.25× the input rate, 1-hour writes 2× — and the
+# JSONL usage block reports each TTL separately. Refresh manually when models
 # change. Unknown models fall back to Sonnet rates and emit a top-level note.
 
 MODEL_RATES = {
-    "opus":   {"input": 5.00, "output": 25.00, "cache_read": 0.50, "cache_write": 6.25},
-    "sonnet": {"input": 3.00, "output": 15.00, "cache_read": 0.30, "cache_write": 3.75},
-    "haiku":  {"input": 1.00, "output": 5.00,  "cache_read": 0.10, "cache_write": 1.25},
+    "fable":  {"input": 10.00, "output": 50.00, "cache_read": 1.00},
+    "opus":   {"input": 5.00,  "output": 25.00, "cache_read": 0.50},
+    "sonnet": {"input": 3.00,  "output": 15.00, "cache_read": 0.30},
+    "haiku":  {"input": 1.00,  "output": 5.00,  "cache_read": 0.10},
 }
+CACHE_WRITE_5M_MULT = 1.25
+CACHE_WRITE_1H_MULT = 2.00
 DEFAULT_RATE_KEY = "sonnet"
 
 
 def rates_for_model(model_id):
-    """Substring-match a model id (e.g. 'claude-opus-4-7') to MODEL_RATES."""
+    """Substring-match a model id (e.g. 'claude-fable-5') to MODEL_RATES."""
     if model_id:
         m = model_id.lower()
         for key, rates in MODEL_RATES.items():
@@ -55,31 +67,30 @@ def rates_for_model(model_id):
     return DEFAULT_RATE_KEY, MODEL_RATES[DEFAULT_RATE_KEY]
 
 
-# ── Behavioral patterns (auto-detected, no longer config-driven) ─────────────
+def compute_cost_usd(model_id, tokens):
+    """Cost from a token dict with input/output/cache_read/cache_write_5m/cache_write_1h."""
+    _, rates = rates_for_model(model_id)
+    return (
+        tokens.get("input", 0)          * rates["input"]      / 1_000_000 +
+        tokens.get("output", 0)         * rates["output"]     / 1_000_000 +
+        tokens.get("cache_read", 0)     * rates["cache_read"] / 1_000_000 +
+        tokens.get("cache_write_5m", 0) * rates["input"] * CACHE_WRITE_5M_MULT / 1_000_000 +
+        tokens.get("cache_write_1h", 0) * rates["input"] * CACHE_WRITE_1H_MULT / 1_000_000
+    )
 
-WEB_SOURCE_PATTERNS = [
-    r"/node_modules/",
+
+# ── Behavioral patterns ──────────────────────────────────────────────────────
+# H1 flags paths that are suspect in ANY project type — dependency trees and
+# other sessions' transcripts. Reading application source is NOT flagged: for
+# dev/QA pipelines that is the agents' job. Always-on, no project-type gate.
+
+SUSPECT_PATH_PATTERNS = [
+    r"(^|/)node_modules/",
     r"\.claude/projects/",
-    r"\.js$",
-    r"\.ts$",
-    r"\.jsx$",
-    r"\.tsx$",
-    r"\.mjs$",
 ]
 
-DEFAULT_ALLOWLIST = [
-    r"^\.claude/skills/",
-    r"^\.claude/agents/",
-    r"^\.claude/commands/",
-    r"\.py$",
-    r"\.json$",
-    r"\.md$",
-]
 
-DEFAULT_FINDING_HEADER_PATTERN = r"^##\s+\[.+\]"
-
-
-# ── Project type detection ───────────────────────────────────────────────────
+# ── Project type detection (informational only — no checks depend on it) ─────
 
 def detect_project_type(cwd):
     detected = set()
@@ -96,23 +107,16 @@ def detect_project_type(cwd):
     return detected
 
 
-def build_h1_patterns(project_types):
-    patterns = list(WEB_SOURCE_PATTERNS) if "web" in project_types else []
-    return patterns, list(DEFAULT_ALLOWLIST)
-
-
-def build_h3_pattern(project_types):
-    if "web" in project_types:
-        return re.compile(DEFAULT_FINDING_HEADER_PATTERN, re.MULTILINE)
-    return None
-
-
 # ── Session / project helpers ────────────────────────────────────────────────
 
 def resolve_project_dir(cwd):
+    # AGENT_EVAL_PROJECTS_DIR overrides the default location — used by fixture
+    # tests so transcripts never need to live under ~/.claude/projects.
+    base = os.environ.get("AGENT_EVAL_PROJECTS_DIR")
+    if not base:
+        base = os.path.join(os.path.expanduser("~"), ".claude", "projects")
     slug = cwd.replace("/", "-")
-    home = os.path.expanduser("~")
-    return os.path.join(home, ".claude", "projects", slug)
+    return os.path.join(base, slug)
 
 
 def parse_parent_jsonl(parent_jsonl_path):
@@ -158,7 +162,7 @@ def parse_task_type_map(parent_jsonl_path):
                 for block in msg_content:
                     if (isinstance(block, dict)
                             and block.get("type") == "tool_use"
-                            and block.get("name") == "Task"):
+                            and block.get("name") in ("Task", "Agent")):
                         tool_id = block.get("id", "")
                         subagent_type = block.get("input", {}).get("subagent_type", "")
                         if tool_id and subagent_type:
@@ -214,20 +218,13 @@ def scan_for_agent_session(project_dir, target):
 
 # ── Path checks ──────────────────────────────────────────────────────────────
 
-def is_source_code_path(path_str, patterns, allowlist):
-    for allow in allowlist:
-        if re.search(allow, path_str):
-            return False
-    for pat in patterns:
-        if re.search(pat, path_str):
-            return True
-    return False
+def is_suspect_path(path_str):
+    return any(re.search(pat, path_str) for pat in SUSPECT_PATH_PATTERNS)
 
 
 # ── Per-agent parsing ────────────────────────────────────────────────────────
 
-def parse_subagent_jsonl(jsonl_path, description, target, agent_type,
-                         agent_meta, h1_patterns, h1_allowlist, h3_pattern):
+def parse_subagent_jsonl(jsonl_path, description, target, agent_type, agent_meta):
     """Parse one subagent JSONL → per-agent metrics + violations.
 
     Model is read from each assistant record's `message.model` (set by Claude Code at
@@ -245,12 +242,17 @@ def parse_subagent_jsonl(jsonl_path, description, target, agent_type,
 
     expected_artifacts = list(agent_meta.get("artifact_paths", []))
     handoff_re = build_handoff_regex(agent_meta)
+    h3_pattern = build_artifact_header_regex(agent_meta)
     role = agent_meta.get("role")
 
     turns = set()
     token_usage = {}
     tool_calls = {}
-    tool_signatures = defaultdict(int)
+    # H4: (tool, input) signatures within the current mutation-free span. Any
+    # Edit/Write resets the span — the workspace changed, so re-running an
+    # identical command afterwards (loop-style iterate/verify) is legitimate.
+    span_signatures = defaultdict(int)
+    repeated_counts = {}
     tool_signature_samples = {}
     timestamps = []
     user_timestamps = []
@@ -325,13 +327,18 @@ def parse_subagent_jsonl(jsonl_path, description, target, agent_type,
                     if req_id:
                         tool_uses_per_turn[req_id] += 1
 
-                    # H4: identical (tool, input) signatures across the agent's turns.
-                    # Hash on canonical-JSON of input so semantically identical calls collide.
+                    # H4: identical (tool, input) signatures with no intervening
+                    # workspace mutation. Edit/Write clears the span first, so a
+                    # re-run after a change never counts as a duplicate.
+                    if tool_name in ("Edit", "Write"):
+                        span_signatures.clear()
                     try:
                         sig = (tool_name, json.dumps(inp, sort_keys=True, default=str))
                     except (TypeError, ValueError):
                         sig = (tool_name, repr(inp))
-                    tool_signatures[sig] += 1
+                    span_signatures[sig] += 1
+                    if span_signatures[sig] > 1:
+                        repeated_counts[sig] = max(repeated_counts.get(sig, 1), span_signatures[sig])
                     if sig not in tool_signature_samples:
                         tool_signature_samples[sig] = inp
 
@@ -362,13 +369,14 @@ def parse_subagent_jsonl(jsonl_path, description, target, agent_type,
                         if isinstance(skill_ref, str) and skill_ref:
                             skills_invoked.add(skill_ref)
 
-                    # H1: source code reading
-                    if h1_patterns and tool_name in ("Read", "Bash"):
+                    # H1: suspect path access (dependency trees, other sessions'
+                    # transcripts). Reading project source is never flagged.
+                    if tool_name in ("Read", "Bash"):
                         path_to_check = inp.get("file_path", "") if tool_name == "Read" else inp.get("command", "")
-                        if path_to_check and is_source_code_path(path_to_check, h1_patterns, h1_allowlist):
+                        if path_to_check and is_suspect_path(path_to_check):
                             violations.append({
                                 "check": "H1",
-                                "detail": f"{tool_name} on source path: {path_to_check[:120]}",
+                                "detail": f"{tool_name} on suspect path: {path_to_check[:120]}",
                             })
 
                     # H2: shell loop usage
@@ -402,30 +410,33 @@ def parse_subagent_jsonl(jsonl_path, description, target, agent_type,
             result_status = next((g for g in m.groups() if g), None)
 
     # Aggregate tokens. cache_read sums across turns (each turn is billed for the
-    # cache it re-reads). output_tokens_total is the primary efficiency signal.
-    total_tokens = {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0}
+    # cache it re-reads). Cache writes are tracked per TTL — the `cache_creation`
+    # breakdown is authoritative; the legacy `cache_creation_input_tokens` total
+    # is only used when the breakdown is absent (it duplicates the breakdown, so
+    # adding both would double-count). Peak context includes cache writes — a
+    # first turn that writes 100k to cache held those tokens in its window.
+    total_tokens = {"input": 0, "output": 0, "cache_read": 0,
+                    "cache_write_5m": 0, "cache_write_1h": 0}
     peak_context = 0
     for usage in token_usage.values():
         inp = usage.get("input_tokens", 0)
         out = usage.get("output_tokens", 0)
         cr  = usage.get("cache_read_input_tokens", 0)
         cc  = usage.get("cache_creation", {})
-        cw  = (cc.get("ephemeral_5m_input_tokens", 0) +
-               cc.get("ephemeral_1h_input_tokens", 0) +
-               usage.get("cache_creation_input_tokens", 0))
-        total_tokens["input"]       += inp
-        total_tokens["output"]      += out
-        total_tokens["cache_read"]  += cr
-        total_tokens["cache_write"] += cw
-        peak_context = max(peak_context, inp + out + cr)
+        cw5 = cc.get("ephemeral_5m_input_tokens", 0)
+        cw1 = cc.get("ephemeral_1h_input_tokens", 0)
+        if not cw5 and not cw1:
+            cw5 = usage.get("cache_creation_input_tokens", 0)
+        total_tokens["input"]         += inp
+        total_tokens["output"]        += out
+        total_tokens["cache_read"]    += cr
+        total_tokens["cache_write_5m"] += cw5
+        total_tokens["cache_write_1h"] += cw1
+        peak_context = max(peak_context, inp + out + cr + cw5 + cw1)
 
-    rate_key, rates = rates_for_model(model)
-    cost_usd = (
-        total_tokens["input"]       * rates["input"]       / 1_000_000 +
-        total_tokens["output"]      * rates["output"]      / 1_000_000 +
-        total_tokens["cache_read"]  * rates["cache_read"]  / 1_000_000 +
-        total_tokens["cache_write"] * rates["cache_write"] / 1_000_000
-    )
+    cache_write_total = total_tokens["cache_write_5m"] + total_tokens["cache_write_1h"]
+    rate_key, _ = rates_for_model(model)
+    cost_usd = compute_cost_usd(model, total_tokens)
 
     duration_s = None
     if len(timestamps) >= 2:
@@ -441,26 +452,26 @@ def parse_subagent_jsonl(jsonl_path, description, target, agent_type,
     output_tokens_total = total_tokens["output"]
     billed_tokens_total = sum(total_tokens.values())
 
-    # H4: collect duplicate tool-call signatures (count > 1).
+    # H4: collect duplicate tool-call signatures (count > 1 within one
+    # mutation-free span — see span_signatures above).
     repeated_calls = []
-    for sig, count in tool_signatures.items():
-        if count > 1:
-            tool_name, _ = sig
-            sample = tool_signature_samples.get(sig, {})
-            preview = (sample.get("file_path")
-                       or sample.get("command")
-                       or sample.get("path")
-                       or sample.get("pattern")
-                       or "")
-            repeated_calls.append({
-                "tool": tool_name,
-                "count": count,
-                "preview": str(preview)[:120],
-            })
-            violations.append({
-                "check": "H4",
-                "detail": f"{tool_name} called {count}× with identical input: {str(preview)[:100]}",
-            })
+    for sig, count in repeated_counts.items():
+        tool_name, _ = sig
+        sample = tool_signature_samples.get(sig, {})
+        preview = (sample.get("file_path")
+                   or sample.get("command")
+                   or sample.get("path")
+                   or sample.get("pattern")
+                   or "")
+        repeated_calls.append({
+            "tool": tool_name,
+            "count": count,
+            "preview": str(preview)[:120],
+        })
+        violations.append({
+            "check": "H4",
+            "detail": f"{tool_name} called {count}× with identical input and no intervening edit: {str(preview)[:100]}",
+        })
 
     # F6: cache hit ratio over the turn-aggregated input. cache_read counts the
     # cached portion of each turn's prompt; input counts the uncached portion.
@@ -497,7 +508,14 @@ def parse_subagent_jsonl(jsonl_path, description, target, agent_type,
         "output_tokens": output_tokens_total,
         "peak_context_tokens": peak_context,
         "billed_tokens": billed_tokens_total,
-        "tokens": total_tokens,
+        "tokens": {
+            "input":          total_tokens["input"],
+            "output":         total_tokens["output"],
+            "cache_read":     total_tokens["cache_read"],
+            "cache_write":    cache_write_total,
+            "cache_write_5m": total_tokens["cache_write_5m"],
+            "cache_write_1h": total_tokens["cache_write_1h"],
+        },
         "cache_hit_ratio": round(cache_hit_ratio, 3) if cache_hit_ratio is not None else None,
         "cost_usd": round(cost_usd, 4),
         "turns": turn_count,
@@ -532,7 +550,7 @@ def agent_label(a):
 
 # ── Checks ───────────────────────────────────────────────────────────────────
 
-def run_checks(agents, project_types, h1_patterns, h3_pattern, dag_shape, discovered_agents=None):
+def run_checks(agents, dag_shape, discovered_agents=None):
     """F-, G-, H-, W-group checks across all evaluated agents."""
     checks = []
     eval_agents = [a for a in agents if "error" not in a]
@@ -664,30 +682,31 @@ def run_checks(agents, project_types, h1_patterns, h3_pattern, dag_shape, discov
             "detail": "No agents with ≥3 turns and ≥50k input+cache_read",
         })
 
-    # F7: Model right-sizing. Terminal/writer roles (-pm, -log) on Opus is
-    # almost always overkill — these agents do mechanical writes/handoffs and
-    # don't need Opus reasoning. Reviewer/producer on Opus is fine. SKIP when
-    # discovery couldn't infer roles for the project.
+    # F7: Model right-sizing. Terminal/writer roles (-pm, -log) on Opus or
+    # Fable is almost always overkill — these agents do mechanical
+    # writes/handoffs and don't need frontier reasoning. Reviewer/producer on
+    # a big model is fine. SKIP when discovery couldn't infer roles.
     over_provisioned_roles = {"terminal", "writer"}
+    big_model_keys = ("opus", "fable")
     role_aware = [a for a in eval_agents if a.get("role") in {"producer", "reviewer", "terminal", "writer", "free-form", "unknown"}]
     if role_aware:
         flagged = [
             a for a in eval_agents
             if a.get("role") in over_provisioned_roles
-            and a.get("model") and "opus" in a["model"].lower()
+            and a.get("model") and any(k in a["model"].lower() for k in big_model_keys)
         ]
         if flagged:
             detail = ", ".join(f"{agent_label(a)} ({a['role']} on {a['model']})" for a in flagged)
             checks.append({
                 "id": "F7", "group": "efficiency", "name": "Model right-sizing",
                 "status": "WARN", "value": len(flagged),
-                "detail": f"Terminal/writer agent on Opus: {detail}",
+                "detail": f"Terminal/writer agent on Opus/Fable: {detail}",
             })
         else:
             checks.append({
                 "id": "F7", "group": "efficiency", "name": "Model right-sizing",
                 "status": "PASS", "value": 0,
-                "detail": "No terminal/writer agents on Opus",
+                "detail": "No terminal/writer agents on Opus/Fable",
             })
     else:
         checks.append({
@@ -723,11 +742,12 @@ def run_checks(agents, project_types, h1_patterns, h3_pattern, dag_shape, discov
         })
 
     # F9: Time-to-first-tool. Long gap between agent start and first tool call =
-    # excessive thinking before action. Threshold 30s — typical agents act in
-    # under 10s. SKIP if no agent has both timestamps available.
+    # excessive thinking before action. Threshold 60s — adaptive-thinking models
+    # legitimately reason for tens of seconds on hard tasks before acting.
+    # SKIP if no agent has both timestamps available.
     f9_eligible = [a for a in eval_agents if a.get("time_to_first_tool_s") is not None]
     if f9_eligible:
-        slow = [a for a in f9_eligible if a["time_to_first_tool_s"] > 30]
+        slow = [a for a in f9_eligible if a["time_to_first_tool_s"] > 60]
         if slow:
             detail = ", ".join(f"{agent_label(a)} ({a['time_to_first_tool_s']:.0f}s)" for a in slow)
             checks.append({
@@ -825,13 +845,21 @@ def run_checks(agents, project_types, h1_patterns, h3_pattern, dag_shape, discov
             "detail": "No agents declare a handoff Status format in .claude/agents/*.md",
         })
 
-    # G3: Retry rate (informational)
-    needs_retry = [a for a in eval_agents if a.get("result_status") == "NEEDS_RETRY"]
-    retry_rate = len(needs_retry) / len(eval_agents)
+    # G3: Failure-status rate (informational). Statuses are discovered per
+    # project, so "failure" is matched by token (blocked/failed/retry/error)
+    # rather than a hardcoded vocabulary. Also reports the full distribution.
+    failure_re = re.compile(r"(block|fail|retry|error|abort)", re.IGNORECASE)
+    failed = [a for a in eval_agents
+              if a.get("result_status") and failure_re.search(a["result_status"])]
+    dist = {}
+    for a in eval_agents:
+        s = a.get("result_status") or "unknown"
+        dist[s] = dist.get(s, 0) + 1
+    dist_str = ", ".join(f"{k}: {v}" for k, v in sorted(dist.items()))
     checks.append({
-        "id": "G3", "group": "reliability", "name": "Retry rate",
-        "status": "INFO", "value": round(retry_rate, 2),
-        "detail": f"{len(needs_retry)}/{len(eval_agents)} agents ended with NEEDS_RETRY",
+        "id": "G3", "group": "reliability", "name": "Failure-status rate",
+        "status": "INFO", "value": round(len(failed) / len(eval_agents), 2),
+        "detail": f"{len(failed)}/{len(eval_agents)} agents ended in a failure-like status | {dist_str}",
     })
 
     # G4: Unknown outcomes — declared handoff or artifact, but produced neither.
@@ -922,55 +950,59 @@ def run_checks(agents, project_types, h1_patterns, h3_pattern, dag_shape, discov
 
     # ── H: Behavioral Compliance ──────────────────────────────────────────────
 
-    if h1_patterns:
-        h1_viols = [v for a in eval_agents for v in a.get("violations", []) if v["check"] == "H1"]
-        if h1_viols:
-            checks.append({
-                "id": "H1", "group": "behavioral", "name": "Source code reading",
-                "status": "FAIL", "value": len(h1_viols),
-                "detail": f"{len(h1_viols)} violation(s): {h1_viols[0]['detail'][:100]}",
-            })
-        else:
-            checks.append({
-                "id": "H1", "group": "behavioral", "name": "Source code reading",
-                "status": "PASS", "value": 0, "detail": "No source code access detected",
-            })
+    # H1: suspect path access — always on (patterns are suspect in any project
+    # type). WARN, not FAIL: wasteful/noisy, but not a broken pipeline.
+    h1_viols = [v for a in eval_agents for v in a.get("violations", []) if v["check"] == "H1"]
+    if h1_viols:
+        checks.append({
+            "id": "H1", "group": "behavioral", "name": "Suspect path access",
+            "status": "WARN", "value": len(h1_viols),
+            "detail": f"{len(h1_viols)} access(es) to node_modules / other-session transcripts: {h1_viols[0]['detail'][:100]}",
+        })
     else:
         checks.append({
-            "id": "H1", "group": "behavioral", "name": "Source code reading",
-            "status": "SKIP", "value": None, "detail": "No web project detected",
+            "id": "H1", "group": "behavioral", "name": "Suspect path access",
+            "status": "PASS", "value": 0,
+            "detail": "No dependency-tree or transcript-directory access detected",
         })
 
+    # H2: shell loops are legitimate in generic workflows — reported as INFO
+    # for visibility, never as a violation.
     h2_viols = [v for a in eval_agents for v in a.get("violations", []) if v["check"] == "H2"]
     if h2_viols:
         checks.append({
             "id": "H2", "group": "behavioral", "name": "Shell loop usage",
-            "status": "WARN", "value": len(h2_viols),
-            "detail": f"{len(h2_viols)} shell loop(s) detected",
+            "status": "INFO", "value": len(h2_viols),
+            "detail": f"{len(h2_viols)} shell loop(s) used (informational)",
         })
     else:
         checks.append({
             "id": "H2", "group": "behavioral", "name": "Shell loop usage",
-            "status": "PASS", "value": 0, "detail": "No shell loops detected",
+            "status": "INFO", "value": 0, "detail": "No shell loops detected",
         })
 
-    if h3_pattern:
+    # H3: artifact header format — gated on discovery finding a header template
+    # in a log skill's SKILL.md. No template discovered → SKIP, not a guess.
+    h3_gated = [a for a in eval_agents
+                if build_artifact_header_regex(discovered_agents.get(a.get("agent_type"), {}))]
+    if h3_gated:
         h3_viols = [v for a in eval_agents for v in a.get("violations", []) if v["check"] == "H3"]
         if h3_viols:
             checks.append({
                 "id": "H3", "group": "behavioral", "name": "Output artifact format",
                 "status": "WARN", "value": len(h3_viols),
-                "detail": f"{len(h3_viols)} artifact(s) missing required header",
+                "detail": f"{len(h3_viols)} artifact(s) missing the header discovered from the log skill",
             })
         else:
             checks.append({
                 "id": "H3", "group": "behavioral", "name": "Output artifact format",
-                "status": "PASS", "value": 0, "detail": "All artifacts have correct header",
+                "status": "PASS", "value": 0, "detail": "All artifacts match the discovered header template",
             })
     else:
         checks.append({
             "id": "H3", "group": "behavioral", "name": "Output artifact format",
-            "status": "SKIP", "value": None, "detail": "No web project detected",
+            "status": "SKIP", "value": None,
+            "detail": "No artifact header template discoverable from log skills",
         })
 
     # H5: File re-read. Same path Read ≥3× without an intervening Edit/Write
@@ -1282,13 +1314,21 @@ def build_summary(agents, checks):
 
 def main():
     if len(sys.argv) < 3:
-        print("Usage: transcript-parser.py <session-id> <target-name> [--output-dir DIR] [--scan]",
+        print("Usage: transcript-parser.py <session-id> <target-name> "
+              "[--output-dir DIR] [--scan] [--compare BASELINE.json]",
               file=sys.stderr)
         sys.exit(1)
 
     session_id = sys.argv[1]
     target = sys.argv[2]
     do_scan = "--scan" in sys.argv
+    compare_path = None
+    if "--compare" in sys.argv:
+        idx = sys.argv.index("--compare")
+        if idx + 1 >= len(sys.argv):
+            print("ERROR: --compare requires a baseline JSON path", file=sys.stderr)
+            sys.exit(1)
+        compare_path = sys.argv[idx + 1]
 
     cwd = os.getcwd()
     project_dir = resolve_project_dir(cwd)
@@ -1302,9 +1342,6 @@ def main():
     project_types = detect_project_type(cwd)
     if project_types:
         print(f"INFO: Detected project types: {sorted(project_types)}", file=sys.stderr)
-
-    h1_patterns, h1_allowlist = build_h1_patterns(project_types)
-    h3_pattern = build_h3_pattern(project_types)
 
     discovery = discover_project(cwd)
     discovered_agents = discovery["agents"]
@@ -1356,8 +1393,7 @@ def main():
                     notes.append(f"agent '{agent_type}' spawned but not declared in .claude/agents/")
 
             result.append(parse_subagent_jsonl(
-                jsonl_path, description, target, agent_type,
-                agent_meta, h1_patterns, h1_allowlist, h3_pattern,
+                jsonl_path, description, target, agent_type, agent_meta,
             ))
         return result
 
@@ -1373,8 +1409,9 @@ def main():
         if alt_session:
             print(f"INFO: Found agent session {alt_session}, switching to it", file=sys.stderr)
             session_id = alt_session
-            alt_task_map = parse_parent_jsonl(os.path.join(project_dir, f"{alt_session}.jsonl"))
-            alt_type_map = parse_task_type_map(os.path.join(project_dir, f"{alt_session}.jsonl"))
+            parent_jsonl = os.path.join(project_dir, f"{alt_session}.jsonl")
+            alt_task_map = parse_parent_jsonl(parent_jsonl)
+            alt_type_map = parse_task_type_map(parent_jsonl)
             agents = parse_session_agents(alt_subagent_dir, alt_task_map, alt_type_map)
         else:
             print(f"WARNING: --scan found no agent session for target '{target}'", file=sys.stderr)
@@ -1393,7 +1430,7 @@ def main():
     if unknown_models:
         notes.append(f"Unknown model(s) {unknown_models} — fell back to {DEFAULT_RATE_KEY} rates")
 
-    checks = run_checks(agents, project_types, h1_patterns, h3_pattern, dag_shape, discovered_agents)
+    checks = run_checks(agents, dag_shape, discovered_agents)
 
     # Static-conformance group (S). Always-on; uses CWD's .claude/ files.
     # Pass undeclared agent types so S15 can promote the existing `note`
@@ -1409,6 +1446,11 @@ def main():
     orch_checks = run_orchestration_checks(cwd, eval_only)
     checks.extend(orch_checks)
 
+    # Parent-session (orchestrator) analysis: W2 orchestrator overhead,
+    # W8 spawn decision latency, O7 top-level source edits after delegation.
+    parent = analyze_parent_session(parent_jsonl, eval_only, compute_cost_usd)
+    checks.extend(parent["checks"])
+
     summary = build_summary(agents, checks)
 
     result = {
@@ -1420,9 +1462,20 @@ def main():
         "discovered_agent_names": sorted(discovered_agents.keys()),
         "notes": notes,
         "checks": checks,
+        "orchestrator": parent["orchestrator"],
         "agents": agents,
         "summary": summary,
     }
+
+    # Compare mode: regression deltas against a previous run's JSON output.
+    if compare_path:
+        try:
+            with open(compare_path) as f:
+                baseline = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"ERROR: Cannot read baseline {compare_path}: {e}", file=sys.stderr)
+            sys.exit(1)
+        result["comparison"] = build_comparison(baseline, result)
 
     print(json.dumps(result, indent=2))
 

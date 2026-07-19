@@ -2,7 +2,7 @@
 
 Static-conformance rules for the S-group. Each rule is anchored to a specific section of the Claude Code documentation. When the docs change, update the rule sets in `scripts/static_checks.py` and refresh the version stamp below.
 
-**Doc snapshot version:** 2026-05-07
+**Doc snapshot version:** 2026-07-19
 **Sources:**
 - Sub-agents: https://code.claude.com/docs/en/sub-agents
 - Skills: https://code.claude.com/docs/en/skills
@@ -30,9 +30,9 @@ Source: sub-agents `Supported frontmatter fields` table.
 - **Trigger:** WARN if `name` field ≠ filename stem
 
 ### S4: Model value
-- **Rule:** `model` accepts `sonnet`, `opus`, `haiku`, full model ID (e.g. `claude-opus-4-7`), or `inherit`
-- **Quote:** "Use one of the available aliases: sonnet, opus, or haiku" / "Use a full model ID such as claude-opus-4-7"
-- **Trigger:** WARN if value doesn't start with `sonnet`/`opus`/`haiku`/`inherit`/`claude-`
+- **Rule:** `model` accepts `sonnet`, `opus`, `haiku`, `fable`, full model ID (e.g. `claude-fable-5`), or `inherit`
+- **Source:** model-config doc — family aliases resolve to the newest version; `fable` documented alongside opus/sonnet/haiku since the Claude 5 launch
+- **Trigger:** WARN if value doesn't start with `sonnet`/`opus`/`haiku`/`fable`/`inherit`/`claude-`
 
 ### S5: Enum-typed fields
 - **Rules:**
@@ -65,8 +65,8 @@ Source: skills `Frontmatter reference` table.
 - **Trigger:** WARN on mismatch
 
 ### S9: Description length
-- **Rule:** "the combined `description` and `when_to_use` text is truncated at 1,536 characters in the skill listing"
-- **Trigger:** WARN if combined length > 1,536
+- **Rule:** historical — earlier docs stated "the combined `description` and `when_to_use` text is truncated at 1,536 characters in the skill listing"; the current skills doc no longer states a truncation limit
+- **Trigger:** INFO if combined length > 1,536 (kept as a size hygiene signal, downgraded from WARN since the documented cap is gone)
 
 ### S10: Body size
 - **Rule:** Tip in docs — "Keep SKILL.md under 500 lines. Move detailed reference material to separate files."
@@ -83,7 +83,7 @@ Source: skills `Frontmatter reference` table.
 Source: hooks doc — full event list and handler structure.
 
 ### S12: Event names
-- **Rule:** Top-level keys under `hooks` must be one of the 29 documented events:
+- **Rule:** Top-level keys under `hooks` must be one of the 30 documented events:
   ```
   SessionStart, Setup, UserPromptSubmit, UserPromptExpansion,
   PreToolUse, PermissionRequest, PermissionDenied, PostToolUse,
@@ -91,7 +91,8 @@ Source: hooks doc — full event list and handler structure.
   SubagentStop, TaskCreated, TaskCompleted, Stop, StopFailure,
   TeammateIdle, InstructionsLoaded, ConfigChange, CwdChanged,
   FileChanged, WorktreeCreate, WorktreeRemove, PreCompact,
-  PostCompact, Elicitation, ElicitationResult, SessionEnd
+  PostCompact, Elicitation, ElicitationResult, SessionEnd,
+  MessageDisplay
   ```
 - **Trigger:** FAIL on any unknown event (Claude Code silently ignores unknown events, so this is a critical lint)
 
@@ -112,8 +113,8 @@ Source: hooks doc — full event list and handler structure.
 
 ### S15: Spawned agents declared
 - **Rule:** Agent types observed in transcripts (`agent_type` from `meta.json`) should be declared in `.claude/agents/` so the project's pipeline is self-documenting and discovery can apply runtime checks (G1, G2, G4, W7) to them.
-- **Allowlist:** Built-in agents from the docs (sub-agents → Built-in subagents): `Explore`, `Plan`, `general-purpose`, `statusline-setup`, `claude-code-guide`. Update this set when Claude Code adds new built-ins.
-- **Trigger:** WARN if any non-built-in agent is undeclared. PASS otherwise.
+- **Allowlist:** Built-in agents: `Explore`, `Plan`, `general-purpose` (documented), plus `claude`, `statusline-setup`, `claude-code-guide` (exist in practice). Plugin-provided agents are named `plugin-name:agent-name` — any type containing a colon is exempt. Update the built-in set when Claude Code adds new ones.
+- **Trigger:** WARN if any non-exempt agent is undeclared. PASS otherwise.
 
 ---
 

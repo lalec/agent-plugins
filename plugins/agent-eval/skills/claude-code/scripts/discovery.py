@@ -55,6 +55,15 @@ UPSTREAM_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Heading template line inside a log skill's SKILL.md — a markdown heading whose
+# text contains placeholder syntax (YYYY date stubs, <angle> or {curly}
+# placeholders). Its heading level becomes the required header for artifact
+# writes (H3). Example: `### YYYY-MM-DD HH:MM · <7-char hash> — <title>`.
+HEADER_TEMPLATE_RE = re.compile(
+    r"^(#{1,6})\s+.*(?:YYYY|<[^>\n]+>|\{[^}\n]+\})",
+    re.MULTILINE,
+)
+
 
 def _read_frontmatter(text: str) -> Tuple[Dict[str, str], str]:
     """Split YAML frontmatter from body. Returns (frontmatter_dict, body)."""
@@ -73,8 +82,13 @@ def _read_frontmatter(text: str) -> Tuple[Dict[str, str], str]:
     return fm, body
 
 
-def _resolve_log_skill_artifacts(skill_name: str, cwd: str) -> List[str]:
-    """Read a *-log skill's SKILL.md and extract docs/*.md paths it writes."""
+def _resolve_log_skill_artifacts(skill_name: str, cwd: str) -> Tuple[List[str], Optional[str]]:
+    """Read a *-log skill's SKILL.md → (docs/*.md paths it writes, header pattern).
+
+    The header pattern is derived from the first heading-shaped template line in
+    the skill body (see HEADER_TEMPLATE_RE): its heading level becomes the regex
+    artifact writes must contain. None when no template is found.
+    """
     candidates = [
         os.path.join(cwd, ".claude", "skills", skill_name, "SKILL.md"),
         os.path.expanduser(f"~/.claude/skills/{skill_name}/SKILL.md"),
@@ -90,9 +104,13 @@ def _resolve_log_skill_artifacts(skill_name: str, cwd: str) -> List[str]:
         # Pull docs/*.md mentions from the skill body — log skills always document
         # their target file in their own SKILL.md.
         paths = list(set(re.findall(r"docs/[\w/.-]+\.md", body)))
+        header_pattern = None
+        m = HEADER_TEMPLATE_RE.search(body)
+        if m:
+            header_pattern = rf"^#{{{len(m.group(1))}}}\s+"
         if paths:
-            return paths
-    return []
+            return paths, header_pattern
+    return [], None
 
 
 def _discover_agent(path: str, cwd: str) -> Dict:
@@ -135,13 +153,16 @@ def _discover_agent(path: str, cwd: str) -> Dict:
     # Inline mentions of docs/*.md without one of these anchors are ignored to avoid
     # over-flagging on conditional writes (e.g. roadmap entries).
     artifact_paths: Set[str] = set()
+    artifact_header_pattern: Optional[str] = None
 
     log_skills: Set[str] = set()
     for m in LOG_SKILL_RE.finditer(body):
         log_skills.add(m.group(1).lower())
     for skill in log_skills:
-        resolved = _resolve_log_skill_artifacts(skill, cwd)
+        resolved, header = _resolve_log_skill_artifacts(skill, cwd)
         artifact_paths.update(resolved)
+        if header and artifact_header_pattern is None:
+            artifact_header_pattern = header
         # Fallback: if the skill body didn't declare a path, look for docs/*.md
         # in the same line as the skill reference in the agent body.
         if not resolved:
@@ -188,6 +209,7 @@ def _discover_agent(path: str, cwd: str) -> Dict:
         "has_handoff": has_handoff,
         "handoff_patterns": handoff_patterns,
         "artifact_paths": sorted(artifact_paths),
+        "artifact_header_pattern": artifact_header_pattern,
         "downstreams": sorted(downstreams),
         "upstreams": sorted(upstreams),
     }
@@ -258,3 +280,12 @@ def build_handoff_regex(agent_meta: Dict):
         return None
     combined = "|".join(f"(?:{p})" for p in patterns)
     return re.compile(combined, re.MULTILINE)
+
+
+def build_artifact_header_regex(agent_meta: Dict):
+    """Compile the per-agent artifact header regex discovered from the log
+    skill's template. Returns None when no template was discoverable."""
+    pattern = agent_meta.get("artifact_header_pattern")
+    if not pattern:
+        return None
+    return re.compile(pattern, re.MULTILINE)

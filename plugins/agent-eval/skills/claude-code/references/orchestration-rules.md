@@ -4,7 +4,7 @@ Heuristic checks that cross-reference declared frontmatter (`.claude/agents/*.md
 
 **Heuristic, not deterministic.** False-positive rate is higher than the other groups. Each detail line includes raw counts so the reader can verify findings fast.
 
-**Doc snapshot version:** 2026-05-07
+**Doc snapshot version:** 2026-07-19
 
 ---
 
@@ -93,12 +93,25 @@ The trailing `\w*` catches conjugations: `deployed`, `commits`, `migrating`, etc
 
 ---
 
+## O7: Top-level source edits after delegation
+
+**Source:** the point of subagents — the orchestrator delegates work to isolated contexts rather than doing it inline. An orchestrator that Edit/Writes project source *after* handing work to agents is absorbing a subagent's role: the edit bypasses whatever review/handoff discipline the pipeline encodes, and its token cost lands in the orchestrator's window.
+
+**Trigger:** Any parent-session `Edit`/`Write` after the first subagent spawn whose `file_path` resolves inside the project root and is not exempt. Exempt (project-relative): `docs/`, `.claude/`, `node_modules/`, and `*.md` — bookkeeping the orchestrator legitimately owns. Paths outside the project root (temp files, scratch dirs) are ignored.
+
+**Detection:** implemented in `scripts/parent_session.py` (`_check_o7`) because it needs parent-transcript data, not frontmatter — it is grouped under `orchestration` in the output like the other O-checks.
+
+**Severity:** WARN. Legitimate cases exist (a one-line hotfix the user asked for directly mid-run), which is why this isn't FAIL — but recurring O7 hits mean the pipeline's delegation boundary is leaking.
+
+---
+
 ## Maintenance
 
 When tuning thresholds:
 - O2: lower the `O2_DISTINCT_TOOL_CEILING` if you want narrower flagging; raise the `O2_MIN_TOTAL_CALLS` floor if small-sample noise becomes a problem
 - O5: bump `O5_PROMPT_CHAR_THRESHOLD` if your project legitimately uses long structured handoffs
+- O7: extend `O7_EXEMPT_RE` in `scripts/parent_session.py` if your project has other orchestrator-owned paths
 
 When adding destructive verbs (O6): edit `DESTRUCTIVE_VERB_RE` in `scripts/orchestration_checks.py`. Match against project conventions — e.g. if your project uses `flush` or `wipe` for destructive operations, add them.
 
-To add new O-checks: same pattern as the existing five — a `_check_oN(...)` helper that returns one or more check dicts via the `_check()` builder, registered in `run_orchestration_checks()`. Group field is always `"orchestration"`.
+To add new O-checks: frontmatter-vs-behavior checks follow the existing pattern in `orchestration_checks.py` (a `_check_oN(...)` helper registered in `run_orchestration_checks()`); checks needing parent-transcript data live in `parent_session.py`. Group field is always `"orchestration"`.

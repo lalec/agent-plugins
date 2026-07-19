@@ -7,15 +7,17 @@ description: Use when evaluating agent process quality and workflow efficiency f
 
 ## Overview
 
-Evaluates **agent process quality, workflow efficiency, Claude Code spec conformance, and orchestration efficiency** for instruction-based agent pipelines. Parses JSONL transcripts from `~/.claude/projects/` for runtime metrics, and reads `.claude/agents/`, `.claude/skills/`, `.claude/settings*.json` from CWD for static and orchestration checks. Applies **46 checks** across 6 groups (deterministic for F/G/H/W/S; heuristic for O).
+Evaluates **agent process quality, workflow efficiency, Claude Code spec conformance, and orchestration efficiency** for instruction-based agent pipelines. Parses JSONL transcripts from `~/.claude/projects/` — both the subagent files and the parent (orchestrator) session — for runtime metrics, and reads `.claude/agents/`, `.claude/skills/`, `.claude/settings*.json` from CWD for static and orchestration checks. Applies **49 checks** across 6 groups (deterministic for F/G/H/W/S; heuristic for O).
 
 **No model grading.** All checks are deterministic — thresholds applied to numeric metrics.
 
-**No config.** Per-agent expectations (handoff format, artifact paths, pipeline shape) are discovered at runtime from `.claude/agents/*.md`. Per-agent cost is computed from each spawn's actual model recorded in the JSONL transcript. There is no `agent-eval.json` — if one exists in the project, it is ignored.
+**No config.** Per-agent expectations (handoff format, artifact paths, artifact header template, pipeline shape) are discovered at runtime from `.claude/agents/*.md` and the log skills they reference. Per-agent cost is computed from each spawn's actual model recorded in the JSONL transcript (cache writes priced by TTL: 5-minute at 1.25× input rate, 1-hour at 2×). There is no `agent-eval.json` — if one exists in the project, it is ignored.
+
+**Generic by design.** No workflow-specific assumptions: reading project source is never a violation (that's the agents' job in dev pipelines), shell loops are informational, and re-running an identical command after an edit is treated as legitimate iterate/verify behavior — loop-style workflows evaluate cleanly.
 
 **Claude Code native.** Agent types come from `agent-{id}.meta.json` written by the runtime at spawn time.
 
-**W2/W6 omitted.** They require `queue-operation` records that Claude Code's `Agent` tool never writes. Permanently removed — not SKIP noise.
+**W6 omitted.** It requires `queue-operation` records that Claude Code's `Agent` tool never writes. Permanently removed — not SKIP noise. (W2 is computed directly from the parent JSONL.)
 
 ---
 
@@ -23,13 +25,14 @@ Evaluates **agent process quality, workflow efficiency, Claude Code spec conform
 
 ```bash
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/claude-code/scripts/transcript-parser.py \
-  <session-id> <target-name> [--output-dir DIR] [--scan]
+  <session-id> <target-name> [--output-dir DIR] [--scan] [--compare BASELINE.json]
 ```
 
 **Arguments**
 - `<session-id>`: parent session UUID. If not known, list sessions sorted by date and ask which to evaluate (`ls -lt ~/.claude/projects/{project-slug}/*.jsonl | head -10`). Do NOT default to the current conversation session.
 - `<target-name>`: free-text label for the run (used in the output report; no logic depends on it).
 - `--scan`: if the given session has no agents, scan sibling sessions in `~/.claude/projects/{project-dir}/` and switch to the first one containing agent JSONL files.
+- `--compare BASELINE.json`: a previous run's saved JSON output. Adds a `comparison` section — check-status regressions/improvements, coverage changes, summary metric deltas, and per-agent-type deltas. Use this to detect regressions after changing agent configs, skills, or models.
 
 **Project slug:** the directory under `~/.claude/projects/` is your CWD with `/` replaced by `-`. Example: `/Users/me/proj/foo` → `-Users-me-proj-foo`.
 
@@ -37,9 +40,11 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/claude-code/scripts/transcript-parser.py \
 - `dag_shape` — `sequential` / `branching` / `unknown`
 - `discovered_agent_names` — agents found in `.claude/agents/`
 - `notes` — top-level warnings (undeclared agents, unknown models)
-- `checks` — 46 check results (id, group, name, status, value, detail). Groups: `efficiency` (F), `reliability` (G), `behavioral` (H), `workflow` (W), `spec` (S — static conformance to Claude Code docs), `orchestration` (O — frontmatter usage vs actual transcript behavior)
+- `checks` — 49 check results (id, group, name, status, value, detail). Groups: `efficiency` (F), `reliability` (G), `behavioral` (H), `workflow` (W), `spec` (S — static conformance to Claude Code docs), `orchestration` (O — frontmatter usage vs actual transcript behavior)
+- `orchestrator` — parent-session metrics (model, turns, billed_tokens, cost_usd, peak_context_tokens, tool_calls, subagent_spawns)
 - `agents` — per-agent metrics (peak_context_tokens, billed_tokens, cache_hit_ratio, role, tool_churn_ratio, time_to_first_tool_s, empty_turns, repeated_tool_calls, first_user_prompt, last_text, …)
 - `summary` — aggregate counts (headline: `total_peak_context_tokens`; cost via `total_billed_tokens`)
+- `comparison` — only with `--compare`: regressions, improvements, coverage_changes, new/removed checks, summary_deltas, agent_deltas
 
 Save output:
 ```bash
@@ -59,6 +64,7 @@ Discovery reads `.claude/agents/*.md` from CWD. Per agent file:
 | `has_handoff` | Body contains a `**Status:** <values>` line **or** `RESULT: <value>` line |
 | `handoff_patterns` | Built from the captured Status values per agent (so each agent's actual format is checked) |
 | `artifact_paths` | (1) Resolved from any `<prefix>-log` skill the agent invokes (read from `.claude/skills/<name>-log/SKILL.md` or `~/.claude/skills/<name>-log/SKILL.md`); (2) explicit `Output: PATH`, `Writes to: PATH`, `Delivers: PATH`, `Artifact: PATH` lines |
+| `artifact_header_pattern` | Derived from the first heading-shaped template line in the log skill's SKILL.md (a markdown heading containing `YYYY`, `<angle>`, or `{curly}` placeholders) — its heading level becomes the regex artifact Writes must match (H3). `None` when no template is found |
 | `downstreams` | "spawn X", "invoke X", "delegate to X", "hand off to X", "tell user to invoke X" — references to other declared agent names |
 | `upstreams` | "Invoked after X" / "after X completes" in the description |
 | `role` | Suffix `-dev` → producer, `-qa` → reviewer, `-pm` → terminal, `-log` → writer; otherwise inferred from Status values |
@@ -76,21 +82,15 @@ For each check with `status == "FAIL"` or `status == "WARN"`, note the check ID,
 
 For G1 (silent failure): verify the artifact actually exists on disk.
 
+With `--compare`: surface every entry in `comparison.regressions` prominently — a check that moved from PASS to WARN/FAIL between runs is the headline finding.
+
 Write `{output-file}-agent-eval.md` using the format below.
 
 ---
 
-## Auto-Detection
+## Project-Type Detection
 
-The parser scans CWD for project indicators:
-
-| Indicator | Detected type | Effect |
-|---|---|---|
-| `package.json`, `*.js`, `*.ts` | `web` | H1 (source-code reading) and H3 (artifact format) activate |
-| `Dockerfile` | `docker` | (no checks currently) |
-| `requirements.txt`, `*.py` | `python` | (no checks currently) |
-
-On non-web projects, H1 and H3 SKIP.
+The parser scans CWD for indicators (`package.json`/`*.ts` → `web`, `Dockerfile` → `docker`, `requirements.txt`/`*.py` → `python`) and reports them in the JSON as context. **No checks depend on project type**: H1's suspect-path patterns are suspect in any project, and H3 is gated on discovery finding a header template, not on stack detection.
 
 ---
 
@@ -105,9 +105,9 @@ On non-web projects, H1 and H3 SKIP.
 | F4 | Context outliers (>2× median peak) | WARN if any agent's `peak_context_tokens` > 2× median |
 | F5 | Duration spread | WARN if max/min > 5× |
 | F6 | Cache hit ratio | WARN if any multi-turn agent (≥3 turns, ≥50k input+cache_read) reads <30% from cache |
-| F7 | Model right-sizing | WARN if any terminal/writer-role agent runs on Opus |
+| F7 | Model right-sizing | WARN if any terminal/writer-role agent runs on Opus or Fable |
 | F8 | Tool churn ratio | WARN if any agent with ≥10 tool calls has `total_calls / distinct_tools` > 10 |
-| F9 | Time-to-first-tool | WARN if any agent waits >30s between first user record and first tool_use |
+| F9 | Time-to-first-tool | WARN if any agent waits >60s between first user record and first tool_use (adaptive-thinking models legitimately reason for tens of seconds first) |
 | F10 | Empty (no-tool) turns | WARN if any agent with ≥5 turns has >30% (and ≥3) empty turns |
 
 ### Group G: Reliability
@@ -116,18 +116,18 @@ On non-web projects, H1 and H3 SKIP.
 |---|---|---|---|
 | G1 | Silent failures | Skip when no agent declares an artifact path | FAIL if any artifact-declaring agent didn't Edit/Write a matching path |
 | G2 | Result completeness | Skip when no agent declares a handoff format | WARN if any handoff-declaring agent's final message has no parseable Status |
-| G3 | Retry rate | — | INFO |
+| G3 | Failure-status rate | — | INFO — fraction of agents whose discovered Status matches a failure token (block/fail/retry/error/abort), plus the full status distribution |
 | G4 | Unknown outcomes | Skip when no agent declares either | FAIL if a declaring agent produced neither Status nor artifact |
 | G5 | Handoff content lineage | Skip if <2 agents | INFO — reports % of consecutive transitions where upstream's `last_text` tokens (file paths, Status values, backticked identifiers) appear in downstream's first user prompt |
 
 ### Group H: Behavioral Compliance
 
-| ID | Name | Auto-detect | Trigger |
+| ID | Name | Gating | Trigger |
 |---|---|---|---|
-| H1 | Source code reading | Web projects | FAIL on any |
-| H2 | Shell loop usage | Always | WARN on any |
-| H3 | Output artifact format | Web projects | WARN on malformed artifact header |
-| H4 | Repeated identical tool calls | Always | WARN on any duplicate `(tool, input)` pair within an agent |
+| H1 | Suspect path access | Always | WARN on Read/Bash touching `node_modules/` or `.claude/projects/` (other sessions' transcripts). Reading project source is never flagged |
+| H2 | Shell loop usage | Always | INFO — loops are legitimate in generic workflows; reported for visibility only |
+| H3 | Output artifact format | Header template discovered from a log skill | WARN if an artifact Write lacks the discovered header; SKIP when no template is discoverable |
+| H4 | Repeated identical tool calls | Always | WARN on a duplicate `(tool, input)` pair **with no intervening Edit/Write** — re-running a command after a change (iterate/verify loops) is not a duplicate |
 | H5 | File re-read without edit | Always | WARN if any agent Reads the same `file_path` ≥3× without an intervening Edit/Write |
 
 ### Group W: Workflow Efficiency
@@ -135,10 +135,12 @@ On non-web projects, H1 and H3 SKIP.
 | ID | Name | Trigger |
 |---|---|---|
 | W1 | Total workflow duration | INFO (wall time vs sum of agent durations) |
+| W2 | Orchestrator overhead | INFO — orchestrator billed tokens as % of workflow total, plus orchestrator cost (from parent JSONL) |
 | W3 | Parallel efficiency | WARN < 30% concurrent — auto-downgraded to INFO when DAG is `sequential` |
 | W4 | Sequential bottlenecks | WARN > 50% serial — auto-downgraded to INFO when DAG is `sequential` |
 | W5 | Idle time | WARN > 20% of wall time |
 | W7 | Spawn-order vs declared DAG | FAIL if any declared `upstream` agent (from "Invoked after X" in description) was first-spawned after the agent that declares it. SKIP if no upstream edges declared |
+| W8 | Spawn decision latency | INFO — median/max gap between an agent's completion and the next spawn in the parent session (orchestrator deliberation time between handoffs) |
 
 ### Group S: Claude Code Spec Conformance
 
@@ -175,6 +177,7 @@ Cross-references each agent's declared frontmatter against actual transcript beh
 | O4 | Description quality | WARN if agent `description` is <40 chars or lacks a delegation trigger phrase (`use when/for/proactively`, `invoked when/after`, etc.) |
 | O5 | Orchestrator prompt size | WARN if any agent's first user prompt exceeds 5,000 chars — orchestrator may be dumping unnecessary context |
 | O6 | Destructive skill safety | WARN if a skill's description matches destructive verbs (`deploy`, `commit`, `push`, `delete`, `migrate`, `release`, `drop`, `truncate`, `reset`, `publish`) without `disable-model-invocation: true` |
+| O7 | Top-level source edits after delegation | WARN if the orchestrator itself Edit/Writes project source files after its first subagent spawn (role absorption). Project-relative `docs/`, `.claude/`, and `*.md` paths are exempt; paths outside the project root are ignored |
 
 ---
 
@@ -185,6 +188,9 @@ Cross-references each agent's declared frontmatter against actual transcript beh
 - **Custom handoff header (e.g. `## Output` instead of `## Handoff`)** — fine. Discovery scans the whole body for `**Status:**` and `RESULT:` lines, not the header.
 - **Agent spawned but not in `.claude/agents/`** — added to top-level `notes` ("agent X spawned but not declared"); doesn't crash. The agent's checks SKIP individually.
 - **Mixed-model pipeline (one agent on Opus, others on Sonnet)** — per-agent cost reflects each agent's actual model. Unknown model strings fall back to Sonnet rates and are listed in `notes`.
+- **Loop-style workflows (iterate/verify, repeated same-type spawns)** — evaluate cleanly: H4 resets on every Edit/Write, H2 is informational, and repeated spawns of one agent type are separate agent files with separate metrics.
+- **Baseline from an older parser version (`--compare`)** — checks present in only one run land in `new_checks`/`removed_checks`, never in regressions.
+- **Parent JSONL unreadable for orchestrator analysis** — W2/W8/O7 SKIP; everything else runs.
 
 ---
 
@@ -207,6 +213,7 @@ Cross-references each agent's declared frontmatter against actual transcript beh
 | Workflow cache hit ratio | {workflow_cache_hit_ratio} |
 | Total billed tokens (cost basis) | {total_billed_tokens} |
 | Total cost | ${cost} |
+| Orchestrator | {model} · {turns} turns · {billed_tokens} tokens · ${cost} ({share}% of workflow) |
 | Result statuses | {status_counts} |
 
 **Headline = peak context, not billed tokens.** `total_peak_context_tokens` sums each agent's largest single-turn context — matches what Claude Code shows in agent returns ("35.2k tokens"). `total_billed_tokens` re-counts cached context per turn and is only useful as the cost basis.
@@ -251,6 +258,16 @@ Cross-references each agent's declared frontmatter against actual transcript beh
 **Violations:**
 - H1: {detail}
 
+## Regressions vs baseline   ← only with --compare
+
+**Baseline:** {baseline_session_id} ({baseline_timestamp})
+
+| Check | Baseline | Current | Detail |
+|---|---|---|---|
+| {id} {name} | {baseline status} | {current status} | {detail} |
+
+{Metric deltas worth calling out: total cost, peak context, per-agent-type cost/turns}
+
 ## Recommendations
 
 1. {Specific actionable fix for each FAIL/WARN}
@@ -264,6 +281,8 @@ Cross-references each agent's declared frontmatter against actual transcript beh
 - `scripts/discovery.py` — reads `.claude/agents/*.md` and infers per-agent metadata + DAG shape
 - `scripts/static_checks.py` — S-group static conformance checks against Claude Code docs
 - `scripts/orchestration_checks.py` — O-group heuristic checks (frontmatter usage vs actual behavior)
+- `scripts/parent_session.py` — parent-session (orchestrator) analysis: W2, W8, O7
+- `scripts/comparison.py` — `--compare` regression diffing between two runs
 - `references/behavioral-rules.md` — violation patterns, thresholds, W-check logic
 - `references/spec-conformance.md` — S-group rules anchored to Claude Code doc URLs (with version stamp)
 - `references/orchestration-rules.md` — O-group thresholds and rationale

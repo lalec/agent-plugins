@@ -48,7 +48,7 @@ For Frontend skills with the Visual Decisions block: this Preconditions rule is 
 <DESIGN_DELEGATION>
 ## Quality Checklist
 
-Run before proceeding to deploy. Every command here must be **non-interactive** (`CI=1`, `--yes`/`--no-input`, explicit timeout) — an interactive prompt inside a subagent stalls the whole pipeline until a watchdog kills the agent. A new or changed test file must also pass **standalone** (run just that file in a clean interpreter) — a test that only passes inside the full suite is order-dependent (leaked stubs, import-order luck) and ships a hidden defect for QA to trip over.
+Run before proceeding to deploy. Every command here must be **non-interactive** (`CI=1`, `--yes`/`--no-input`, explicit timeout) — an interactive prompt inside a subagent stalls the whole pipeline until a watchdog kills the agent. Each command must also be **self-contained from a bare shell**: resolve the project's toolchain explicitly (`uv run …`, `poetry run …`, `pnpm exec …`, or an absolute `.venv/bin/…` / `node_modules/.bin/…` path) rather than a bare `ruff`/`eslint`/`tsc` that only works with the env activated — the same env that `pre-handoff-check.sh` enforces against, and a bare command silently fails there. A new or changed test file must also pass **standalone** (run just that file in a clean interpreter) — a test that only passes inside the full suite is order-dependent (leaked stubs, import-order luck) and ships a hidden defect for QA to trip over.
 
 <!-- Fill in: quality rules for this domain — e.g.
 - New module → new test file covering auth, not-found, error, and happy-path cases

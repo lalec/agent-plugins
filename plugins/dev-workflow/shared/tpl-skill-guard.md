@@ -317,6 +317,21 @@ exit 0
 
 **Note:** Replace `<LINT_CMD>` and `<TYPECHECK_CMD>` with the project's actual commands. If the project has no typecheck, remove that block. If lint/typecheck commands aren't known at install time, leave `<fill in>` stubs and prompt the user to fill them in.
 
+**Bare-shell rule (critical).** This hook runs in a **bare, non-interactive shell that does not inherit the project's activated environment** — no virtualenv, no `nvm`/`asdf` shim, no `direnv`, none of the `PATH` your terminal has. A command that names a bare interpreter or tool (`ruff check .`, `python -m ruff`, `eslint .`, `tsc`) works in your terminal but **fails inside this hook** the moment it depends on an activated env — silently failing the gate on every handoff. Substitute a command that resolves its own toolchain from a bare shell, in this order of preference:
+1. An env-launcher that finds the project env itself: `uv run ruff check .`, `poetry run ruff check .`, `pnpm exec biome check .`, `npx --no-install eslint .`.
+2. An absolute path into the project env: `.venv/bin/ruff check .`, `node_modules/.bin/eslint .`.
+3. Only if neither exists, a bare tool name — and then confirm the tool is genuinely on the global `PATH` a bare shell sees.
+
+When the interpreter path itself varies (a venv that may or may not exist), resolve it defensively at the top of the hook rather than hardcoding one path, e.g.:
+```bash
+if   [ -x ".venv/bin/python" ]; then PY=".venv/bin/python"
+elif command -v python3       >/dev/null 2>&1; then PY="python3"
+elif command -v python        >/dev/null 2>&1; then PY="python"
+fi
+[ -n "$PY" ] && ! "$PY" -m ruff check . >/dev/null 2>&1 && { echo "Pre-handoff gate: lint check failed …" >&2; exit 2; }
+```
+The same bare-shell constraint applies to any tool a hook shells out to (typecheckers, test runners) — never assume the project env is active.
+
 ---
 
 ## § ref-sync-check.sh

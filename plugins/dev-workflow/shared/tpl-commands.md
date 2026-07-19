@@ -453,10 +453,14 @@ Cap at `max_tasks`. For each task derive: a one-line description, 1–3 candidat
 - `pipeline` — features, bug fixes, schema/API/auth changes, anything needing review depth. Default when unsure.
 - `tweak` — small inline-verifiable changes (pixel nudges, copy, config values) per the `/tweak` lane rules.
 
+**Split broad tasks (do this before the gate).** A single item that applies **one uniform change across an enumerable set** — phrased with "~N", "each", "all/every X", plural targets, "across the <collection>" — is really N sub-tasks. Bundled into one pipeline task it balloons the dev agent past a healthy context window and hands QA an unreviewable diff (the observed failure: one "invert ~9 modules" item ran 49 turns / 222k context / 41 min and had to spawn its own sub-agents to cope). For each such task, enumerate the concrete target set, then:
+- **Split into bounded chunks** — group the set so each chunk is one coherent review unit (rule of thumb: ≤~5 files of the same uniform change per chunk), one `pipeline` task per chunk, sharing the parent's verifications. This is the **default** — a bounded pipeline unit keeps context healthy and the per-task diff reviewable.
+- **Cap tension:** if splitting would exceed `max_tasks`, don't silently drop chunks — keep the item **whole** but tag it `[large]` in the gate list with the target count, so the user sees the ballooning risk and can raise `--max-tasks` or pre-split via "Other". Never split a task whose changes are genuinely interdependent (a single edit touching N files together) — that's one review unit, not a set; tag it `[large]` instead.
+
 **Gate.** Ask everything in **one AskUserQuestion call** — the only planned interaction of the run:
 
 1. **Confirm**:
-   - question: "Fly this mission? <goal> — <N> tasks: <numbered task list with lanes and verifications; success criteria if any>"
+   - question: "Fly this mission? <goal> — <N> tasks: <numbered task list with lanes and verifications; split chunks shown as sub-items; any `[large]` tag with its target count; success criteria if any>"
    - header: "Confirm"
    - options:
      - label: "Launch (Recommended)" — description: "Run all tasks unattended; everything holds at UAT until close-out"

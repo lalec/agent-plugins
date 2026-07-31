@@ -41,7 +41,7 @@ No confirmation needed — these are absent, not stale.
 
 Read `../../shared/tpl-agents.md` and `../../shared/tpl-commands.md` now.
 
-- **Missing commands** — if `.claude/commands/` is absent or any of `code.md`, `fix.md`, `pilot.md`, `tweak.md`, `revert.md`, `roadmap.md`, `wrap.md` are missing: create `.claude/commands/` if needed, then create each missing command file from the corresponding template in `tpl-commands.md`, substituting `<PREFIX>` and `<PROJECT>`. Announce what was created.
+- **Missing commands** — if `.claude/commands/` is absent or any of `code.md`, `fix.md`, `pilot.md`, `tweak.md`, `revert.md`, `tidy.md`, `roadmap.md`, `wrap.md` are missing: create `.claude/commands/` if needed, then create each missing command file from the corresponding template in `tpl-commands.md`, substituting `<PREFIX>` and `<PROJECT>`. Announce what was created.
 - **Missing docs stubs** — create `docs/roadmap.md` and `docs/project-log.md` if absent (same stubs as install Phase 2).
 - **Design command** — if a frontend/design domain skill is detected and `.claude/commands/design.md` is missing: create it from `tpl-commands.md § /design`.
 
@@ -129,6 +129,7 @@ Present to the user as a checklist before changing anything:
 - [ ] `.claude/commands/code.md` / `fix.md` lack any of: the "Gate policy" section (risk-split timeouts, never claim consent), `--no-push` flag, entry hygiene + plan shortcut in Step 0, the UAT-only intent rule in Step 0.5, the salvage protocol + no-top-level-edits rule, `stack:`-aware + freshness-aware ensure-stack, the `signed-off-with-deferrals` branch, `Feature commit:` + `UAT-deferred:` in the pm prompt, the "Close out: push + verified scorecard" step, or the evidence-first Done section
 - [ ] `.claude/commands/tweak.md` missing — the sanctioned iterate lane (top-level, inline-verified, batched close-out)
 - [ ] `.claude/commands/revert.md` missing — the sanctioned rollback (`git revert`, scoped re-verify, logged reversal)
+- [ ] `.claude/commands/tidy.md` missing — the WIP-resolution lane; without it a dirty tree at `/code`/`/fix`/`/pilot` entry has nowhere to go but a blind stash. Also flag when `code.md` / `fix.md` / `pilot.md` entry hygiene still says "ask the user how to proceed" on overlapping WIP instead of routing to `/tidy`, or when the `CLAUDE.md` `## Agents` routing paragraph lacks the `/tidy` sentence
 - [ ] `.claude/commands/wrap.md` lacks the conditional Step 0 review (ad-hoc source changes otherwise ship on self-review only) or the Step 4 push + scorecard (wrapped work otherwise accumulates unpushed commits)
 - [ ] `<PREFIX>-deploy/SKILL.md` lacks the `## Push policy` section, the `gate: unanswered — parked` timeout return, or the non-prod early exit
 - [ ] `<PREFIX>-test/references/custom-tests.md` lacks the **Freshness rule** (stale target = non-evidence) or the **Evidence trace** rule (per-verification command → observed → verdict lines feeding qa's `Evidence:` field)
@@ -221,6 +222,7 @@ Each step is idempotent — re-running the upgrade is safe.
 - **Upgrade `<PREFIX>-pm.md` for deferrals + feature commit**: re-sync step 1 (accept both signed-off statuses), step 2 (feature-commit hash rule + `UAT-deferred:` carry), and step 2.5 (required roadmap advancement) from `../../shared/tpl-agents.md § tosk-pm`. Idempotent — skip if step 1 already contains `signed-off-with-deferrals`.
 - **Add the non-interactive rule to `<PREFIX>-dev.md` step 3** from `../../shared/tpl-agents.md § tosk-dev`. Idempotent — skip if step 3 already contains "non-interactively".
 - **Create `tweak.md` and `revert.md`** from `../../shared/tpl-commands.md § /tweak` and `§ /revert`, substituting `<PREFIX>`/`<PROJECT>`. Idempotent — skip each file that exists.
+- **Create `tidy.md`** from `../../shared/tpl-commands.md § /tidy`, substituting `<PREFIX>`/`<PROJECT>`. The `code.md` / `fix.md` / `pilot.md` entry-hygiene routing to `/tidy` arrives with their full re-sync above — no separate edit. Also ensure the `CLAUDE.md` `## Agents` routing paragraph carries the `/tidy` sentence (from `../../shared/tpl-domain-skill.md § Project file sections`). Idempotent — skip the file if `tidy.md` exists; skip the routing sentence if `## Agents` already mentions `/tidy`.
 - **Create or re-sync `pilot.md`** from `../../shared/tpl-commands.md § /pilot` in full (commands are uniform across projects — Rule 3), substituting `<PREFIX>`/`<PROJECT>`. Also ensure the `CLAUDE.md` `## Agents` routing paragraph carries the `/pilot` sentence (from `../../shared/tpl-domain-skill.md § Project file sections`). Idempotent — skip the file if it already contains "Autonomy contract", "mission report", and "Split broad tasks" (the last re-syncs installs that predate split-detection); skip the routing sentence if `## Agents` already mentions `/pilot`.
 - **Re-sync `wrap.md`** from `../../shared/tpl-commands.md § /wrap`: the conditional Step 0 review, the `--no-push` flag, and the Step 4 push + scorecard. Idempotent — skip if wrap.md contains both `## Step 0 — Review` and `## Step 4 — Push + scorecard`.
 - **Add `## Push policy` + gate parking + non-prod early exit + the Pre-authorization clause to `<PREFIX>-deploy/SKILL.md`** from `../../shared/tpl-lifecycle.md § tosk-deploy/SKILL.md`. Idempotent — skip if the file contains `## Push policy`, `gate: unanswered — parked`, and `Pre-authorization`.
@@ -260,7 +262,7 @@ Run these verification checks on the upgrade-affected items:
 - `<PREFIX>-qa.md` has an explicit `Reference Sync` step between Sign off and Hand off
 - `<PREFIX>-pm.md` has an explicit `Reference Sync` step between Docs check and Verify log written
 - `.claude/commands/wrap.md` exists; legacy `log.md` command file removed
-- `.claude/commands/code.md`, `fix.md`, `roadmap.md`, `wrap.md` all exist
+- `.claude/commands/code.md`, `fix.md`, `roadmap.md`, `tidy.md`, `wrap.md` all exist
 - If `<PREFIX>-design` exists: the frontend-owning skill contains a `## Visual Decisions — Delegate to <PREFIX>-design` section AND `<PREFIX>-design/SKILL.md` description starts with "Visual authority for <PROJECT>. MUST be invoked"
 - `<PREFIX>-review/references/verification-before-completion.md` does not exist; `<PREFIX>-review/SKILL.md` `## References` points to `<PREFIX>-debug/references/verification.md`
 - `<PREFIX>-qa.md` step 3 begins with `Test — invoke`; the `## Sign-off criteria` section is removed
@@ -302,6 +304,7 @@ Run these verification checks on the upgrade-affected items:
 - `<PREFIX>-dev.md` step 3 contains "non-interactively"
 - `.claude/commands/code.md` and `fix.md` contain "Gate policy", "--no-push", "Salvage protocol", "Honor the user's answer", "signed-off-with-deferrals", "Feature commit:", and a "Close out: push + verified scorecard" step
 - `.claude/commands/tweak.md` and `revert.md` exist; `tweak.md` contains "batched close-out"; `revert.md` contains "git revert" and no `git reset`
+- `.claude/commands/tidy.md` exists and contains "history probe", the disposition vocabulary (`commit`/`deliver`/`discard`/`ignore`/`keep`), `tidy-discard-`, and `git branch -d`; `code.md`, `fix.md`, and `pilot.md` entry hygiene routes overlapping WIP to `/tidy`; `CLAUDE.md` `## Agents` routing paragraph mentions `/tidy`
 - `.claude/commands/pilot.md` exists and contains "Autonomy contract", "Fly this mission", `max_tasks`, "auto-accepted — pilot run", "Split broad tasks", and a "mission report" Done section; `CLAUDE.md` `## Agents` routing paragraph mentions `/pilot`
 - `.claude/commands/wrap.md` contains a conditional `## Step 0 — Review` and a `## Step 4 — Push + scorecard`
 - `<PREFIX>-deploy/SKILL.md` contains `## Push policy`, `gate: unanswered — parked`, and the non-prod early exit

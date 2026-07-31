@@ -22,6 +22,7 @@ A multi-agent delivery workflow for Claude Code. It runs your plan through a tea
 | `/pilot` | The autonomous multi-task lane — feed it a goal (a roadmap batch, or "improve X until Y"), confirm the mission plan once, and it works task after task unattended: each routed to the full pipeline or the tweak lane, with one batched close-out and a full mission report at the end. |
 | `/tweak` | The sanctioned lightweight lane for iterative rounds — pixel nudges, copy, small hotfixes — verified inline (screenshots/curl), with one batched close-out enforced at push time. |
 | `/revert` | Sanctioned rollback: `git revert` (never reset), scoped re-verification, and a logged reversal. |
+| `/tidy` | Resolve leftover WIP — sweeps the dirty tree, stashes, worktrees and stale branches, probes git history to establish what each item actually *is* (superseded ≠ accidental), then routes every one to commit / deliver / discard / ignore. |
 | `/design` | Generate 2–3 HTML variants, open them in the browser, route the winner to `/code` *(if a design skill is present)*. |
 | `/roadmap` | Rank open roadmap items by priority and pick the next thing to work on. |
 | `/wrap` | Close out ad-hoc work done outside `/code`/`/fix` — reviews the diff when source changed, runs `myapp-log` + `myapp-docs` + `myapp-skill` reference sync, then pushes per the deploy skill's push policy with a verified scorecard (`--no-push` to skip). |
@@ -106,6 +107,12 @@ Top-level, inline-verified iteration — no subagent ceremony. The close-out (re
 /revert <commit or description of what to undo>
 ```
 `git revert` (never reset), re-runs the affected verifications, logs the reversal.
+
+### Clean up a dirty working tree
+```
+/tidy
+```
+Sweeps uncommitted changes, stashes, worktrees and stale branches, then investigates history before judging any of it — a file whose replacement already landed is *superseded*, not accidentally deleted, and the two want opposite treatment. Proposes a disposition per item (commit / deliver / discard / ignore / keep), applies it with self-protecting commands (`discard` becomes a named stash, `git branch -d` never `-D`), and re-runs the sweep as proof. `/code`, `/fix`, and `/pilot` route here when entry WIP overlaps the paths they're about to touch.
 
 ### Design a UI feature *(if design skill installed)*
 ```

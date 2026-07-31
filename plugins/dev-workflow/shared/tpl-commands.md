@@ -32,7 +32,7 @@ If a question times out unanswered, split by risk:
 
 **Flag parse (first):** if `$ARGUMENTS` contains `--prod`, set `ship_mode = prod`; if it contains `--no-push`, set `ship_mode = hold` and `no_push = true`. Strip both flags from the task description used in every step below. If neither flag is present, `ship_mode` is decided by the Ship question in the Step 0.5 gate.
 
-**Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it in the close-out step — the pre-handoff gate blocks the qa spawn on any dirty tree, so deferring the stash just moves the failure mid-pipeline. If the WIP overlaps paths this task will touch, ask the user how to proceed instead of stashing.
+**Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it in the close-out step — the pre-handoff gate blocks the qa spawn on any dirty tree, so deferring the stash just moves the failure mid-pipeline. If the WIP overlaps paths this task will touch, do not stash it blind — tell the user and run `/tidy` scoped to the overlapping paths first, then resume here.
 
 **Plan shortcut:** if the session contains a just-approved plan covering this task, plan approval was the confirmation — omit the Confirm question from the Step 0.5 gate.
 
@@ -227,7 +227,7 @@ If a question times out unanswered, split by risk:
 
 **Flag parse (first):** if `$ARGUMENTS` contains `--prod`, set `ship_mode = prod`; if it contains `--no-push`, set `ship_mode = hold` and `no_push = true`. Strip both flags from the description used in every step below. If neither flag is present, `ship_mode` is decided by the Ship question in the Step 0.5 gate.
 
-**Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it in the close-out step — the pre-handoff gate blocks the qa spawn on any dirty tree, so deferring the stash just moves the failure mid-pipeline. If the WIP overlaps paths this task will touch, ask the user how to proceed instead of stashing.
+**Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it in the close-out step — the pre-handoff gate blocks the qa spawn on any dirty tree, so deferring the stash just moves the failure mid-pipeline. If the WIP overlaps paths this task will touch, do not stash it blind — tell the user and run `/tidy` scoped to the overlapping paths first, then resume here.
 
 **Plan shortcut:** if the session contains a just-approved plan covering this fix, plan approval was the confirmation — omit the Confirm question from the Step 0.5 gate.
 
@@ -440,7 +440,7 @@ After the single Step 1 gate, the run is unattended until close-out:
 
 **Flag parse (first):** `--max-tasks N` → cap the task list at N (default 10); `--prod` → `ship_mode = prod`; `--no-push` → `ship_mode = hold` and `no_push = true`. Strip all flags from the goal used below. If neither ship flag is present, `ship_mode` is decided by the Ship question in Step 1.
 
-**Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it at close-out. If the WIP overlaps paths this mission will touch, ask the user how to proceed instead of stashing.
+**Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it at close-out. If the WIP overlaps paths this mission will touch, do not stash it blind — tell the user and run `/tidy` scoped to the overlapping paths first, then resume here.
 
 ## Step 1 — Mission plan + single gate
 
@@ -696,6 +696,79 @@ Use `<PREFIX>-log`: one entry naming what was reverted and why. Flip any roadmap
 ## Step 4 — Close out
 
 Push + verified scorecard, same as `/code` Step 5. If the original change was deployed, redeploy the reverted state to the same envs via `<PREFIX>-deploy` (prod requires its gate — park on timeout).
+```
+
+---
+
+## § /tidy — tidy.md (Claude Code)
+
+```markdown
+---
+description: Resolve leftover WIP — sweep the dirty working tree, stashes, worktrees and stale branches, investigate history to establish what each item actually is, then route every item to commit / deliver / discard / ignore.
+---
+
+# Tidy
+
+**Usage:** `/tidy` — sweeps the whole repo. `/tidy <paths or area>` limits the sweep.
+
+**Examples:**
+- `/tidy`
+- `/tidy <path prefix>`
+
+## Gate policy
+
+`commit`, `deliver`, `ignore`, `keep` are reversible — on timeout proceed with the proposal and label it `auto-selected on timeout — not user-confirmed`. `discard` destroys uncommitted work and is **irreversible** — park on timeout, never discard on silence.
+
+## Step 1 — Sweep
+
+One read-only pass: `git status --porcelain`, `git rev-list --count @{upstream}..HEAD` (report "no upstream" rather than failing when the branch has none), `git stash list`, `git worktree list`, and per local branch its merged-into-default state, unique-commit count (`git rev-list --count <default>..<branch>`), and last-commit date. Add recent CI status if `gh` is available. Scope to `$ARGUMENTS` when given.
+
+If the tree is clean with no stashes, extra worktrees, or stale branches, report that and stop — nothing to tidy.
+
+## Step 2 — Establish intent (history investigation)
+
+Never call an item accidental, orphaned, or stale from its appearance alone — **a `discard` or `ignore` disposition requires a history probe backing it.** Probe only what the sweep leaves ambiguous:
+
+| Ambiguity | Probe |
+|---|---|
+| Deleted or removed content | `git log -S"<distinctive token>" -- <path>` plus a repo-wide grep for surviving references — content whose replacement already landed is **superseded on purpose**, not an accident |
+| Untracked file | `git log --diff-filter=D -- <path>` (was it deleted before?) and whether an existing `.gitignore` rule was meant to cover it |
+| Modified file | `git log -1 --format='%h %s' -- <path>` — an unfinished follow-up to that commit, or unrelated drift? |
+| Stash | `git stash show -p` against the current tree — already landed, or still unique? |
+| Branch | merged with 0 unique commits → leftover pointer; unmerged commits → real WIP, treat it as an item |
+
+State the evidence behind each conclusion. When a probe contradicts your first read, say so plainly and go with the probe.
+
+## Step 3 — Propose dispositions
+
+Present one table — item · what it is · evidence · disposition — using this fixed vocabulary:
+
+- **commit** — finished work → group into named commits by concern
+- **deliver** — unfinished real work → route to `/code`, `/fix`, or `/tweak`; do not commit it here
+- **discard** — scratch, superseded, or generated output
+- **ignore** — local-only or generated → a `.gitignore` rule instead
+- **keep** — deliberately uncommitted; say why and leave it alone
+
+Then one AskUserQuestion: "Apply this plan?" — options: `Apply as proposed` · `Apply, but keep everything marked discard` · `Stash it all instead` (one named stash, decide later) · `Cancel`.
+
+## Step 4 — Apply
+
+In this order, so nothing is destroyed before it is recoverable:
+
+1. **commit** — one commit per concern. Load the owning domain skill before any edit (skill-guard enforces this).
+2. **ignore** — add the `.gitignore` rules, `git rm --cached` anything already tracked, commit that.
+3. **discard** — `git stash push -u -m "tidy-discard-<YYYY-MM-DD>" -- <paths>`, never `checkout --` or `rm`. Same clean tree, but recoverable; tell the user the stash name and leave dropping it to them.
+4. **branches** — `git branch -d` only, never `-D`: `-d` refuses anything unmerged, so it is self-protecting. Report the printed SHAs as reflog-recoverable.
+
+## Step 5 — Close out
+
+- Anything committed → one `<PREFIX>-log` entry covering the tidy, then push per `<PREFIX>-deploy` § Push policy (a push that fires prod CI is an irreversible gate — ask, park on timeout).
+- Anything `deliver` → name each one and the command it goes to; hand them over rather than starting them silently.
+- Nothing committed → no log entry, no push.
+
+## Done
+
+Re-run the Step 1 sweep and report it as evidence, not claims: working tree · unpushed · stashes · worktrees · branches · CI. `deliver` and `keep` items are still dirty by design — list them so "clean" is never overstated, alongside any `tidy-discard-*` stash still holding removed content.
 ```
 
 ---

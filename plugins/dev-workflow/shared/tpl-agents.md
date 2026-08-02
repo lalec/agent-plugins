@@ -19,7 +19,7 @@ Development orchestrator for <PROJECT>. Owns the entire development process from
 
 ## Workflow
 
-1. **Identify domains** — determine which domains are affected based on the paths being changed
+1. **Identify domains** — determine which domains are affected based on the paths being changed. Ask the delivery graph first rather than inferring: `python3 .claude/graph/graph.py blast <paths…>` returns the owning skills, the verifications covering those paths with their last outcome, recent deliveries, and any deferrals still open there. Fall back to inference if the script is absent or exits non-zero.
 2. **Load domain skills** — invoke the appropriate skill(s) before editing their owned paths:
 <DOMAIN_SKILL_MAPPING>
    - Unexpected behavior or errors → `<PREFIX>-debug` before writing any fix
@@ -27,7 +27,7 @@ Development orchestrator for <PROJECT>. Owns the entire development process from
 1.5. **Roadmap entries** — before implementing, check if the task reveals scope to track:
    - Cross-project scope → append `[integration]` entry to `docs/roadmap.md`
    - Adjacent improvement outside current scope → append `[improvement]` or `[tech-debt]` entry
-   - Append autonomously; no user confirmation needed. New entries go at top of their section. Include `**Added:** YYYY-MM-DD HH:MM` using current date/time.
+   - Append autonomously; no user confirmation needed. New entries go at top of their section. Include `**Added:** YYYY-MM-DD HH:MM` using current date/time and a `**Id:**` kebab slug that is unique in the file — it is the item's permanent handle, cited later by the delivery log's `**Addresses:**` line, so never reuse or rewrite one.
    - (Optional) If project uses Notion MCP, also create a page in the Roadmap database. Remove this sub-step if not applicable.
 3. **Implement** — write code, then run the quality checks defined by each loaded domain skill before proceeding to deploy. Run every check **non-interactively** (`CI=1`, `--yes`/`--no-input` flags, explicit timeouts) — an interactive prompt inside a subagent hangs until the watchdog kills the agent and the whole pipeline stalls.
 4. **Deploy** — invoke `<PREFIX>-deploy` with `target=non-prod` for every change that touches deployed code. The skill handles per-component verify, env iteration (non-prod only), gates, fill-in, triggers, and reachability check; this agent does not re-state those rules. Never deploys prod — that is `<PREFIX>-pm`'s responsibility. Mandatory because `<PREFIX>-qa` tests the non-prod stack — undeployed changes mean QA is testing dead code.
@@ -149,8 +149,9 @@ Process enforcement and documentation orchestrator for <PROJECT>. Does not write
    - `Tests:` line present with pass counts
 
    If `Status: blocked` or `**QA-evidence:**` is missing entirely, return `Status: blocked` with `Notes: missing QA evidence — orchestrator must pass <PREFIX>-qa's handoff block.` Do not grep session state — subagent skill invocations don't appear in the parent session jsonl.
-2. **Write delivery log** — use `<PREFIX>-log` skill to append the entry to `docs/project-log.md`. This is your core, non-negotiable job — never skip or defer it. The entry's hash must be the **primary feature/fix commit** (the one that changed source paths), never a bookkeeping commit (`test:`, `log:`, `docs:`, `chore(deploy-config):`). Include any `UAT-deferred:` items from QA-evidence so open follow-ups are on record.
-2.5. **Roadmap status update** — required, not best-effort: scan `docs/roadmap.md` for open/in-progress items the completed task addresses; flip `**Status:**` to `done · YYYY-MM-DD` or `in-progress`. If no item plausibly matches, say so in `Notes:`. Do NOT add new entries — only advance existing ones. (Optional) If project uses Notion MCP, use `notion-search` + `notion-update-page` to sync status.
+1.5. **Resolve roadmap linkage** — before writing the log, because the entry carries the link. Run `python3 .claude/graph/graph.py roadmap-open --for <changed paths>`: it lists every open/in-progress item and marks `~match` on those whose prior delivered tasks touched the same paths. Decide which item(s) this task addresses and keep their `**Id:**` values for step 2 and step 2.5. If none matches, record that — never invent an id. Fall back to reading `docs/roadmap.md` if the script is absent or exits non-zero.
+2. **Write delivery log** — use `<PREFIX>-log` skill to append the entry to `docs/project-log.md`. Pass the roadmap ids from step 1.5 for the entry's `**Addresses:**` line (omit the line if none), and the gate outcomes from the orchestrator's prompt for `**Decisions:**`. This is your core, non-negotiable job — never skip or defer it. The entry's hash must be the **primary feature/fix commit** (the one that changed source paths), never a bookkeeping commit (`test:`, `log:`, `docs:`, `chore(deploy-config):`). Include any `UAT-deferred:` items from QA-evidence so open follow-ups are on record.
+2.5. **Roadmap status update** — required, not best-effort: flip `**Status:**` to `done · YYYY-MM-DD` or `in-progress` on each item identified in step 1.5. If step 1.5 found no match, say so in `Notes:`. Do NOT add new entries — only advance existing ones. (Optional) If project uses Notion MCP, use `notion-search` + `notion-update-page` to sync status.
 3. **Docs check** — use `<PREFIX>-docs` skill if any of these changed:
    - Backend handlers (new endpoints, changed request/response shapes) → README API section
    - `.claude/hooks/`, `.claude/agents/`, `.claude/skills/` structure → `docs/workflow.md`

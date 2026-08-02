@@ -1,2 +1,6 @@
 # Local scratch / marketing drafts — not for the public repo
 docs/
+
+# Python bytecode (shared/graph.py is executed during template validation)
+__pycache__/
+*.pyc

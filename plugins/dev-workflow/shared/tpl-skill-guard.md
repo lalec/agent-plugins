@@ -53,6 +53,8 @@ PATH_MAP=(
   '^docs/roadmap\.md$:EXEMPT'
   '^docs/project-log\.md$:EXEMPT'
   '^\.claude/skills/<PREFIX>-test/references/custom-tests\.yaml$:EXEMPT'
+  '^\.claude/graph/edges\.jsonl$:EXEMPT'
+  '^\.claude/graph/:<PREFIX>-graph'
 <SKILL_SELF_OWNERSHIP_ENTRIES>
   '^\.claude/skills/:<PREFIX>-skill'
   '^\.claude/hooks/|^\.claude/agents/:<PREFIX>-skill'
@@ -87,6 +89,8 @@ REF_WATCH='^(api/routes/|api/models/|api/auth/)'
 PATH_MAP=(
   '^docs/project-log\.md$:EXEMPT'
   '^\.claude/skills/myapp-test/references/custom-tests\.yaml$:EXEMPT'
+  '^\.claude/graph/edges\.jsonl$:EXEMPT'
+  '^\.claude/graph/:myapp-graph'
   '^\.claude/skills/myapp-backend/:myapp-backend'
   '^\.claude/skills/myapp-frontend/:myapp-frontend'
   '^\.claude/skills/myapp-deploy/:myapp-deploy'

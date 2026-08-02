@@ -34,6 +34,8 @@ If a question times out unanswered, split by risk:
 
 **Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it in the close-out step — the pre-handoff gate blocks the qa spawn on any dirty tree, so deferring the stash just moves the failure mid-pipeline. If the WIP overlaps paths this task will touch, do not stash it blind — tell the user and run `/tidy` scoped to the overlapping paths first, then resume here.
 
+**Open deferrals:** run `python3 .claude/graph/graph.py open-deferrals` and, if it returns anything, list it for the user in one line — these are verifications an earlier task deferred and nothing has passed since. Surfacing them here is the only point at which they resurface at all. Report, do not gate; skip silently if the script is absent or exits non-zero. (Cheap by design — a few lines of output, not a file read; the Step 0.5 gate stays read-free.)
+
 **Plan shortcut:** if the session contains a just-approved plan covering this task, plan approval was the confirmation — omit the Confirm question from the Step 0.5 gate.
 
 ## Step 0.5 — Single gate: confirm + capture verifications + regression flag
@@ -153,6 +155,8 @@ Task:
     Verify QA phases ran. Write delivery log via <PREFIX>-log. Update docs if architectural changes were made.
     Feature commit: <the dev Handoff `Commit:` hash — the delivery-log hash, not any later bookkeeping commit>
     UAT-deferred: <names + how confirmed, from Step 2 — omit line if none>
+    Decisions: regression=<smart|full> (<user|timeout>) · ship=<prod|hold> (<user|timeout>)<append ` · defer=accept (<user|timeout>)` when the Step 2 deferral gate ran>
+    Changed paths: <the dev Handoff `Files changed:` list>
 
     **QA-evidence:**
     <paste the full ## Handoff block returned by <PREFIX>-qa, verbatim>
@@ -228,6 +232,8 @@ If a question times out unanswered, split by risk:
 **Flag parse (first):** if `$ARGUMENTS` contains `--prod`, set `ship_mode = prod`; if it contains `--no-push`, set `ship_mode = hold` and `no_push = true`. Strip both flags from the description used in every step below. If neither flag is present, `ship_mode` is decided by the Ship question in the Step 0.5 gate.
 
 **Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it in the close-out step — the pre-handoff gate blocks the qa spawn on any dirty tree, so deferring the stash just moves the failure mid-pipeline. If the WIP overlaps paths this task will touch, do not stash it blind — tell the user and run `/tidy` scoped to the overlapping paths first, then resume here.
+
+**Open deferrals:** run `python3 .claude/graph/graph.py open-deferrals` and, if it returns anything, list it for the user in one line — these are verifications an earlier task deferred and nothing has passed since. Surfacing them here is the only point at which they resurface at all. Report, do not gate; skip silently if the script is absent or exits non-zero. (Cheap by design — a few lines of output, not a file read; the Step 0.5 gate stays read-free.)
 
 **Plan shortcut:** if the session contains a just-approved plan covering this fix, plan approval was the confirmation — omit the Confirm question from the Step 0.5 gate.
 
@@ -365,6 +371,8 @@ Task:
     Verify QA phases ran. Write delivery log via <PREFIX>-log. Update docs if architectural changes were made.
     Feature commit: <the dev Handoff `Commit:` hash — the delivery-log hash, not any later bookkeeping commit>
     UAT-deferred: <names + how confirmed, from Step 3 — omit line if none>
+    Decisions: regression=<smart|full> (<user|timeout>) · ship=<prod|hold> (<user|timeout>)<append ` · defer=accept (<user|timeout>)` when the Step 3 deferral gate ran>
+    Changed paths: <the dev Handoff `Files changed:` list>
 
     **QA-evidence:**
     <paste the full ## Handoff block returned by <PREFIX>-qa, verbatim>
@@ -487,7 +495,7 @@ Work the task list in order until: tasks exhausted, all success criteria pass, o
    - `signed-off` → continue to 5.
    - `signed-off-with-deferrals` → **auto-accept** (no mid-run gate): carry `UAT-deferred: <names> (auto-accepted — pilot run, not user-confirmed)` into the pm prompt and the mission report, then continue to 5.
    - `blocked` with code-fix `Notes:` → re-spawn `<PREFIX>-dev` with the fix, then `<PREFIX>-qa` `mode=retest`. At most **2 fix cycles per task**; still blocked → mark the task **failed** with qa's notes. If the failure leaves the tree broken (smoke fails), `git revert` the task's commits before moving on. If later tasks depend on this one, stop the loop and go to Step 3.
-5. Spawn `<PREFIX>-pm` with the feature commit, any UAT-deferred line, and the verbatim QA-evidence block (`/code` Step 3 prompt shape).
+5. Spawn `<PREFIX>-pm` with the feature commit, any UAT-deferred line, the changed paths, and the verbatim QA-evidence block (`/code` Step 3 prompt shape). Its `Decisions:` line carries the mission gate's answers plus anything decided inside the loop — every autonomous branch is labelled `(pilot-auto)`, never `(user)`; an auto-accepted deferral is `defer=accept (pilot-auto)`. The mission gate's own Ship answer keeps its true origin (`user` or `timeout`).
 
 **(b) Tweak lane** — top-level inline work under the `/tweak` lane rules: load the owning domain skill first, verify every change inline with shown evidence, commit in small named steps. Task exit: use the `<PREFIX>-review` skill on the task's diff (fix non-source nits directly; a source finding needing review depth → reclassify the task to the pipeline lane and run (a)), then one `<PREFIX>-log` entry for the task. **Scope guard:** if the work grows into schema/API/auth/migrations, reclassify to the pipeline lane before continuing.
 

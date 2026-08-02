@@ -11,7 +11,7 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 
 **What gets installed:**
 - 3 orchestrator agents: `<PREFIX>-dev`, `<PREFIX>-qa`, `<PREFIX>-pm`
-- 7 lifecycle skills: `<PREFIX>-log`, `<PREFIX>-review`, `<PREFIX>-debug`, `<PREFIX>-deploy`, `<PREFIX>-test`, `<PREFIX>-skill`, `<PREFIX>-docs`
+- 8 lifecycle skills: `<PREFIX>-log`, `<PREFIX>-review`, `<PREFIX>-debug`, `<PREFIX>-deploy`, `<PREFIX>-test`, `<PREFIX>-skill`, `<PREFIX>-docs`, `<PREFIX>-graph`
 - 9 slash commands: `/code` + `/fix` + `/pilot` + `/tweak` + `/revert` + `/tidy` + `/design` (conditional on design skill) + `/roadmap` + `/wrap`
 - `docs/roadmap.md` stub — source of truth for open items; tracked by `<PREFIX>-dev` (new entries) and `<PREFIX>-pm` (status updates)
 - Domain skills: one per substantive source dir, derived from discovery (not hardcoded)
@@ -25,12 +25,14 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 - `.claude/hooks/ref-sync-check.sh` — PostToolUse Bash: warns after `git commit` on reference-worthy drift (structural changes or `REF_WATCH` matches; modify-only cosmetic commits stay silent) and on deploy-mechanism drift without `deploy-config.yaml` updates
 - `.claude/hooks/skill-mark.sh` — PostToolUse Skill: records invoked skills to an agent-scoped session marker
 - `.claude/hooks/post-commit.sh` — PostToolUse Bash: reminds to run `<PREFIX>-log` after every commit
+- `.claude/graph/graph.py` — delivery-graph projector + query engine (copied verbatim from `../../shared/graph.py`); `edges.jsonl` is generated and gitignored
 - `.claude/settings.json` — wires all hooks
 - `CLAUDE.md` workflow sections
 
 **Template files (read before Phase 2 and 3):**
 - `../../shared/tpl-agents.md` — tosk-dev, tosk-qa, tosk-pm templates
-- `../../shared/tpl-lifecycle.md` — 7 lifecycle skill templates
+- `../../shared/tpl-lifecycle.md` — 8 lifecycle skill templates
+- `../../shared/graph.py` — the delivery-graph projector, copied verbatim to `.claude/graph/graph.py`
 - `../../shared/tpl-skill-guard.md` — all hook templates + governed-paths.conf + settings.json
 - `../../shared/tpl-domain-skill.md` — domain skill stub + project file sections
 - `../../shared/tpl-commands.md` — slash command templates
@@ -143,7 +145,7 @@ Already present in docs/: <list any of workflow.md, project-log.md, roadmap.md t
 
 What will be created:
 - 3 agents: <PREFIX>-dev, <PREFIX>-qa, <PREFIX>-pm
-- 7 lifecycle skills: <PREFIX>-log, <PREFIX>-review, <PREFIX>-debug, <PREFIX>-deploy, <PREFIX>-test, <PREFIX>-skill, <PREFIX>-docs
+- 8 lifecycle skills: <PREFIX>-log, <PREFIX>-review, <PREFIX>-debug, <PREFIX>-deploy, <PREFIX>-test, <PREFIX>-skill, <PREFIX>-docs, <PREFIX>-graph
 - 1 design skill: <PREFIX>-design  ← omit if no frontend category
 - <N> domain skills: <comma-separated list>
 - <N> slash commands: /code, /fix, /pilot, /tweak, /revert, /tidy, /roadmap, /wrap[, /design if frontend]
@@ -190,6 +192,8 @@ Create these files (skip if already present, offer to overwrite if stale):
 .claude/skills/<PREFIX>-skill/SKILL.md
 .claude/skills/<PREFIX>-skill/references/skill-manifest.md  ← stub; populate with all lifecycle + domain skills installed in this run
 .claude/skills/<PREFIX>-docs/SKILL.md
+.claude/skills/<PREFIX>-graph/SKILL.md        ← from tpl-lifecycle.md § tosk-graph; also create references/graph-schema.md
+.claude/graph/graph.py                        ← copy ../../shared/graph.py VERBATIM — no substitution (it glob-discovers skill dirs), so it stays byte-identical across projects and diffs cleanly on upgrade
 .claude/skills/<PREFIX>-design/SKILL.md       ← only if a frontend/website domain skill was confirmed in Phase 1c; also create references/design-tokens.md stub
 .claude/commands/code.md          ← from tpl-commands.md § /code, substitute <PROJECT> and <PREFIX>
 .claude/commands/fix.md           ← from tpl-commands.md § /fix, substitute <PROJECT> and <PREFIX>
@@ -243,7 +247,12 @@ Also create `docs/roadmap.md` stub if not present:
 # Roadmap
 
 Items tracked here are the source of truth for open scope.
-Format: title, **Category:** improvement | dogfood | integration | tech-debt, **Priority:** high | medium | low, **Status:** open | in-progress | done · YYYY-MM-DD, **Added:** YYYY-MM-DD HH:MM
+Format: title, **Id:** stable-kebab-slug, **Category:** improvement | dogfood | integration | tech-debt, **Priority:** high | medium | low, **Status:** open | in-progress | done · YYYY-MM-DD, **Added:** YYYY-MM-DD HH:MM
+
+`**Id:**` is the item's permanent handle — the delivery log's `**Addresses:**` line cites it, which
+is what links a shipped commit back to the scope it closed. Assign one when the item is created and
+**never change it**, even if the title is later rewritten; a title-derived id silently orphans every
+prior reference the moment the title changes.
 
 ---
 
@@ -260,6 +269,16 @@ Also create `docs/project-log.md` stub if not present:
 
 ---
 ```
+
+Also append to `.gitignore` (create it if absent) if the line is not already present:
+```
+.claude/graph/edges.jsonl
+```
+The index is generated, churns on every delivery, and is rebuilt in under a second — committing it
+would add noise to every diff for no recoverable value. `graph.py` itself **is** committed.
+
+Then run `python3 .claude/graph/graph.py build` once to prove the projector works against this
+project's artifacts. On a fresh repo it correctly reports `0 edges`.
 
 Also create `docs/workflow.md` if not present — generate with real content using values confirmed in Phase 1 (not a stub):
 
@@ -317,6 +336,7 @@ Gate timeouts split by risk: reversible gates proceed with defaults labeled `aut
 | `<PREFIX>-test` | Smoke (always) · per-task verifications via `custom-tests.yaml` · on-demand regression |
 | `<PREFIX>-skill` | Meta-skill — skill system governance and path ownership |
 | `<PREFIX>-docs` | Documentation sync — README and workflow.md |
+| `<PREFIX>-graph` | Delivery graph — projects the log, verifications, ownership and deploy config into a queryable edge index (`covers` / `blast` / `history` / `roadmap-open` / `open-deferrals`); derived and disposable, every caller falls back without it |
 
 ### Domain
 
@@ -355,11 +375,21 @@ Each entry in `docs/project-log.md`:
 **Tests:** <what was verified>
 **Skills:** <skill-x> · <skill-y>
 **Deployed:** <component> → <env> · <url>  ← omit line if no deploy happened
+**Addresses:** <roadmap **Id:** value(s)>  ← omit line if no tracked item is addressed
 **UAT-deferred:** <verification names + how confirmed>  ← omit line if nothing deferred
+**Decisions:** <gate>=<value> (<user|timeout|pilot-auto>) · …  ← omit line if no gate was answered
 **Checklist:** <skill> — <what changed>  ← omit line if nothing updated
 ```
 
 The hash is the primary feature/fix commit, never a `test:`/`log:`/`docs:` bookkeeping commit.
+
+`**Addresses:**` cites the roadmap item's permanent `**Id:**` — that citation is what links a
+shipped commit back to the scope it closed. `**Decisions:**` records how each gate was answered;
+a timeout or an autonomous choice is never written as `user`.
+
+The delivery log is also the delivery graph's primary input — `<PREFIX>-log` runs
+`python3 .claude/graph/graph.py build` after committing each entry, so these fields become
+queryable. See `<PREFIX>-graph`.
 ```
 
 Substitute `<DOMAIN_SKILL_TABLE>` with a markdown table built from `DOMAIN_SKILLS[]` and `DOMAIN_PATTERNS[]` confirmed in Phase 1c:
@@ -466,7 +496,7 @@ Upsert the following sections in `CLAUDE.md` (add if missing, replace if present
 Walk the checklist before declaring done:
 
 - [ ] `.claude/agents/` has `<PREFIX>-dev.md`, `<PREFIX>-qa.md`, `<PREFIX>-pm.md`
-- [ ] `.claude/skills/` has all 7 lifecycle skills (`<PREFIX>-log`, `-review`, `-debug`, `-deploy`, `-test`, `-skill`, `-docs`) + all confirmed domain skills, all named `<PREFIX>-*`
+- [ ] `.claude/skills/` has all 8 lifecycle skills (`<PREFIX>-log`, `-review`, `-debug`, `-deploy`, `-test`, `-skill`, `-docs`, `-graph`) + all confirmed domain skills, all named `<PREFIX>-*`
 - [ ] `.claude/skills/<PREFIX>-skill/references/skill-manifest.md` exists and lists all installed lifecycle and domain skills
 - [ ] `.claude/skills/<PREFIX>-test/references/` has `test-commands.md` (with `## Smoke`, `## Regression`, `## Functional Feature Subjects` headings), `sync-checklist.md`, `custom-tests.md`, and `custom-tests.yaml` (initialized to `tests: []`). `<PREFIX>-test/SKILL.md` has a `## Test Plan` with the three tiers and no `## E2E Browser Tests` section. `custom-tests.md`'s schema uses `type: UX | Integration | E2E` (not `surface`)
 - [ ] `.claude/commands/code.md`, `fix.md`, `pilot.md`, `tweak.md`, `revert.md`, `tidy.md`, `roadmap.md`, and `wrap.md` exist (markdown format, `$ARGUMENTS`)
@@ -492,8 +522,16 @@ Walk the checklist before declaring done:
 - [ ] `.claude/hooks/post-commit.sh` is executable, references `<PREFIX>-log`, and exits 0 on success paths (recorders never exit non-zero)
 - [ ] `.claude/settings.json` exists and wires all 9 hooks across `PreToolUse`/`PostToolUse` + `Edit`/`Write`/`Bash`/`Skill`/`Task|Agent` matchers
 - [ ] `CLAUDE.md` has `## Plan Mode`, `## Agents`, `## Skills`, and `## Roadmap` sections with correct references
-- [ ] `docs/roadmap.md` exists (even as a stub)
+- [ ] `docs/roadmap.md` exists (even as a stub) and its format line documents `**Id:**` as the item's permanent handle
 - [ ] `docs/project-log.md` exists
+- [ ] `.claude/graph/graph.py` exists and is **byte-identical** to the plugin's `shared/graph.py` (no substitution — a diff means someone edited the copy instead of the plugin)
+- [ ] `python3 .claude/graph/graph.py build` exits 0, reports `N/N log entries parsed` with no `WARNING`, and running it twice produces an identical `edges.jsonl` body (on a fresh repo it correctly reports `0 edges · 0/0`)
+- [ ] `.gitignore` contains `.claude/graph/edges.jsonl`; `graph.py` itself is **not** ignored
+- [ ] `governed-paths.conf` `PATH_MAP` has `'^\.claude/graph/edges\.jsonl$:EXEMPT'` **before** `'^\.claude/graph/:<PREFIX>-graph'`, and both before the `'^\.claude/:OPEN'` catch-all
+- [ ] `<PREFIX>-graph/SKILL.md` exists with `references/graph-schema.md`; the schema reference documents every edge type `graph.py` emits with its source artifact
+- [ ] `<PREFIX>-log/SKILL.md` entry format has `**Addresses:**` and `**Decisions:**`, and its Process runs `graph.py build` after committing the entry
+- [ ] `<PREFIX>-test` `custom-tests.md` schema documents the `last:` block, and the execution protocol writes it after each run
+- [ ] Every graph call site (`<PREFIX>-test` prior-selection, `<PREFIX>-dev` step 1, `<PREFIX>-pm` step 1.5, `<PREFIX>-debug` Phase 1, `/code` + `/fix` Step 0) states an explicit fallback for a missing or failing script — the graph is never a gate
 - [ ] `docs/workflow.md` exists (even as a stub)
 - [ ] `.claude/skills/<PREFIX>-deploy/references/deploy-config.yaml` exists and parses as valid YAML. If any IaC/CI/CD/Build/Deployment categories were discovered or any component can be run locally, the file has at least one component; every env declares exactly one of `run:`/`deploy:` plus a `url`; every locally-runnable component has at least one non-prod env (`envs.local` serve-env or a cloud non-prod ship-env); there is no top-level `local:` block, no `cloud:` prefix in `verify:`, and no placeholder text. If the project has no deploy mechanism and no local run command, the file contains `components: {}` plus an explanatory leading comment.
 - [ ] No domain-skill SKILL.md contains a `## Deployment` section (deploy logic lives only in `<PREFIX>-deploy/SKILL.md`)

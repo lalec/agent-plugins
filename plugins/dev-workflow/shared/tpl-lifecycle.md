@@ -37,6 +37,13 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
    git add docs/project-log.md
    git commit -m "log: <short title from the entry>"
    ```
+6. Reproject the delivery graph so this entry becomes queryable — the log is the projector's
+   primary input, so an unprojected entry is invisible to every downstream query:
+   ```bash
+   python3 .claude/graph/graph.py build
+   ```
+   The index is gitignored, so nothing further to commit. If the script is absent or exits
+   non-zero, note it in the handoff and continue — this step never blocks the close-out.
 
 ## Entry Format
 
@@ -49,7 +56,9 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
 **Tests:** <what was actually verified>
 **Skills:** <PREFIX>-x · <PREFIX>-y
 **Deployed:** <component> → <env> · <url> (omit line entirely if no deploy happened)
+**Addresses:** <roadmap **Id:** value(s), comma-separated> (omit line entirely if no tracked item is addressed)
 **UAT-deferred:** <verification names + how confirmed> (omit line entirely if nothing was deferred)
+**Decisions:** <gate>=<value> (<user|timeout|pilot-auto>) · … (omit line entirely if no gate was answered)
 **Checklist:** <skill> — <what changed> (omit line entirely if nothing to note)
 ~~~
 
@@ -60,7 +69,9 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
 - **Tests** — be honest. "manual smoke" is a real test. Common values: `lint + type check (clean)`, `manual smoke in browser`, `E2E: <scenario>`, `none`. If a gate decision was auto-selected on a timeout, say so here — never record it as user-confirmed.
 - **Skills** — only skills confirmed present in the transcript grep output, separated by ` · `. Use `—` if none found.
 - **Deployed** — one line per component deployed this session, taken verbatim from the deploy-owning skill's report (e.g. `backend → test · https://test-api.example.com`). Omit the line entirely when no deploy happened.
-- **UAT-deferred** — verifications QA could not run in any environment, carried from the pipeline (e.g. `login-flow-e2e (user-confirmed)`). These are open follow-ups; omit the line when none.
+- **Addresses** — the `**Id:**` of each `docs/roadmap.md` item this task advances or closes, comma-separated (e.g. `verification-email-on-signup, stripe-receipt-sender`). This is the durable roadmap↔delivery link: without it the connection survives only as a status flip that nothing can trace back. Use the ids the pm step confirmed; omit the line when the task addresses no tracked item, and say so in the pm handoff rather than guessing an id.
+- **UAT-deferred** — verifications QA could not run in any environment, carried from the pipeline (e.g. `` `login-flow-e2e` (user-confirmed) ``). Backtick each verification name so it stays machine-readable. These are open follow-ups; omit the line when none.
+- **Decisions** — one term per gate that was answered this task, as `<gate>=<value> (<how>)`, joined by ` · ` — e.g. `regression=smart (user) · ship=hold (timeout) · defer=accept (user)`. `<how>` is `user` (a real answer), `timeout` (a default taken on silence), or `pilot-auto` (decided autonomously mid-mission). **A timeout or an auto-decision is never recorded as `user`** — this line is the only durable record of whether a shipped change was actually consented to. Omit the line when no gate was answered.
 - **Checklist** — one `skill — note` per skill whose reference files were updated. Omit the line entirely if nothing was updated.
 
 ## Quality Checklist
@@ -70,8 +81,11 @@ Required steps before writing the log entry:
 3. [ ] Skills field is derived from transcript grep, not from memory
 4. [ ] Body is 1–3 sentences, no `What:` label
 5. [ ] `Deployed:` line included when a deploy occurred this session (env + url sourced from the deploy-owning skill's report); omitted otherwise
-6. [ ] `Checklist:` line omitted when nothing was updated
-7. [ ] `docs/project-log.md` committed with `log: <short title>`
+6. [ ] `Addresses:` carries the roadmap `**Id:**` the pm step confirmed, or the line is omitted — never a guessed id
+7. [ ] `Decisions:` records every answered gate with its true `user` / `timeout` / `pilot-auto` origin
+8. [ ] `Checklist:` line omitted when nothing was updated
+9. [ ] `docs/project-log.md` committed with `log: <short title>`
+10. [ ] `graph.py build` run after the commit (or its failure noted in the handoff)
 ```
 
 ---
@@ -576,6 +590,10 @@ Must complete each phase before proceeding to next.
 1. **Read Error Messages Carefully** - Don't skip past errors/warnings, read stack traces completely
 2. **Reproduce Consistently** - Can trigger reliably? Exact steps? If not reproducible → gather more data
 3. **Check Recent Changes** - What changed? Git diff, recent commits, new dependencies, config changes
+   - For a file you suspect, ask the delivery graph what it already knows before re-deriving it:
+     `python3 .claude/graph/graph.py history <path>` — what shipped here, what covers it, what was
+     reverted. A path with a `(REVERTED)` delivery is the strongest single lead available. Skip
+     silently if the script is absent or errors.
 4. **Gather Evidence in Multi-Component Systems**
    - For EACH component boundary: log data entering/exiting, verify environment propagation
    - Run once to gather evidence showing WHERE it breaks
@@ -1409,6 +1427,7 @@ Full broad suite — `references/test-commands.md § Regression` (hand-authored)
 Verify before finishing any `<PREFIX>-test` invocation that touches API handlers or test infrastructure:
 - [ ] `references/test-commands.md` Smoke / Regression / Functional Feature Subjects match current handlers, endpoints, and run scripts
 - [ ] `references/custom-tests.yaml` verifications reflect current behavior; stale `type`/`paths` corrected
+- [ ] Every verification executed this invocation has its `last:` block written (including `blocked` ones)
 - [ ] `references/custom-tests.md` execution protocol matches the types in use
 - [ ] `references/sync-checklist.md` trigger rules reflect current API surface and test tooling
 
@@ -1438,6 +1457,7 @@ Verify before finishing any `<PREFIX>-test` invocation that touches API handlers
 
 - [ ] A functional feature entry's `assert`, `type`, or `paths` no longer matches current behavior
 - [ ] A captured verification is permanently obsolete (feature removed) — delete the entry
+- [ ] A verification ran this invocation — write its `last:` outcome block
 ```
 
 `references/test-commands.md`:
@@ -1488,14 +1508,23 @@ tests:
     assert: '<one sentence: what must be true>'
     type: UX | Integration | E2E     # UX=frontend · Integration=backend (api/data) · E2E=full journey
     paths: ["<changed path/glob>"]   # from dev's `Files changed:` (minus .claude/**); drives prior-selection
+    last:                            # written by this skill after every run it executes
+      status: pass | fail | blocked  #   the outcome recorded in the Evidence trace
+      commit: <sha7>                 #   HEAD at the moment it ran
+      ts: YYYY-MM-DDTHH:MM:SSZ       #   UTC
 ```
 
 `task` and `assert` are **single-quoted** (double any internal `'`): both routinely contain colons,
 braces, or double-quotes — e.g. an assert quoting a JSON fragment like `{"key": "value"}` — which
 break unquoted *and* double-quoted YAML. Single quotes survive all of those.
 
-`type` and `paths` are the only persisted signals — both stable. The concrete target
+`type` and `paths` are the only persisted **selection** signals — both stable. The concrete target
 (url / endpoint / query) is re-derived every run, never stored, so route changes can't go stale.
+
+`last` is the persisted **outcome** signal, and it exists because without it a verification that
+has been blocked for six consecutive runs is indistinguishable from one that has never run. It
+records only the outcome, never the target. Absent on entries that have not run since the field
+was introduced — treat a missing `last` as "never run", not as a pass.
 
 ## Execution (per verification, every run)
 
@@ -1535,10 +1564,25 @@ the observed result (HTTP status + relevant body fragment, or the screenshot pat
 → `pass | fail | blocked`. These lines flow into the qa handoff `Evidence:` field verbatim — they
 are what the user reads instead of re-testing, so concrete observations, not claims.
 
+**Record the outcome:** after running a verification, write its `last:` block (`status`, `commit`
+= `git rev-parse --short HEAD`, `ts` = UTC now) back to its `custom-tests.yaml` entry. Write it for
+every verification this run executed, including `blocked` ones — a blocked run is the outcome that
+most needs a history. Commit the file with `test: record verification outcomes`.
+
 ## Prior-selection
 
-Include a prior verification in this run when its stored `paths:` set intersects the changed-paths list
-passed by the caller. This task's own verifications always run.
+Resolve the prior set with the delivery graph:
+
+```bash
+python3 .claude/graph/graph.py covers <changed paths…>
+```
+
+It returns the verification names whose stored `paths:` intersect the changed paths — the same rule
+stated below, evaluated against the index instead of by reading the whole file. **Fall back** to the
+manual rule if the script is missing or exits non-zero.
+
+The rule it implements: include a prior verification when its stored `paths:` set intersects the
+changed-paths list passed by the caller. This task's own verifications always run.
 
 ## Interactive fallback — top-level only
 
@@ -1726,3 +1770,148 @@ Verify before finishing any `<PREFIX>-docs` invocation:
 - [ ] Skill gap types or resolution process changes
 - [ ] Delivery log format changes
 ```
+
+---
+
+## § tosk-graph/SKILL.md
+
+**`graph.py` is not inlined here.** Copy `shared/graph.py` from the dev-workflow plugin to
+`.claude/graph/graph.py` **verbatim** — it takes no `<PREFIX>` substitution (skill dirs are
+glob-discovered), so it stays byte-identical across every project and can be diffed on upgrade.
+
+```markdown
+---
+name: <PREFIX>-graph
+description: Delivery graph for <PROJECT> — the queryable index of what shipped, what covers which paths, what is deployed where, and what is still deferred. Use when a question spans more than one delivery ("what verifies this file", "what has been delivered here", "which deferrals are still open", "which roadmap items relate to these paths"), when the index looks stale or wrong, or when changing anything under `.claude/graph/`.
+---
+
+# <PREFIX>-graph
+
+Owns the delivery graph: a typed, provenanced edge index projected from the project's own records.
+
+**The index is derived and disposable.** git, `docs/project-log.md`, `docs/roadmap.md`,
+`custom-tests.yaml`, `deploy-config.yaml` and `governed-paths.conf` stay the source of truth;
+`graph.py build` discards `edges.jsonl` and reprojects from them. Never hand-edit `edges.jsonl`,
+and never record a fact only in the graph — write it to its owning artifact and reproject.
+
+**Every caller falls back.** If `graph.py` is missing, python3 is unavailable, or the command
+exits non-zero, the caller uses its pre-graph behaviour. The graph is an accelerator, never a gate.
+
+## Owned Paths
+- `.claude/graph/` — `graph.py` and the schema reference (`edges.jsonl` itself is EXEMPT: machine-generated)
+
+## Commands
+
+```
+python3 .claude/graph/graph.py build                      reproject the index (<1s)
+python3 .claude/graph/graph.py covers <path>...           verifications whose paths intersect these
+python3 .claude/graph/graph.py blast <path>...            owners · verifications+status · deliveries · deferrals
+python3 .claude/graph/graph.py history <path>             what shipped, was verified, or was reverted here
+python3 .claude/graph/graph.py roadmap-open [--for <path>...]   open items; path-affine ones marked ~match
+python3 .claude/graph/graph.py open-deferrals [<path>...] deferred and never since passed
+```
+
+Add `--json` to any query for machine-readable output. Queries rebuild automatically when the
+index is missing or behind `HEAD`, so `build` is only needed after a manual artifact edit.
+
+## Read Map
+
+```
+SITUATION?
+│
+├─ Need an answer from the graph        → run the query above; no reading required
+├─ Adding/changing an edge or query     → references/graph-schema.md
+├─ A query returns something surprising → references/graph-schema.md § Provenance, then the cited artifact
+└─ Index looks stale or corrupt         → `graph.py build`; it is always safe to reproject
+```
+
+## References
+- `references/graph-schema.md` — node ids, the 12 edge types, which artifact each is projected from, and the provenance contract
+
+## Reference Sync
+Verify before finishing any `<PREFIX>-graph` invocation:
+- [ ] `references/graph-schema.md` lists every edge type `graph.py` emits, with its source artifact and field
+- [ ] Any new query is documented in `## Commands` here and in the schema reference
+- [ ] `graph.py` still matches the plugin's `shared/graph.py` (no local drift — fix the plugin instead)
+```
+
+**Also create this reference file when installing `<PREFIX>-graph`:**
+
+`references/graph-schema.md`:
+~~~markdown
+# Delivery graph — schema
+
+One JSON object per line in `.claude/graph/edges.jsonl`. Line 1 is `_meta`
+(`version`, `head`, `built`, `edges`); every other line is one edge.
+
+```json
+{"e":"COVERS","from":"verif:login-redirects-home","to":"path:app/auth/login.tsx",
+ "src":"custom-tests.yaml#login-redirects-home.paths"}
+```
+
+## Provenance contract
+
+**Every edge carries a non-empty `src`** naming the artifact and field it was projected from.
+An answer cites an edge; the edge cites the file. Nothing is asserted that cannot be traced back
+to a record a human can open. An edge without `src` is a bug in the projector.
+
+## Node ids — `<type>:<natural-key>`
+
+| Node | Id | Key from |
+|---|---|---|
+| Task | `task:<slug>` | delivery-log entry title |
+| RoadmapItem | `road:<id>` | roadmap `**Id:**` (falls back to the title slug when absent) |
+| Commit | `commit:<sha7>` | git |
+| Path | `path:<repo-relative>` | git / `paths:` / `PATH_MAP` pattern |
+| Skill | `skill:<PREFIX>-<name>` | `governed-paths.conf` |
+| Verification | `verif:<name>` | `custom-tests.yaml` `name` |
+| Component | `comp:<name>` | `deploy-config.yaml` |
+| Env | `env:<comp>/<env>` | `deploy-config.yaml` |
+| Decision | `dec:<sha7>/<gate>` | delivery-log `**Decisions:**` |
+
+Ids are exact natural keys that already exist, so there is **no entity-resolution step** and no
+model call anywhere in the projector — projection is pure parsing.
+
+## Edges
+
+| Edge | From → To | Props | Projected from |
+|---|---|---|---|
+| `LANDED_AS` | task → commit | — | log entry hash (several when an entry names several) |
+| `TOUCHES` | commit → path | — | one `git log --name-only` pass, filtered to delivery commits |
+| `USED` | commit → skill | — | log `**Skills:**` |
+| `DEPLOYED_TO` | commit → env | `url` | log `**Deployed:**` |
+| `DEFERRED` | commit → verif | `accepted_by` | log `**UAT-deferred:**` |
+| `DECIDED` | commit → decision | `value`, `by` | log `**Decisions:**` |
+| `ADDRESSES` | task → road | — | log `**Addresses:**` |
+| `SUPERSEDES` | commit → commit | — | `git log --grep=^Revert` |
+| `COVERS` | verif → path | — | `custom-tests.yaml` `paths:` |
+| `VERIFIED` | commit → verif | `status`, `ts` | `custom-tests.yaml` `last:` |
+| `OWNED_BY` | path-pattern → skill | — | `governed-paths.conf` `PATH_MAP` |
+| `HAS_ENV` | comp → env | `url`, `kind` | `deploy-config.yaml` |
+
+`OWNED_BY` stores the **PATH_MAP pattern, not resolved files** — ownership is evaluated
+first-match at query time, the same rule the hooks apply, so new files are covered without a rebuild.
+
+## Field precedence
+
+Two fields can describe how a deferral was accepted: `**Decisions:** defer=accept (<how>)` and the
+prose in `**UAT-deferred:**`. **`Decisions:` wins** — it is the structured record. The prose scan is
+a fallback for entries written before that field existed. Where any two records disagree, the
+structured one is authoritative and the other is treated as commentary.
+
+A verification is an **open deferral** when it has a `DEFERRED` edge and no `VERIFIED` edge with
+`status: pass`. A missing `last:` block means "never run" — never a pass.
+
+## Rebuild semantics
+
+`build` always reprojects in full. There is deliberately no incremental mode: a full build is
+under a second on a 200-entry log, and an append path would leave deleted verifications and
+retired path patterns lingering in the index.
+
+## Tolerated input variation
+
+The log parser accepts entry headings that predate the current format — missing `HH:MM`, several
+hashes joined by `+` or `,`, and non-commit placeholders such as `uncommit`. An entry with no
+usable sha still contributes its `ADDRESSES` edge; commit-keyed edges need a commit.
+`custom-tests.yaml` `paths:` is read in both the block-list and inline-flow-list forms.
+~~~

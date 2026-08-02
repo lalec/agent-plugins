@@ -15,7 +15,8 @@ A multi-agent delivery workflow for Claude Code. It runs your plan through a tea
 | `myapp-dev` | **The builder.** Loads the right domain skills, writes the code, runs each skill's quality checks, deploys non-prod, syncs reference docs — then hands off a structured report, so QA always tests a live stack. |
 | `myapp-qa` | **The gatekeeper.** Reviews the code and runs the test tiers before signing off. Routes any required fix back to `myapp-dev` instead of patching it itself. |
 | `myapp-pm` | **The closer.** Confirms QA actually ran, ships prod when asked, writes the delivery log, refreshes docs, and advances the roadmap — the audit trail writes itself. |
-| 7 lifecycle skills | `log`, `review`, `debug`, `deploy`, `test`, `skill`, `docs` — one per delivery concern, shared by every agent. |
+| 8 lifecycle skills | `log`, `review`, `debug`, `deploy`, `test`, `skill`, `docs`, `graph` — one per delivery concern, shared by every agent. |
+| Delivery graph | `myapp-graph` turns the records you already keep — the delivery log, captured verifications, path ownership, deploy config, git — into a typed edge index the agents query instead of re-reading files. Answers "what verifies this file", "what shipped here", "which deferrals are still open", "which roadmap items relate to these paths". Derived and disposable: rebuilt from scratch in under a second, and every caller falls back to its old behaviour if it's missing. |
 | Domain skills | One per source directory, generated from your actual structure. Each owns its paths, carries reference docs, and defines the lint/type/test checks `myapp-dev` runs before deploy — and improves itself as the code evolves. |
 | 9 hooks | Make the workflow self-enforcing: skills must load before edits, bad installs are blocked, handoffs are gated, ref-sync drift is flagged, and nothing pushes without a delivery-log close-out. |
 | `/code`, `/fix` | Drive the full pipeline (dev → qa → pm) from one line — confirm, capture verifications, auto-retest after fixes, then close out with a push + evidence-backed scorecard. Add `--prod` to ship after sign-off, `--no-push` to keep it local. |
@@ -35,6 +36,7 @@ A multi-agent delivery workflow for Claude Code. It runs your plan through a tea
 - Claude Code (`claude`) installed and authenticated
 - A git repo (recommended — hooks use `git status`)
 - `jq` on PATH (used by hook scripts)
+- `python3` on PATH (used by the delivery graph; stdlib only, no packages). Without it the graph simply never builds and every call site falls back — the pipeline still works, just without the index.
 - [`agent-browser`](https://github.com/vercel-labs/agent-browser) plugin installed — used by `<PREFIX>-test` for E2E browser automation
 - [`skill-creator`](https://github.com/anthropics/skills/tree/main/skills/skill-creator) skill installed — used by `<PREFIX>-skill` to author and update skills
 - [`ui-ux-pro-max`](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) skill installed — used by `<PREFIX>-design` for design intelligence (styles, palettes, font pairings, design-system generation) *(conditional: only if a design skill is installed; can be replaced with any design skill — update the reference in `<PREFIX>-design/SKILL.md` after install)*

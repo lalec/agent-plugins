@@ -1,6 +1,6 @@
 # Lifecycle Skill Templates
 
-Substitute `<PROJECT>` with the project name and `<PREFIX>` with the chosen prefix. For `<PREFIX>-log`, also substitute `<PROJECT_ENCODED>` with the result of `$(echo "$PWD" | sed 's|/|-|g')`.
+Substitute `<PROJECT>` with the project name and `<PREFIX>` with the chosen prefix.
 
 These skills are project-agnostic and require minimal substitution.
 
@@ -25,12 +25,23 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
 
 1. Identify the **primary feature/fix commit** for the task — the commit that changed source paths, never workflow bookkeeping (`test:`, `log:`, `docs:`, `chore(deploy-config):` commits). If the invocation prompt names a `Feature commit:` hash, use it; otherwise pick it from `git log --oneline -8`
 2. Run `git log <hash> -1 --format="%ai"` to get that commit's timestamp — extract the `HH:MM` in local time for the date field
-3. Identify which skills were actually invoked this session by scanning the most recent session transcript:
+3. Identify which skills were actually invoked, from the **agent-scoped markers** `skill-mark.sh` writes — one file per agent, so this is the only source that sees skills loaded **inside the `<PREFIX>-dev` / `<PREFIX>-qa` subagents**. The window is bounded by the previous delivery-log commit, so it covers exactly this task's work:
    ```bash
-   PROJECT_ENCODED=$(echo "$PWD" | sed 's|/|-|g')
-   grep -o '"skill":"[^"]*"' "$(ls -t ~/.claude/projects/${PROJECT_ENCODED}/*.jsonl 2>/dev/null | head -1)" | sort -u
+   SINCE=$(git log -n1 --format=%ct -- docs/project-log.md 2>/dev/null)
+   for f in /tmp/<PREFIX>-skills-*; do
+     [ -f "$f" ] || continue
+     M=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null) || continue
+     [ -z "$SINCE" ] || [ "$M" -ge "$SINCE" ] || continue
+     cat "$f"
+   done 2>/dev/null | sort -u | grep -E '^<PREFIX>-'
    ```
-   Use only skills that appear in this output for the **Skills** field. If none appear, use `—`.
+   Use that list for the **Skills** field, joined with ` · `. The `grep -E '^<PREFIX>-'` filter is required — markers also record slash-command names (`code`, `fix`, `revert`), which are not skills.
+
+   **Do not scan the session transcript for this.** The old approach (`grep '"skill":"…"'` over `~/.claude/projects/*.jsonl`) reads only the *parent* session, which structurally cannot see subagent skill loads — measured at 27–64% recall for `<PREFIX>-review`, a skill `<PREFIX>-qa` runs on every single task. It is also blocked outright on machines with a secret guard over `~/.claude/`. If you ever fall back to it, mark the field as best-effort in the entry.
+
+   If the marker list comes back empty (markers are in `/tmp` and do not survive a reboot), use `—`. Do not reconstruct the list from memory — an invented list is worse than an honest `—`.
+
+   Two known, accepted limits: a prior session abandoned without a log entry can leave markers inside the window, slightly **over**-reporting; and agents (`<PREFIX>-dev`/`-qa`/`-pm`) never appear, because they are not skills — and in a pipeline run they always ran anyway, so their presence carries no information.
 4. Write the new entry at the **top** of `docs/project-log.md`, immediately below the header block, before the previous `---` separator
 5. Commit the log entry — stage `docs/project-log.md` only and commit:
    ```bash
@@ -67,7 +78,7 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
 - **Title** — short, plain English. Not the raw commit message — rephrase for a human skimming the log.
 - **Body** — 1–3 sentences. Add context beyond the title: *why* it was needed, *what problem* it solves, any non-obvious decisions.
 - **Tests** — be honest. "manual smoke" is a real test. Common values: `lint + type check (clean)`, `manual smoke in browser`, `E2E: <scenario>`, `none`. If a gate decision was auto-selected on a timeout, say so here — never record it as user-confirmed.
-- **Skills** — only skills confirmed present in the transcript grep output, separated by ` · `. Use `—` if none found.
+- **Skills** — only skills confirmed present in the marker union from Process step 3, separated by ` · `. Use `—` if none found; never reconstruct from memory. This field is the source of the delivery graph's `USED` edges, and it is the **only** record that a no-file-trace skill like `<PREFIX>-review` or `<PREFIX>-debug` ran — git cannot recover it, so an inaccurate list here is unrecoverable later.
 - **Deployed** — one line per component deployed this session, taken verbatim from the deploy-owning skill's report (e.g. `backend → test · https://test-api.example.com`). Omit the line entirely when no deploy happened.
 - **Addresses** — the `**Id:**` of each `docs/roadmap.md` item this task advances or closes, comma-separated (e.g. `verification-email-on-signup, stripe-receipt-sender`). This is the durable roadmap↔delivery link: without it the connection survives only as a status flip that nothing can trace back. Use the ids the pm step confirmed; omit the line when the task addresses no tracked item, and say so in the pm handoff rather than guessing an id.
 - **UAT-deferred** — verifications QA could not run in any environment, carried from the pipeline (e.g. `` `login-flow-e2e` (user-confirmed) ``). Backtick each verification name so it stays machine-readable. These are open follow-ups; omit the line when none.
@@ -78,7 +89,7 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
 Required steps before writing the log entry:
 1. [ ] Entry is at the top of docs/project-log.md (below the `# Project Log` header)
 2. [ ] Hash is the primary feature/fix commit — not a `test:`/`log:`/`docs:` bookkeeping commit — and HH:MM comes from that commit's timestamp
-3. [ ] Skills field is derived from transcript grep, not from memory
+3. [ ] Skills field is derived from the `/tmp/<PREFIX>-skills-*` marker union (Process step 3), not from the session transcript and not from memory; `<PREFIX>-log` itself appears in it (it ran — if it is absent, the derivation is wrong)
 4. [ ] Body is 1–3 sentences, no `What:` label
 5. [ ] `Deployed:` line included when a deploy occurred this session (env + url sourced from the deploy-owning skill's report); omitted otherwise
 6. [ ] `Addresses:` carries the roadmap `**Id:**` the pm step confirmed, or the line is omitted — never a guessed id
@@ -1879,6 +1890,8 @@ model call anywhere in the projector — projection is pure parsing.
 | `LANDED_AS` | task → commit | — | log entry hash (several when an entry names several) |
 | `TOUCHES` | commit → path | — | one `git log --name-only` pass, filtered to delivery commits |
 | `USED` | commit → skill | — | log `**Skills:**` |
+
+**What `USED` is for.** For skills that own files it is largely redundant — `commit -TOUCHES-> path -OWNED_BY-> skill` derives the same answer from git, which cannot be wrong. Its unique value is the **no-file-trace** skills: `<PREFIX>-review` and `<PREFIX>-debug` leave nothing in a diff, so "did this feature need debugging?" exists here and nowhere else. That signal only holds if `**Skills:**` is derived from the agent-scoped markers (see `<PREFIX>-log` Process step 3) — a transcript-derived list misses exactly those two, because they load inside subagents.
 | `DEPLOYED_TO` | commit → env | `url` | log `**Deployed:**` |
 | `DEFERRED` | commit → verif | `accepted_by` | log `**UAT-deferred:**` |
 | `DECIDED` | commit → decision | `value`, `by` | log `**Decisions:**` |

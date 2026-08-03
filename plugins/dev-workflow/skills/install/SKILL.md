@@ -175,7 +175,6 @@ For each template, substitute:
 - `<PROJECT>` → the project name derived in Phase 1
 - `<PREFIX>` → the prefix confirmed in Phase 1a
 - `<DOMAIN_SKILL_MAPPING>` → the confirmed skill→path table from Phase 1c
-- `<PROJECT_ENCODED>` → `$(echo "$PWD" | sed 's|/|-|g')` (for `<PREFIX>-log` grep)
 
 Create these files (skip if already present, offer to overwrite if stale):
 
@@ -530,6 +529,7 @@ Walk the checklist before declaring done:
 - [ ] `governed-paths.conf` `PATH_MAP` has `'^\.claude/graph/edges\.jsonl$:EXEMPT'` **before** `'^\.claude/graph/:<PREFIX>-graph'`, and both before the `'^\.claude/:OPEN'` catch-all
 - [ ] `<PREFIX>-graph/SKILL.md` exists with `references/graph-schema.md`; the schema reference documents every edge type `graph.py` emits with its source artifact
 - [ ] `<PREFIX>-log/SKILL.md` entry format has `**Addresses:**` and `**Decisions:**`, and its Process runs `graph.py build` after committing the entry
+- [ ] `<PREFIX>-log/SKILL.md` derives `**Skills:**` from the `/tmp/<PREFIX>-skills-*` marker union bounded by the last delivery-log commit — it must **not** contain `PROJECT_ENCODED` or a `~/.claude/projects/*.jsonl` grep (that source cannot see subagent skill loads and is blocked outright by a secret guard), and the union must filter with `grep -E '^<PREFIX>-'` so slash-command names are excluded
 - [ ] `<PREFIX>-test` `custom-tests.md` schema documents the `last:` block, and the execution protocol writes it after each run
 - [ ] Every graph call site (`<PREFIX>-test` prior-selection, `<PREFIX>-dev` step 1, `<PREFIX>-pm` step 1.5, `<PREFIX>-debug` Phase 1, `/code` + `/fix` Step 0) states an explicit fallback for a missing or failing script — the graph is never a gate
 - [ ] `docs/workflow.md` exists (even as a stub)

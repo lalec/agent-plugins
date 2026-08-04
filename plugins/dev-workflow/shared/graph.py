@@ -83,7 +83,7 @@ SLUG_RE = re.compile(r"[^a-z0-9]+")
 # current format), several hashes joined by `+` or `,`, and non-commit placeholders such as
 # `uncommit` or `<uncommitted>`. Dropping those entries would silently lose real history.
 ENTRY_RE = re.compile(
-    r"^###\s+(\d{4}-\d{2}-\d{2})(?:\s+(\d{2}:\d{2}))?\s+·\s+(.+?)\s+—\s+(.+?)\s*$"
+    r"^###\s+(\d{4}-\d{2}-\d{2})(?:\s+(\d{2}:\d{2}))?\s*·\s*(.*?)\s*—\s*(.+?)\s*$"
 )
 SHA_RE = re.compile(r"^[0-9a-f]{6,40}$")
 FIELD_RE = re.compile(r"^\*\*([A-Za-z][A-Za-z -]*?):\*\*\s*(.*)$")

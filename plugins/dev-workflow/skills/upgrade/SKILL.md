@@ -279,7 +279,8 @@ Run these verification checks on the upgrade-affected items:
 - `build` reports **`N/N` log entries parsed** with no `WARNING` line. Any shortfall means entry headings are being silently dropped, which is a parser bug, not a tolerable loss — report it rather than accepting it. (Note the `LANDED_AS` count legitimately differs from the entry count in both directions: entries naming several commits emit several, and entries with a non-commit placeholder such as `pending` or `(uncommitted)` emit none.)
 - `graph.py covers <paths>` returns the same set as the manual `paths:`-intersection rule for a sample of three historical tasks
 - Every roadmap item has a unique `**Id:**`; `graph.py roadmap-open` lists the open ones
-- `<PREFIX>-log/SKILL.md` contains `/tmp/<PREFIX>-skills-` and does **not** contain `PROJECT_ENCODED` or `~/.claude/projects`
+- `<PREFIX>-log/SKILL.md` contains `/tmp/<PREFIX>-skills-` scoped by an extracted `SESSION` id, and does **not** contain `PROJECT_ENCODED`, `~/.claude/projects`, or an mtime (`stat -f %m` / `stat -c %Y`) window
+- If another repo on this machine shares this `<PREFIX>` (e.g. `<name>-agent` and `<name>-web`), confirm the next entry's `**Skills:**` lists only skills this project actually has — a sibling's skills appearing is the mtime-window bug, not a tuning issue
 - On the next delivery after the upgrade, the entry's `**Skills:**` list contains `<PREFIX>-log` itself. It demonstrably ran — it wrote the entry — so its absence proves the derivation is still wrong. This is the cheapest available check that the fix took
 - `.gitignore` contains `.claude/graph/edges.jsonl`, and `git status` is clean of graph artifacts after a build
 - Deleting `edges.jsonl` mid-pipeline does not break `/code` — every call site falls back

@@ -25,23 +25,22 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
 
 1. Identify the **primary feature/fix commit** for the task — the commit that changed source paths, never workflow bookkeeping (`test:`, `log:`, `docs:`, `chore(deploy-config):` commits). If the invocation prompt names a `Feature commit:` hash, use it; otherwise pick it from `git log --oneline -8`
 2. Run `git log <hash> -1 --format="%ai"` to get that commit's timestamp — extract the `HH:MM` in local time for the date field
-3. Identify which skills were actually invoked, from the **agent-scoped markers** `skill-mark.sh` writes — one file per agent, so this is the only source that sees skills loaded **inside the `<PREFIX>-dev` / `<PREFIX>-qa` subagents**. The window is bounded by the previous delivery-log commit, so it covers exactly this task's work:
+3. Identify which skills were actually invoked, from the session markers `skill-mark.sh` writes — the only source that sees skills loaded **inside the `<PREFIX>-dev` / `<PREFIX>-qa` subagents**. Scope by **session**, anchored on this agent's own marker (`skill-mark.sh` appended `<PREFIX>-log` to it as this skill loaded, so its last line identifies it):
    ```bash
-   SINCE=$(git log -n1 --format=%ct -- docs/project-log.md 2>/dev/null)
-   for f in /tmp/<PREFIX>-skills-*; do
-     [ -f "$f" ] || continue
-     M=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null) || continue
-     [ -z "$SINCE" ] || [ "$M" -ge "$SINCE" ] || continue
-     cat "$f"
-   done 2>/dev/null | sort -u | grep -E '^<PREFIX>-'
+   NEWEST=$(for f in $(ls -t /tmp/<PREFIX>-skills-* 2>/dev/null); do
+              [ "$(tail -1 "$f" 2>/dev/null)" = "<PREFIX>-log" ] && { echo "$f"; break; }; done)
+   [ -n "$NEWEST" ] || NEWEST=$(ls -t /tmp/<PREFIX>-skills-* 2>/dev/null | head -1)
+   SESSION=$(basename "$NEWEST" | sed -E 's/^.*-skills-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}).*/\1/')
+   cat /tmp/<PREFIX>-skills-"${SESSION}"* 2>/dev/null | sort -u | grep -E '^<PREFIX>-'
    ```
+   **Scope by session, never by file mtime.** Marker filenames carry the prefix but not the project, so two sibling projects sharing a `<PREFIX>` (e.g. a `-agent` and a `-web` repo under one product name) write into the same `/tmp/<PREFIX>-skills-*` namespace. An mtime window pulls the sibling's skills into this project's entry; a session id cannot.
    Use that list for the **Skills** field, joined with ` · `. The `grep -E '^<PREFIX>-'` filter is required — markers also record slash-command names (`code`, `fix`, `revert`), which are not skills.
 
    **Do not scan the session transcript for this.** The old approach (`grep '"skill":"…"'` over `~/.claude/projects/*.jsonl`) reads only the *parent* session, which structurally cannot see subagent skill loads — measured at 27–64% recall for `<PREFIX>-review`, a skill `<PREFIX>-qa` runs on every single task. It is also blocked outright on machines with a secret guard over `~/.claude/`. If you ever fall back to it, mark the field as best-effort in the entry.
 
    If the marker list comes back empty (markers are in `/tmp` and do not survive a reboot), use `—`. Do not reconstruct the list from memory — an invented list is worse than an honest `—`.
 
-   Two known, accepted limits: a prior session abandoned without a log entry can leave markers inside the window, slightly **over**-reporting; and agents (`<PREFIX>-dev`/`-qa`/`-pm`) never appear, because they are not skills — and in a pipeline run they always ran anyway, so their presence carries no information.
+   Two accepted limits: a session that ran several tasks accumulates skills across all of them in the top-level marker, so a second task in one session can over-report slightly; and agents (`<PREFIX>-dev`/`-qa`/`-pm`) never appear, because they are not skills — and in a pipeline run they always ran anyway, so their presence carries no information.
 4. Write the new entry at the **top** of `docs/project-log.md`, immediately below the header block, before the previous `---` separator
 5. Commit the log entry — stage `docs/project-log.md` only and commit:
    ```bash

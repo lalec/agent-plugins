@@ -269,15 +269,26 @@ Also create `docs/project-log.md` stub if not present:
 ---
 ```
 
-Also append to `.gitignore` (create it if absent) if the line is not already present:
+Also append to `.gitignore` (create it if absent) any of these lines not already present:
 ```
 .claude/graph/edges.jsonl
+.claude/graph/__pycache__/
 ```
 The index is generated, churns on every delivery, and is rebuilt in under a second — committing it
-would add noise to every diff for no recoverable value. `graph.py` itself **is** committed.
+would add noise to every diff for no recoverable value. `__pycache__/` appears whenever anything
+imports `graph.py` rather than running it as a script.
+
+**`graph.py` itself must be committed** — stage it explicitly:
+```bash
+git add .claude/graph/graph.py .gitignore
+```
+An untracked `graph.py` has no protection: any `git clean`, a `/tidy` discard, or a stray `rm -rf`
+deletes it, and because every call site is required to fall back silently, the workflow keeps
+running with the graph quietly gone and **no signal that it was ever there**. Tracking it is the
+only thing that makes its absence visible.
 
 Then run `python3 .claude/graph/graph.py build` once to prove the projector works against this
-project's artifacts. On a fresh repo it correctly reports `0 edges`.
+project's artifacts. On a fresh repo it correctly reports `0 edges · 0/0 log entries parsed`.
 
 Also create `docs/workflow.md` if not present — generate with real content using values confirmed in Phase 1 (not a stub):
 
@@ -525,7 +536,8 @@ Walk the checklist before declaring done:
 - [ ] `docs/project-log.md` exists
 - [ ] `.claude/graph/graph.py` exists and is **byte-identical** to the plugin's `shared/graph.py` (no substitution — a diff means someone edited the copy instead of the plugin)
 - [ ] `python3 .claude/graph/graph.py build` exits 0, reports `N/N log entries parsed` with no `WARNING`, and running it twice produces an identical `edges.jsonl` body (on a fresh repo it correctly reports `0 edges · 0/0`)
-- [ ] `.gitignore` contains `.claude/graph/edges.jsonl`; `graph.py` itself is **not** ignored
+- [ ] `.gitignore` contains `.claude/graph/edges.jsonl` and `.claude/graph/__pycache__/`; `graph.py` itself is **not** ignored
+- [ ] `graph.py` is **tracked by git** — `git ls-files --error-unmatch .claude/graph/graph.py` exits 0. Present-but-untracked is the failure that silently deletes itself later, and the mandatory fallbacks mean nothing reports it
 - [ ] `governed-paths.conf` `PATH_MAP` has `'^\.claude/graph/edges\.jsonl$:EXEMPT'` **before** `'^\.claude/graph/:<PREFIX>-graph'`, and both before the `'^\.claude/:OPEN'` catch-all
 - [ ] `<PREFIX>-graph/SKILL.md` exists with `references/graph-schema.md`; the schema reference documents every edge type `graph.py` emits with its source artifact
 - [ ] `<PREFIX>-log/SKILL.md` entry format has `**Addresses:**` and `**Decisions:**`, and its Process runs `graph.py build` after committing the entry

@@ -32,6 +32,10 @@ from pathlib import Path
 
 VERSION = 1
 
+# A roadmap item is closed only if it says so. Anything else — including vocabulary this
+# project has never seen — counts as still open, so it surfaces instead of disappearing.
+TERMINAL_STATUS = {"done", "closed", "removed", "resolved", "cancelled", "canceled", "shipped"}
+
 # --------------------------------------------------------------------------- discovery
 
 
@@ -87,6 +91,10 @@ ENTRY_RE = re.compile(
 )
 SHA_RE = re.compile(r"^[0-9a-f]{6,40}$")
 FIELD_RE = re.compile(r"^\*\*([A-Za-z][A-Za-z -]*?):\*\*\s*(.*)$")
+# Same shape, but finds every field on a line — each value stops at the next `**Name:**`.
+MULTI_FIELD_RE = re.compile(
+    r"\*\*([A-Za-z][A-Za-z -]*?):\*\*\s*(.*?)(?=\s*·\s*\*\*[A-Za-z][A-Za-z -]*?:\*\*|$)"
+)
 TOKEN_RE = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)+$")
 BACKTICK_RE = re.compile(r"`([^`]+)`")
 DEPLOYED_RE = re.compile(r"([A-Za-z0-9_-]+)\s*→\s*([A-Za-z0-9_-]+)\s*·\s*(\S+)")
@@ -144,6 +152,20 @@ def parse_log(text: str) -> list[dict]:
     return entries
 
 
+def roadmap_fields(line: str) -> list[tuple[str, str]]:
+    """Every `**Name:** value` on one line, not just the first.
+
+    Roadmaps write metadata one-per-line (`- **Status:** open`) *and* packed onto a
+    single line (`**Added:** … · **Owner:** … · **Status:** open · 2026-07-29`). Matching
+    only the first field makes `Status` invisible and reports the whole roadmap as open.
+    Each value runs until the next `**Name:**`, so values keep their own `·` separators.
+    """
+    return [
+        (m.group(1).strip(), m.group(2).strip())
+        for m in MULTI_FIELD_RE.finditer(line[2:] if line.startswith("- ") else line)
+    ]
+
+
 def parse_roadmap(text: str) -> list[dict]:
     """`### title` items carrying `- **Field:** value` lines, grouped under `## Section`."""
     items: list[dict] = []
@@ -157,15 +179,25 @@ def parse_roadmap(text: str) -> list[dict]:
         elif line.startswith("### "):
             cur = {"title": line[4:].strip(), "section": section, "fields": {}}
             items.append(cur)
-        elif cur is not None and line.startswith("- "):
-            m = FIELD_RE.match(line[2:])
-            if m:
-                cur["fields"][m.group(1).strip()] = m.group(2).strip()
+        elif cur is not None:
+            # Metadata is written as a list item (`- **Status:** open`), bare, and packed
+            # several-to-a-line — the documented format mandates none of these.
+            for k, v in roadmap_fields(line):
+                cur["fields"].setdefault(k, v)
     for it in items:
         # **Id:** is authoritative once present; fall back to the title slug so this
         # works on installs that predate the field and on items not yet backfilled.
         it["id"] = it["fields"].get("Id") or slug(it["title"])
-        it["status"] = it["fields"].get("Status", "open").split("·")[0].strip().lower()
+        # Status values trail free text in several shapes — `done · 2026-07-30`,
+        # `closed — superseded by …`, `in-progress · 2026-07-29 (abc1234) — …`. Only the
+        # leading token is the status; splitting on one separator misses the others.
+        head = re.match(r"[a-z-]+", it["fields"].get("Status", "open").strip().lower())
+        raw = head.group(0) if head else "open"
+        it["status"] = raw
+        # Terminal statuses are blacklisted rather than active ones whitelisted: real
+        # roadmaps carry `reopened`, `awaiting`, `blocked` and other local vocabulary,
+        # and an unrecognised status must stay VISIBLE rather than silently vanish.
+        it["open"] = raw.rstrip(".") not in TERMINAL_STATUS
         it["priority"] = it["fields"].get("Priority", "").strip().lower()
     return items
 
@@ -687,7 +719,7 @@ def main(argv: list[str]) -> int:
             addressed.setdefault(node_id(e["to"]), []).append(node_id(e["from"]))
         items = []
         for it in parse_roadmap(read(src.roadmap)):
-            if it["status"] not in ("open", "in-progress"):
+            if not it["open"]:
                 continue
             prior = addressed.get(it["id"], [])
             items.append(

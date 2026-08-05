@@ -3,9 +3,12 @@
 Open changes discovered while rolling the delivery graph (Stage 0+1) across real installs.
 Each item: what, the evidence, and what has to be decided. Delete an entry when it ships.
 
+**Delete this file when the rollout closes** — i.e. once tosk-agent is upgraded and all four
+projects have passed the 6-point acceptance test. Everything below is transitional.
+
 ---
 
-## Where we are (handover, 2026-08-05)
+## Where we are (handover, 2026-08-05 23:35)
 
 **What shipped.** The delivery graph: `shared/graph.py` (a derived, disposable typed-edge index over
 `docs/project-log.md`, `docs/roadmap.md`, `custom-tests.yaml`, `governed-paths.conf`,
@@ -17,12 +20,17 @@ read/write call sites. Design rationale: `~/.claude/plans/please-research-how-we
 
 **Rollout status:**
 
-| Project | State |
-|---|---|
-| tosk-web | Upgraded, `/fix` verified end to end, committed + pushed ✅ |
-| jobzeeker | Upgrade in progress — 145 roadmap items, packed inline form |
-| portrais | Not started |
-| tosk-agent | Not started |
+| Project | Upgrade | Post-upgrade `/fix` | Graph build |
+|---|---|---|---|
+| tosk-web | done, pushed | ✅ `0c9169a` — **6/6 acceptance pass** | 156/156, no warnings |
+| jobzeeker | done (`b14cbe6`), unpushed | not yet run | 216/216, no warnings |
+| portrais | done (`3e41b58`), unpushed | not yet run | 189/189, no warnings |
+| tosk-agent | **not started** — no `.claude/graph`, no `tosk-graph` skill | not yet run | n/a |
+
+jobzeeker and portrais were further along than the previous handover recorded. Their newest log
+entries *predate* their upgrade commits, which is why those entries show no `Addresses:`/`Decisions:`
+and list agent names under `Skills:` — old derivation, not a regression. Both still need one
+post-upgrade `/fix` before the acceptance test means anything.
 
 **Acceptance test per project** — run one `/fix` (better than `/code`: it also exercises the
 `<PREFIX>-debug` → `history` read site) and check:
@@ -44,6 +52,13 @@ read/write call sites. Design rationale: `~/.claude/plans/please-research-how-we
   A push alone does not reach a project; a local edit without a push reaches nothing.
 - `~/.claude/projects/**` is blocked by the secretrun guard — transcripts and memory are unreadable
   from Bash. Don't design anything that depends on reading them.
+- **Sibling sessions run concurrently in these repos.** On 2026-08-05 ~23:30, tosk-agent, portrais
+  and jobzeeker all had live sessions (dirty trees, HEADs moving mid-analysis). Re-read state
+  immediately before acting on it, and never run a build or an upgrade in a repo another session
+  is holding.
+- The plugin work is safe to do from the `agent-plugins` session; the per-project work is not.
+  `/dev-workflow:upgrade` resolves `.claude` relative to cwd and `/fix` is a project-local command —
+  neither can be driven from another repo's session.
 
 Test beds: **tosk-web** · **tosk-agent** · **portrais** · **jobzeeker**.
 
@@ -51,67 +66,7 @@ Test beds: **tosk-web** · **tosk-agent** · **portrais** · **jobzeeker**.
 
 ## Open — needs a decision
 
-### 1. The agent-scoped marker claim is false
-
-`skill-mark.sh` writes `/tmp/<PREFIX>-skills-${SESSION_ID}${AGENT}` where `AGENT` derives from
-`transcript_path`. **Subagents share the parent's `transcript_path`**, so every agent writes to one
-file and `AGENT` never differentiates.
-
-**Evidence:** 7 markers on the dev machine across many pipeline runs — *zero* with differing
-session/agent halves. tosk-web's `/fix` (session `4646b2e9`) produced exactly one marker containing
-`tosk-review`, `tosk-test`, `tosk-backend`, `tosk-frontend`, `tosk-design` — all loaded inside the
-dev/qa subagents.
-
-**Consequence:** `tpl-skill-guard.md` asserts *"a skill loaded by one agent never satisfies another
-agent's gate."* That is untrue — gates are session-wide. A skill dev loads satisfies qa's gate.
-tosk-web's 2026-07-23 delivery log claims a prior upgrade fixed this; it did not take.
-
-Cuts both ways: this is exactly *why* the `<PREFIX>-log` marker union captures subagent skills.
-Tightening the gate would break the `Skills:` derivation unless both move together.
-
-**Decide:** fix the derivation (needs a look at what `transcript_path` actually holds for a
-subagent) **or** correct the claim in the templates. Asserting something untrue is the worst option.
-
-### 2. Roadmap metadata form is undefined, so writers drift
-
-Three forms exist in the wild and the parser now reads all of them: list (`- **Status:** open`),
-bare (`**Status:** open`), and packed (`**Added:** … · **Owner:** … · **Status:** …`).
-
-The **writers** don't say which to emit. tosk-web's upgrade agent reformatted 390 lines to list form
-as a workaround for a parser bug — pure churn once the parser was fixed, and it left `tosk-dev` s1.5
-and `tosk-test § Roadmap` diverged from the templates.
-
-**Fix:** `<PREFIX>-dev` step 1.5 should say *match the file's existing convention* rather than
-mandate a form, and the install stub should stop implying one. Also add to the upgrade skill: never
-propose reformatting an existing roadmap.
-
-Per-project: jobzeeker packs inline (145 items) → append `· **Id:** <slug>`, do not add a separate
-`- **Id:**` line. tosk-agent is 100% bare. portrais and tosk-web are list form.
-
-### 3. `**Follow-ups:**` — undocumented log field
-
-tosk-web's `/fix` emitted a `**Follow-ups:**` line. Useful content; the projector ignores unknown
-fields so nothing breaks. But per repo CLAUDE.md any log field must land in the `<PREFIX>-log`
-template, the `docs/workflow.md` template, and the upgrade checklist **together**.
-
-**Decide:** adopt it properly in all three, or fold the content into the body and drop the field.
-
-### 4. `Deployed:` absent on a `ship=prod` run
-
-tosk-web's entry recorded `**Decisions:** … ship=prod (user)` and pushed clean, but carried no
-`**Deployed:**` line — while four earlier entries in the same log do. Either no prod deploy
-happened, or it happened via CI-on-push and went unrecorded.
-
-**Check:** if a CI-triggered prod deploy doesn't produce a `Deployed:` line, that's a template gap —
-push-fires-prod is the normal shape on these projects.
-
-### 5. Install stub ships a literal example roadmap item
-
-`### [category] Title` appears as a real `### ` heading in installed roadmaps (seen in tosk-agent
-and tosk-web), so `roadmap-open` counts it as an open item forever.
-
-**Fix:** make the stub's example a comment, or have the parser skip a placeholder title. Cosmetic,
-low priority, trivially fixed at install.
+*(none — all five open decisions were settled in `8b3766b`; see below)*
 
 ---
 
@@ -137,6 +92,9 @@ low priority, trivially fixed at install.
   itself the first time a verification can't run in any environment.
 - **`/pilot` against the graph** — no autonomous run yet.
 - **A project with no `python3`** — the documented fallback path has never actually been hit.
+- **The session-scoped marker rename (`8b3766b`)** — verified by construction and against 12 real
+  markers, but no pipeline has yet run with the rewritten hooks. First `/fix` after upgrade proves
+  it: acceptance points 1 and 2.
 
 ---
 
@@ -152,7 +110,55 @@ low priority, trivially fixed at install.
 | `graph.py` installed untracked → silently deleted, and mandatory fallbacks hid its absence | `4f5a780` |
 | Multi-hash (`` `a` + `b` ``) and missing-`HH:MM` log headings unparsed | `1888b44` |
 | `build --append` removed — full rebuild is <1s and append leaked deleted verifications | `763d217` |
+| Hooks claimed per-agent marker scoping they never had → keyed on `${SESSION_ID}` alone, claim corrected | `8b3766b` |
+| Parser read `### ` headings inside ``` fences → fenced format examples became phantom roadmap items | `8b3766b` |
+| Roadmap metadata form undefined → dev matches the file's existing convention, never reformats | `8b3766b` |
+| Log field set open-ended → declared closed; `Follow-ups:`-style invented fields routed to roadmap / `UAT-deferred:` | `8b3766b` |
+| `Deployed:` absent on a `ship=prod` run — **not a bug**; tosk-web declares no `envs.prod` and has no CI, so nothing deployed | n/a |
 
 **Verified on real data:** parse coverage N/N on all four corpora · prior-selection parity against an
 independently written parser · byte-identical rebuilds · zero edges without `src` · roadmap-open
-matching ground truth 55/55, 105/105, 75/75, 59/59 · prior-selection cost 11,757 → 81 tokens.
+matching ground truth 55/55, 105/105, 75/75, 59/59 · prior-selection cost 11,757 → 81 tokens ·
+`8b3766b`'s fence fix drops exactly one phantom on tosk-agent (82→81) and leaves tosk-web, portrais
+and jobzeeker byte-identical (edge counts and parse coverage unchanged on all three).
+
+### How the five decisions were settled (`8b3766b`)
+
+1. **Marker agent-scoping claim was false — confirmed, claim corrected.** All 12 `/tmp/*-skills-*`
+   markers on the dev machine have *identical* session and agent halves, including sessions that ran
+   `/code`, `/fix` and `/pilot` with subagents. `basename(transcript_path)` returns the session id,
+   so the `AGENT` suffix was provably always a duplicate. Fixed by keying all four scripts on
+   `${SESSION_ID}` alone and replacing the comment with the truth: the gate **is** session-wide, and
+   that is required — `<PREFIX>-log` derives `**Skills:**` from the same marker, and only session
+   scope sees `<PREFIX>-review` / `<PREFIX>-debug`, which load exclusively inside subagents.
+   Old doubled-name markers still match the log skill's glob, so no cleanup is needed.
+2. **Roadmap form drift.** Parser already read all three forms; the *writers* were unconstrained.
+   `<PREFIX>-dev` step 1.5 now says match the file's existing convention and never reformat existing
+   items; the install stub documents that all three forms are read; the upgrade skill is barred from
+   proposing a reformat (the `**Id:**` backfill remains its only sanctioned roadmap edit).
+3. **`Follow-ups:` — dropped, not adopted.** tosk-web's instance restated a roadmap item the same
+   task had just created, so the field duplicated tracked scope rather than recording anything new.
+   The log's field set is now explicitly **closed**, with leftover scope routed to `docs/roadmap.md`
+   and unrunnable verifications to `**UAT-deferred:**`. Applied to the `<PREFIX>-log` template, the
+   `docs/workflow.md` template and the upgrade checklist together, per repo CLAUDE.md.
+4. **`Deployed:` on a `ship=prod` run — no gap.** tosk-web's `deploy-config.yaml` states that neither
+   component declares `envs.prod`, so `target: prod` is a no-op and `--prod` finishes at UAT; the repo
+   has no CI workflows at all. `ship=prod (user)` with no `**Deployed:**` line is the honest record.
+   No template change. (Worth revisiting only once a project actually wires push-fires-prod CI.)
+5. **Install stub's literal example item — root cause was the parser.** The current stub ships no
+   literal `### [category] Title`; tosk-agent's phantom came from a **fenced** format example in its
+   roadmap header, which `parse_roadmap` read as a real item. Fixed generally with `strip_fences()`,
+   applied to `parse_roadmap`, `parse_log` and the build's heading count (that last one matters —
+   counting unstripped text would have raised a permanent false `WARNING`). Any project documenting
+   its own format in a fence is now safe, not just this one.
+
+---
+
+## Next
+
+1. **tosk-agent** — `/dev-workflow:upgrade` in its own session (it is the only un-upgraded project).
+2. **jobzeeker, portrais** — one `/fix` each against the 6-point test; push the pending upgrade commit.
+3. **tosk-web** — re-run `/dev-workflow:upgrade` to pick up `8b3766b`, then confirm acceptance
+   points 1–2 still pass with the rewritten hooks.
+4. Run `/plugin update` first in each session — the marketplace clone was at `bd082f7` as of
+   2026-08-05 23:00 and does not yet have `4f5a780` or `8b3766b`.

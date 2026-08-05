@@ -246,7 +246,14 @@ Also create `docs/roadmap.md` stub if not present:
 # Roadmap
 
 Items tracked here are the source of truth for open scope.
-Format: title, **Id:** stable-kebab-slug, **Category:** improvement | dogfood | integration | tech-debt, **Priority:** high | medium | low, **Status:** open | in-progress | done · YYYY-MM-DD, **Added:** YYYY-MM-DD HH:MM
+Each item is a `### ` heading, a 1–2 sentence description, then its metadata fields:
+**Id:** stable-kebab-slug · **Category:** improvement | dogfood | integration | tech-debt ·
+**Priority:** high | medium | low · **Status:** open | in-progress | done · YYYY-MM-DD ·
+**Added:** YYYY-MM-DD HH:MM
+
+Fields may be written one per line, as list items (`- **Status:** open`), or packed several to a
+line — all three are read correctly. Pick one and stay consistent within the file; never reformat
+existing items to match a different one.
 
 `**Id:**` is the item's permanent handle — the delivery log's `**Addresses:**` line cites it, which
 is what links a shipped commit back to the scope it closed. Assign one when the item is created and
@@ -396,6 +403,10 @@ The hash is the primary feature/fix commit, never a `test:`/`log:`/`docs:` bookk
 `**Addresses:**` cites the roadmap item's permanent `**Id:**` — that citation is what links a
 shipped commit back to the scope it closed. `**Decisions:**` records how each gate was answered;
 a timeout or an autonomous choice is never written as `user`.
+
+This field set is **closed**. Leftover scope goes to `docs/roadmap.md` as its own item, and a
+verification that could not be run goes to `**UAT-deferred:**` — not into an invented field. The
+graph ignores unknown fields silently, so an invented one reads as recorded but is not.
 
 The delivery log is also the delivery graph's primary input — `<PREFIX>-log` runs
 `python3 .claude/graph/graph.py build` after committing each entry, so these fields become

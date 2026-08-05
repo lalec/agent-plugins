@@ -153,12 +153,14 @@ done
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 [ -z "$SESSION_ID" ] && exit 0  # fail-open if no session ID
 
-# Marker is scoped per agent: subagents have their own transcript_path, so a skill loaded
-# by one agent never satisfies another agent's gate (shared markers let pm inherit dev's marks).
-TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
-AGENT=""
-[ -n "$TRANSCRIPT" ] && AGENT="-$(basename "$TRANSCRIPT" .jsonl)"
-MARKER="/tmp/<PREFIX>-skills-${SESSION_ID}${AGENT}"
+# Marker is scoped per SESSION, not per agent. Subagents inherit the parent's transcript_path,
+# so no per-agent key is derivable from the hook payload. The gate is deliberately session-wide:
+# <PREFIX>-log derives the delivery log's Skills field from this same marker, and that field is
+# the only surviving record that a subagent-only skill (<PREFIX>-review, <PREFIX>-debug) ran.
+# Consequence, stated plainly: within one session, a skill loaded by one agent DOES satisfy
+# another agent's gate. That is the accepted trade — do not "fix" it without moving the
+# Skills derivation in <PREFIX>-log at the same time.
+MARKER="/tmp/<PREFIX>-skills-${SESSION_ID}"
 
 if [ ! -f "$MARKER" ] || ! grep -qF "$SKILL" "$MARKER"; then
   MSG="Skill gate: '${FILE##*/}' is owned by ${SKILL} — invoke it first (skill=\"${SKILL}\"), then retry."
@@ -222,10 +224,7 @@ echo "$CMD" | grep -qE "(pnpm add|npm install|yarn add|pip install)" || exit 0
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 [ -z "$SESSION_ID" ] && exit 0  # fail-open if no session ID
 
-TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
-AGENT=""
-[ -n "$TRANSCRIPT" ] && AGENT="-$(basename "$TRANSCRIPT" .jsonl)"
-MARKER="/tmp/<PREFIX>-skills-${SESSION_ID}${AGENT}"
+MARKER="/tmp/<PREFIX>-skills-${SESSION_ID}"  # session-scoped — see skill-guard.sh
 
 if [ ! -f "$MARKER" ] || ! grep -qF "<PREFIX>-skill" "$MARKER"; then
   MSG="Dependency gate: '${CMD}' installs a new package — invoke <PREFIX>-skill first (skill=\"<PREFIX>-skill\") to assess whether new packages need reference files, then retry."
@@ -265,10 +264,7 @@ ADDED=$(comm -13 <(echo "$OLD_PKGS") <(echo "$NEW_PKGS"))
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 [ -z "$SESSION_ID" ] && exit 0
 
-TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
-AGENT=""
-[ -n "$TRANSCRIPT" ] && AGENT="-$(basename "$TRANSCRIPT" .jsonl)"
-MARKER="/tmp/<PREFIX>-skills-${SESSION_ID}${AGENT}"
+MARKER="/tmp/<PREFIX>-skills-${SESSION_ID}"  # session-scoped — see skill-guard.sh
 
 if [ ! -f "$MARKER" ] || ! grep -qF "<PREFIX>-skill" "$MARKER"; then
   MSG="Dependency gate: new packages detected in package.json — invoke <PREFIX>-skill first to assess whether new packages need reference files, then retry."
@@ -395,7 +391,9 @@ exit 0
 
 ## § skill-mark.sh
 
-Records each invoked skill to an agent-scoped marker file. Used by `skill-guard.sh`, `dependency-guard.sh`, and `package-edit-guard.sh` to verify a skill was loaded. The marker key must match the guards' derivation exactly: session id + transcript basename — per-agent scoping is what stops one subagent's skill loads from satisfying another's gates.
+Records each invoked skill to a session-scoped marker file. Used by `skill-guard.sh`, `dependency-guard.sh`, and `package-edit-guard.sh` to verify a skill was loaded, and by `<PREFIX>-log` to derive the delivery log's `**Skills:**` field. The marker key must match the guards' derivation exactly: session id alone.
+
+**Do not key this per agent.** Subagents inherit the parent's `transcript_path`, so `basename "$TRANSCRIPT"` returns the session id itself — a per-agent suffix is provably always equal to the session id (verified across 12 real markers on a machine that had run `/code`, `/fix` and `/pilot` pipelines: every filename's two halves were identical). Session scope is also what makes the `Skills:` derivation work at all, since `<PREFIX>-review` and `<PREFIX>-debug` only ever load inside subagents.
 
 ```bash
 #!/bin/bash
@@ -404,10 +402,7 @@ SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 [ -z "$SESSION_ID" ] && exit 0
 SKILL=$(echo "$INPUT" | jq -r '.tool_input.skill // empty' 2>/dev/null)
 [ -z "$SKILL" ] && exit 0
-TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
-AGENT=""
-[ -n "$TRANSCRIPT" ] && AGENT="-$(basename "$TRANSCRIPT" .jsonl)"
-echo "$SKILL" >> "/tmp/<PREFIX>-skills-${SESSION_ID}${AGENT}"
+echo "$SKILL" >> "/tmp/<PREFIX>-skills-${SESSION_ID}"  # session-scoped — see skill-guard.sh
 exit 0
 ```
 

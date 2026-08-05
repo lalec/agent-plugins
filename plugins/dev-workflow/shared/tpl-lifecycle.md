@@ -40,7 +40,9 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
 
    If the marker list comes back empty (markers are in `/tmp` and do not survive a reboot), use `—`. Do not reconstruct the list from memory — an invented list is worse than an honest `—`.
 
-   Two accepted limits: a session that ran several tasks accumulates skills across all of them in the top-level marker, so a second task in one session can over-report slightly; and agents (`<PREFIX>-dev`/`-qa`/`-pm`) never appear, because they are not skills — and in a pipeline run they always ran anyway, so their presence carries no information.
+   One session writes exactly **one** marker — subagents inherit the parent's `transcript_path`, so there is nothing per-agent to merge; the glob is a `*` only so markers written by an older, doubled-suffix install still match.
+
+   Two accepted limits: a session that ran several tasks accumulates skills across all of them in that one marker, so a second task in one session can over-report slightly; and agents (`<PREFIX>-dev`/`-qa`/`-pm`) never appear, because they are not skills — and in a pipeline run they always ran anyway, so their presence carries no information.
 4. Write the new entry at the **top** of `docs/project-log.md`, immediately below the header block, before the previous `---` separator
 5. Commit the log entry — stage `docs/project-log.md` only and commit:
    ```bash
@@ -84,6 +86,8 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
 - **Decisions** — one term per gate that was answered this task, as `<gate>=<value> (<how>)`, joined by ` · ` — e.g. `regression=smart (user) · ship=hold (timeout) · defer=accept (user)`. `<how>` is `user` (a real answer), `timeout` (a default taken on silence), or `pilot-auto` (decided autonomously mid-mission). **A timeout or an auto-decision is never recorded as `user`** — this line is the only durable record of whether a shipped change was actually consented to. Omit the line when no gate was answered.
 - **Checklist** — one `skill — note` per skill whose reference files were updated. Omit the line entirely if nothing was updated.
 
+**The field set above is closed — do not invent new fields.** The delivery graph projects known fields and silently ignores unknown ones, so an invented field looks fine and contributes nothing. Work that is *left over* rather than *done* already has two homes: scope someone will pick up later belongs in `docs/roadmap.md` as its own item (the body sentence may name it), and a verification that could not be run belongs in `**UAT-deferred:**`. A field like `Follow-ups:` restating a roadmap item it already created is duplication, not a record. If a genuinely new field is needed, it must be added to this template, the `docs/workflow.md` template, and the upgrade checklist in the same change.
+
 ## Quality Checklist
 Required steps before writing the log entry:
 1. [ ] Entry is at the top of docs/project-log.md (below the `# Project Log` header)
@@ -94,7 +98,8 @@ Required steps before writing the log entry:
 6. [ ] `Addresses:` carries the roadmap `**Id:**` the pm step confirmed, or the line is omitted — never a guessed id
 7. [ ] `Decisions:` records every answered gate with its true `user` / `timeout` / `pilot-auto` origin
 8. [ ] `Checklist:` line omitted when nothing was updated
-9. [ ] `docs/project-log.md` committed with `log: <short title>`
+9. [ ] No field outside the closed set above — leftover scope went to `docs/roadmap.md`, unrunnable verifications to `UAT-deferred:`
+10. [ ] `docs/project-log.md` committed with `log: <short title>`
 10. [ ] `graph.py build` run after the commit (or its failure noted in the handoff)
 ```
 
@@ -1890,7 +1895,7 @@ model call anywhere in the projector — projection is pure parsing.
 | `TOUCHES` | commit → path | — | one `git log --name-only` pass, filtered to delivery commits |
 | `USED` | commit → skill | — | log `**Skills:**` |
 
-**What `USED` is for.** For skills that own files it is largely redundant — `commit -TOUCHES-> path -OWNED_BY-> skill` derives the same answer from git, which cannot be wrong. Its unique value is the **no-file-trace** skills: `<PREFIX>-review` and `<PREFIX>-debug` leave nothing in a diff, so "did this feature need debugging?" exists here and nowhere else. That signal only holds if `**Skills:**` is derived from the agent-scoped markers (see `<PREFIX>-log` Process step 3) — a transcript-derived list misses exactly those two, because they load inside subagents.
+**What `USED` is for.** For skills that own files it is largely redundant — `commit -TOUCHES-> path -OWNED_BY-> skill` derives the same answer from git, which cannot be wrong. Its unique value is the **no-file-trace** skills: `<PREFIX>-review` and `<PREFIX>-debug` leave nothing in a diff, so "did this feature need debugging?" exists here and nowhere else. That signal only holds if `**Skills:**` is derived from the session-scoped markers (see `<PREFIX>-log` Process step 3) — a transcript-derived list misses exactly those two, because they load inside subagents.
 | `DEPLOYED_TO` | commit → env | `url` | log `**Deployed:**` |
 | `DEFERRED` | commit → verif | `accepted_by` | log `**UAT-deferred:**` |
 | `DECIDED` | commit → decision | `value`, `by` | log `**Decisions:**` |

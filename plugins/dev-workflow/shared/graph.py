@@ -126,10 +126,29 @@ def parse_fields(lines: list[str]) -> dict[str, str]:
     return fields
 
 
+def strip_fences(text: str) -> str:
+    """Blank lines inside ``` fences so a documented format example isn't read as data.
+
+    Roadmaps and delivery logs routinely show their own entry shape inside a fence. Without
+    this, `### [category] Title` in a roadmap header becomes a permanent phantom open item
+    (seen on a real install), and a fenced `### ` example in a log would be counted as an
+    entry the parser then fails to read. Lines are blanked rather than removed so line
+    offsets stay valid for callers that index into them.
+    """
+    out, fenced = [], False
+    for ln in text.splitlines():
+        if ln.lstrip().startswith("```"):
+            fenced = not fenced
+            out.append("")
+        else:
+            out.append("" if fenced else ln)
+    return "\n".join(out)
+
+
 def parse_log(text: str) -> list[dict]:
     """Delivery-log entries, newest first (the file is written top-insertion)."""
     entries: list[dict] = []
-    lines = text.splitlines()
+    lines = strip_fences(text).splitlines()
     starts = [i for i, ln in enumerate(lines) if ENTRY_RE.match(ln)]
     for n, i in enumerate(starts):
         m = ENTRY_RE.match(lines[i])
@@ -171,7 +190,7 @@ def parse_roadmap(text: str) -> list[dict]:
     items: list[dict] = []
     section = ""
     cur: dict | None = None
-    for raw in text.splitlines():
+    for raw in strip_fences(text).splitlines():
         line = raw.strip()
         if line.startswith("## ") and not line.startswith("### "):
             section = line[3:].strip()
@@ -653,7 +672,11 @@ def main(argv: list[str]) -> int:
         # Report parse coverage: a heading the parser cannot read is delivery history lost
         # silently, which is exactly the failure this index exists to prevent.
         text = read(src.log)
-        headings = sum(1 for ln in text.splitlines() if ln.startswith("### "))
+        # Count on the fence-stripped text, or a documented format example inside a fence
+        # reports as an entry the parser "missed" and raises a permanent false WARNING.
+        headings = sum(
+            1 for ln in strip_fences(text).splitlines() if ln.startswith("### ")
+        )
         parsed = len(parse_log(text))
         print(
             f"{len(edges)} edges · {parsed}/{headings} log entries parsed "

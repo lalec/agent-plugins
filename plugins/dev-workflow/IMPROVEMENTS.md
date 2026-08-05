@@ -3,7 +3,49 @@
 Open changes discovered while rolling the delivery graph (Stage 0+1) across real installs.
 Each item: what, the evidence, and what has to be decided. Delete an entry when it ships.
 
-Test beds: **tosk-web** (upgraded + `/fix` verified) · **tosk-agent** · **portrais** · **jobzeeker**.
+---
+
+## Where we are (handover, 2026-08-05)
+
+**What shipped.** The delivery graph: `shared/graph.py` (a derived, disposable typed-edge index over
+`docs/project-log.md`, `docs/roadmap.md`, `custom-tests.yaml`, `governed-paths.conf`,
+`deploy-config.yaml` and `git log`), an 8th lifecycle skill `<PREFIX>-graph`, three new fields
+(roadmap `**Id:**`, log `**Addresses:**` / `**Decisions:**`, `custom-tests.yaml` `last:`), and seven
+read/write call sites. Design rationale: `~/.claude/plans/please-research-how-we-refactored-summit.md`.
+
+**Plugin repo:** `lalec/agent-plugins`, `plugins/dev-workflow/`. Everything pushed; nothing local-only.
+
+**Rollout status:**
+
+| Project | State |
+|---|---|
+| tosk-web | Upgraded, `/fix` verified end to end, committed + pushed ✅ |
+| jobzeeker | Upgrade in progress — 145 roadmap items, packed inline form |
+| portrais | Not started |
+| tosk-agent | Not started |
+
+**Acceptance test per project** — run one `/fix` (better than `/code`: it also exercises the
+`<PREFIX>-debug` → `history` read site) and check:
+
+1. `**Skills:**` contains `<PREFIX>-log` — the marker-union derivation ran
+2. `**Skills:**` contains `<PREFIX>-review` — subagent skills were captured
+3. `**Addresses:**` carries a real roadmap `**Id:**`, or pm's `Notes:` explains no match
+4. `**Decisions:**` present, any timeout recorded as `(timeout)` not `(user)`
+5. `custom-tests.yaml` gained a `last:` block for each verification that ran
+6. `graph.py build` reports `N/N log entries parsed`, no `WARNING`
+
+**Landmines:**
+
+- **Never `rm -rf .claude/graph/` in a user project.** Doing this during regression testing deleted
+  tosk-web's installed `graph.py`. Because every call site falls back silently, nothing reported it.
+- **Fix the plugin, never hand-patch an installed project** — two tosk-web workarounds had to be
+  undone once the real parser bugs were fixed upstream.
+- **Propagation:** commit → push → the plugin cache updates → `/dev-workflow:upgrade` in the project.
+  A push alone does not reach a project; a local edit without a push reaches nothing.
+- `~/.claude/projects/**` is blocked by the secretrun guard — transcripts and memory are unreadable
+  from Bash. Don't design anything that depends on reading them.
+
+Test beds: **tosk-web** · **tosk-agent** · **portrais** · **jobzeeker**.
 
 ---
 

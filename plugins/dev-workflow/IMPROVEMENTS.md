@@ -3,8 +3,9 @@
 Open changes discovered while rolling the delivery graph (Stage 0+1) across real installs.
 Each item: what, the evidence, and what has to be decided. Delete an entry when it ships.
 
-**Delete this file when the rollout closes** — i.e. once tosk-agent is upgraded and all four
-projects have passed the 6-point acceptance test. Everything below is transitional.
+**Delete this file when the rollout closes** — i.e. once all four projects are on the current
+templates and have passed the 6-point acceptance test. All four are upgraded as of 2026-08-06; the
+acceptance runs are what remain. Everything below is transitional.
 
 ---
 
@@ -25,7 +26,7 @@ read/write call sites. Design rationale: `~/.claude/plans/please-research-how-we
 | tosk-web | done, pushed | ✅ `0c9169a` — **6/6 acceptance pass** | 156/156, no warnings |
 | jobzeeker | done (`b14cbe6`), unpushed | not yet run | 216/216, no warnings |
 | portrais | done (`3e41b58`), unpushed | not yet run | 189/189, no warnings |
-| tosk-agent | **not started** — no `.claude/graph`, no `tosk-graph` skill | not yet run | n/a |
+| tosk-agent | done (`07d8dd1`), unpushed — incl. all of `8b3766b` | not yet run | 93/93, no warnings |
 
 jobzeeker and portrais were further along than the previous handover recorded. Their newest log
 entries *predate* their upgrade commits, which is why those entries show no `Addresses:`/`Decisions:`
@@ -156,9 +157,18 @@ and jobzeeker byte-identical (edge counts and parse coverage unchanged on all th
 
 ## Next
 
-1. **tosk-agent** — `/dev-workflow:upgrade` in its own session (it is the only un-upgraded project).
-2. **jobzeeker, portrais** — one `/fix` each against the 6-point test; push the pending upgrade commit.
-3. **tosk-web** — re-run `/dev-workflow:upgrade` to pick up `8b3766b`, then confirm acceptance
+**All four projects are now upgraded.** What remains is verification and propagation.
+
+1. **jobzeeker, portrais, tosk-agent** — one `/fix` each against the 6-point test; push the pending
+   upgrade commit. tosk-agent's is `07d8dd1`.
+2. **jobzeeker, portrais** — re-run `/dev-workflow:upgrade` to pick up `8b3766b` (they were upgraded
+   before it landed: their hooks still carry the per-agent `AGENT` suffix, `graph.py` predates the
+   fence fix, dev step 1.5 lacks the convention rule, and the log field set is not declared closed).
+3. **tosk-web** — same: re-run `/dev-workflow:upgrade` for `8b3766b`, then confirm acceptance
    points 1–2 still pass with the rewritten hooks.
 4. Run `/plugin update` first in each session — the marketplace clone was at `bd082f7` as of
-   2026-08-05 23:00 and does not yet have `4f5a780` or `8b3766b`.
+   2026-08-05 23:00 and does not yet have `4f5a780`, `8b3766b` or later.
+
+**tosk-agent leftover:** `docs/plan-vpc-deployment.md` is still untracked, and the roadmap item
+`agentcore-vpc-networking-deferred-design-in` (added by the pre-upgrade session) points at it. Commit
+the plan doc or the reference dangles. Deliberately left out of the upgrade commit — unrelated scope.

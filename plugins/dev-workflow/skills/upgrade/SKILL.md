@@ -282,7 +282,7 @@ Run these verification checks on the upgrade-affected items:
 - `<PREFIX>-dev.md` has an explicit `Commit` step between Reference Sync and Hand off
 - `<PREFIX>-qa.md` has an explicit `Reference Sync` step between Sign off and Hand off
 - `.claude/graph/graph.py` is byte-identical to the plugin's `shared/graph.py` (`diff` is empty)
-- `python3 .claude/graph/graph.py build` exits 0; running it twice produces an identical `edges.jsonl` body; every emitted edge has a non-empty `src`
+- `python3 .claude/graph/graph.py build` exits 0; running it twice produces an identical `edges.jsonl` body; every emitted edge has a non-empty `src` — when checking this, **skip the first line**, which is a `_meta` header (`built`/`edges`/`head`/`version`), not an edge. A naive "count lines without `src`" always returns 1 and is not a finding
 - `build` reports **`N/N` log entries parsed** with no `WARNING` line. Any shortfall means entry headings are being silently dropped, which is a parser bug, not a tolerable loss — report it rather than accepting it. (Note the `LANDED_AS` count legitimately differs from the entry count in both directions: entries naming several commits emit several, and entries with a non-commit placeholder such as `pending` or `(uncommitted)` emit none.)
 - `graph.py covers <paths>` returns the same set as the manual `paths:`-intersection rule for a sample of three historical tasks
 - Every roadmap item has a unique `**Id:**`; `graph.py roadmap-open` lists the open ones

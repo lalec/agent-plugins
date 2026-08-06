@@ -116,6 +116,7 @@ Test beds: **tosk-web** · **tosk-agent** · **portrais** · **jobzeeker**.
 | Roadmap metadata form undefined → dev matches the file's existing convention, never reformats | `8b3766b` |
 | Log field set open-ended → declared closed; `Follow-ups:`-style invented fields routed to roadmap / `UAT-deferred:` | `8b3766b` |
 | `Deployed:` absent on a `ship=prod` run — **not a bug**; tosk-web declares no `envs.prod` and has no CI, so nothing deployed | n/a |
+| Headless roadmap items (metadata with no `### ` heading) silently absorbed by the item above → build warns | `0adea66` |
 
 **Verified on real data:** parse coverage N/N on all four corpora · prior-selection parity against an
 independently written parser · byte-identical rebuilds · zero edges without `src` · roadmap-open
@@ -168,6 +169,14 @@ and jobzeeker byte-identical (edge counts and parse coverage unchanged on all th
    points 1–2 still pass with the rewritten hooks.
 4. Run `/plugin update` first in each session — the marketplace clone was at `bd082f7` as of
    2026-08-05 23:00 and does not yet have `4f5a780`, `8b3766b` or later.
+
+**portrais roadmap hygiene (`b162aeb`) — checked, no interference.** It gave `### ` headings + `**Id:**`
+to two *headless* items (metadata with no heading) and added two new ones: 82 → 86 items, all ids
+unique, and a full cross-check of parsed status against the literal `**Status:**` line matched on
+89/89 items, so none of the long `**Updated: …**` prose lines shadow a real field. Both recovered
+items read `done · 2026-08-06`, which is a later legitimate flip, not a parse artifact. Net effect is
+recovery: two items that were invisible to `roadmap-open` and uncitable by `**Addresses:**` are now
+both. This is what motivated `0adea66`.
 
 **tosk-agent leftover:** `docs/plan-vpc-deployment.md` is still untracked, and the roadmap item
 `agentcore-vpc-networking-deferred-design-in` (added by the pre-upgrade session) points at it. Commit

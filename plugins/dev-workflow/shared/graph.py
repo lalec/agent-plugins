@@ -185,6 +185,34 @@ def roadmap_fields(line: str) -> list[tuple[str, str]]:
     ]
 
 
+def headless_roadmap_items(text: str) -> list[tuple[str, int]]:
+    """Headings that contain more than one `**Category:**` — a headless item is hiding there.
+
+    An item written without its `### ` heading is not a parse error: its fields are quietly
+    absorbed by the preceding item (and dropped, since that item already has them), so it
+    vanishes from `roadmap-open` and has no id for the log's `**Addresses:**` to cite. Two
+    such items sat invisible in a real roadmap for weeks.
+
+    Category is the signal, not Status: an item declares its category exactly once, whereas
+    real roadmaps stack several `**Status:**` lines on one item to keep superseded history.
+    Measured across four roadmaps, Category flagged both headless items and nothing else;
+    Status produced two false positives on exactly that history-keeping pattern.
+    """
+    lines = strip_fences(text).splitlines()
+    idx = [n for n, ln in enumerate(lines) if ln.strip().startswith("### ")]
+    out = []
+    for k, n in enumerate(idx):
+        end = idx[k + 1] if k + 1 < len(idx) else len(lines)
+        count = sum(
+            1
+            for ln in lines[n + 1 : end]
+            if re.match(r"^-?\s*\*\*Category:\*\*", ln.strip())
+        )
+        if count > 1:
+            out.append((lines[n].strip()[4:], count))
+    return out
+
+
 def parse_roadmap(text: str) -> list[dict]:
     """`### title` items carrying `- **Field:** value` lines, grouped under `## Section`."""
     items: list[dict] = []
@@ -687,6 +715,13 @@ def main(argv: list[str]) -> int:
             print(
                 f"WARNING: {missed} log {'entry' if missed == 1 else 'entries'} did not parse "
                 f"and contribute nothing to the graph — check the `### ` heading format",
+                file=sys.stderr,
+            )
+        for title, n in headless_roadmap_items(read(src.roadmap)):
+            print(
+                f"WARNING: {n} `**Category:**` lines under one roadmap heading "
+                f"({title!r}) — an item below it is missing its `### ` heading, so it is "
+                f"invisible to roadmap-open and has no id the delivery log can cite",
                 file=sys.stderr,
             )
         return 0

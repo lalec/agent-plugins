@@ -24,7 +24,7 @@ read/write call sites. Design rationale: `~/.claude/plans/please-research-how-we
 | Project | Upgrade | Post-upgrade `/fix` | Graph build |
 |---|---|---|---|
 | tosk-web | done, pushed | ✅ `0c9169a` — **6/6 acceptance pass** | 156/156, no warnings |
-| jobzeeker | done (`b14cbe6`), unpushed | not yet run | 216/216, no warnings |
+| jobzeeker | **verified current at `dbdffa0`** — 60-point checklist, no gaps | not yet run | 228/228, no warnings |
 | portrais | done (`3e41b58`), unpushed | not yet run | 189/189, no warnings |
 | tosk-agent | done (`07d8dd1`), unpushed — incl. all of `8b3766b` | not yet run | 93/93, no warnings |
 
@@ -117,6 +117,7 @@ Test beds: **tosk-web** · **tosk-agent** · **portrais** · **jobzeeker**.
 | Log field set open-ended → declared closed; `Follow-ups:`-style invented fields routed to roadmap / `UAT-deferred:` | `8b3766b` |
 | `Deployed:` absent on a `ship=prod` run — **not a bug**; tosk-web declares no `envs.prod` and has no CI, so nothing deployed | n/a |
 | Headless roadmap items (metadata with no `### ` heading) silently absorbed by the item above → build warns | `0adea66` |
+| `paths` reduction was a flat `.claude/**` exclusion — let docs-only paths drive prior-selection and dropped executable source under `.claude/skills/**/scripts/**` → behavioral-surface rule (upstreamed from jobzeeker) | `e4a8470` |
 
 **Verified on real data:** parse coverage N/N on all four corpora · prior-selection parity against an
 independently written parser · byte-identical rebuilds · zero edges without `src` · roadmap-open

@@ -23,10 +23,10 @@ read/write call sites. Design rationale: `~/.claude/plans/please-research-how-we
 
 | Project | Upgrade | Post-upgrade `/fix` | Graph build |
 |---|---|---|---|
-| tosk-web | current at `e4a8470` (`de415e9`) | ✅ `0c9169a` — 6/6, but on pre-`8b3766b` templates | 157/157, no warnings |
-| tosk-agent | current at `e4a8470` (`7e3b753`) | not yet run | 93/93, no warnings |
-| jobzeeker | current at `e4a8470` — 60-point checklist, no gaps | not yet run | 228/228, no warnings |
-| portrais | current at `e4a8470` (`ce04ffc`) | not yet run | 208/208, no warnings |
+| tosk-web | current at `65593aa` (`b426c65`) | ✅ `0c9169a` — 6/6, but on pre-`8b3766b` templates | 157/157, no warnings |
+| tosk-agent | current at `65593aa` (`482aee5`) | not yet run | 93/93, no warnings |
+| jobzeeker | current at `65593aa` (`07dd59f`) | not yet run | 228/228, no warnings |
+| portrais | current at `65593aa` (`3f5544b`) | not yet run | 208/208, no warnings |
 
 **All four verified byte-current** against the plugin on 2026-08-09:
 `graph.py` identical, zero `TRANSCRIPT=` in hooks, dev 1.5 convention rule, closed log field set,
@@ -129,6 +129,7 @@ subagent. Subagent skills reach the parent-session marker exactly as the `Skills
 | `Deployed:` absent on a `ship=prod` run — **not a bug**; tosk-web declares no `envs.prod` and has no CI, so nothing deployed | n/a |
 | Headless roadmap items (metadata with no `### ` heading) silently absorbed by the item above → build warns | `0adea66` |
 | A subagent backgrounding a long deploy watch parked the pipeline **silently** — the completion routes to the parent, and salvage only triggered on a *dead* agent → foreground-wait rule + salvage on any non-`## Handoff` return | `ed6f7ba` |
+| `/pilot` lanes frozen at pipeline/tweak, spend caps chat-granted with nothing tracking them, human-gated verdicts auto-decided or dropped → `pilot-lane:` frontmatter registry + granted resource ledger + parked-verdict contract | `65593aa` |
 | `paths` reduction was a flat `.claude/**` exclusion — let docs-only paths drive prior-selection and dropped executable source under `.claude/skills/**/scripts/**` → behavioral-surface rule (upstreamed from jobzeeker) | `e4a8470` |
 
 **Verified on real data:** parse coverage N/N on all four corpora · prior-selection parity against an

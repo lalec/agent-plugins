@@ -402,7 +402,8 @@ The hash is the primary feature/fix commit, never a `test:`/`log:`/`docs:` bookk
 
 `**Addresses:**` cites the roadmap item's permanent `**Id:**` — that citation is what links a
 shipped commit back to the scope it closed. `**Decisions:**` records how each gate was answered;
-a timeout or an autonomous choice is never written as `user`.
+a timeout or an autonomous choice is never written as `user`, and a gate deliberately left for a
+human is written `<gate>=parked (human-gated)` rather than being decided.
 
 This field set is **closed**. Leftover scope goes to `docs/roadmap.md` as its own item, and a
 verification that could not be run goes to `**UAT-deferred:**` — not into an invented field. The

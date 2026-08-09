@@ -434,7 +434,7 @@ description: Autonomous multi-task run — decompose a goal into tasks, route ea
 
 # Pilot
 
-**Usage:** `/pilot <goal>` — a batch of work (e.g. open roadmap items matching a filter) or a target state to reach (improve an area until measurable criteria pass). Flags: `--max-tasks N` caps the run (default 10); `--prod` pre-answers Ship; `--no-push` pre-answers Hold and skips the close-out push.
+**Usage:** `/pilot <goal>` — a batch of work (e.g. open roadmap items matching a filter) or a target state to reach (improve an area until measurable criteria pass). Flags: `--max-tasks N` caps the run (default 10); `--prod` pre-answers Ship; `--no-push` pre-answers Hold and skips the close-out push; `--grant <unit>=<N>` (repeatable) pre-answers Budget for a metered lane.
 
 **Examples:**
 - `/pilot implement all open roadmap items`
@@ -450,7 +450,7 @@ After the single Step 1 gate, the run is unattended until close-out:
 
 ## Step 0 — Flags + entry hygiene
 
-**Flag parse (first):** `--max-tasks N` → cap the task list at N (default 10); `--prod` → `ship_mode = prod`; `--no-push` → `ship_mode = hold` and `no_push = true`. Strip all flags from the goal used below. If neither ship flag is present, `ship_mode` is decided by the Ship question in Step 1.
+**Flag parse (first):** `--max-tasks N` → cap the task list at N (default 10); `--prod` → `ship_mode = prod`; `--no-push` → `ship_mode = hold` and `no_push = true`; `--grant <unit>=<N>` (repeatable) → seed the resource ledger below. Strip all flags from the goal used below. If neither ship flag is present, `ship_mode` is decided by the Ship question in Step 1.
 
 **Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it at close-out. If the WIP overlaps paths this mission will touch, do not stash it blind — tell the user and run `/tidy` scoped to the overlapping paths first, then resume here.
 
@@ -461,9 +461,24 @@ After the single Step 1 gate, the run is unattended until close-out:
 - **Target-state goal** ("improve X until Y"): derive 2–3 **success criteria** — measurable checks, each with a command or observable that decides pass/fail — then derive the initial tasks that most plausibly move toward them. The loop re-plans between tasks; the criteria, not the initial list, define done.
 - **Plain batch** (an explicit list of things to do): one task per item.
 
-Cap at `max_tasks`. For each task derive: a one-line description, 1–3 candidate verifications (`{assert, type}` — UX / Integration / E2E, same vocabulary as `/code` Step 0.5), and a **lane**:
+Cap at `max_tasks`. For each task derive: a one-line description, 1–3 candidate verifications (`{assert, type}` — UX / Integration / E2E, same vocabulary as `/code` Step 0.5), and a **lane**.
+
+**Lane registry — discovered, not hardcoded.** Two lanes are always present:
 - `pipeline` — features, bug fixes, schema/API/auth changes, anything needing review depth. Default when unsure.
 - `tweak` — small inline-verifiable changes (pixel nudges, copy, config values) per the `/tweak` lane rules.
+
+Projects add their own. Scan `.claude/commands/*.md` frontmatter for a `pilot-lane:` key; each one that declares it is a lane this mission may route to:
+
+```yaml
+pilot-lane:
+  routing: <one line — when a task belongs in this lane>
+  close-out: <what the lane owes at task exit, e.g. "log entry" | "artifact + parked verdict" | "none">
+  spend: none | metered:<unit>          # <unit> names the finite resource a task in this lane consumes
+```
+
+The lane's **name is the command's filename** (`<command>.md` → lane `<command>`) — there is no separate name field to drift. Route a task to a discovered lane only when its `routing` rule matches better than `pipeline`/`tweak`; `pipeline` remains the default when unsure. A lane whose frontmatter is malformed or whose `spend` is unparseable is **skipped with a warning at the gate**, never guessed at. Show each task's lane in the gate list so the user sees the routing before launch.
+
+Discovered lanes are project-owned: this command knows how to *find and dispatch* them, never what they do.
 
 **Split broad tasks (do this before the gate).** A single item that applies **one uniform change across an enumerable set** — phrased with "~N", "each", "all/every X", plural targets, "across the <collection>" — is really N sub-tasks. Bundled into one pipeline task it balloons the dev agent past a healthy context window and hands QA an unreviewable diff (the observed failure: one "invert ~9 modules" item ran 49 turns / 222k context / 41 min and had to spawn its own sub-agents to cope). For each such task, enumerate the concrete target set, then:
 - **Split into bounded chunks** — group the set so each chunk is one coherent review unit (rule of thumb: ≤~5 files of the same uniform change per chunk), one `pipeline` task per chunk, sharing the parent's verifications. This is the **default** — a bounded pipeline unit keeps context healthy and the per-task diff reviewable.
@@ -485,7 +500,16 @@ Cap at `max_tasks`. For each task derive: a one-line description, 1–3 candidat
      - label: "Ship (Recommended)" — description: "If every task signs off clean, deploy/push to prod at close-out without asking again. On projects where push fires prod CI, shipping = prod deploy."
      - label: "Hold at UAT" — description: "End committed but not pushed/deployed; ship later with /code --prod or by asking"
 
-Timeout → same risk split as the `/code` Gate policy: launch on the recommended defaults labeled `auto-selected on timeout — not user-confirmed`, **except Ship, whose timeout default is always Hold**. Regression scope is fixed at `smart` for every task — a full regression per task would multiply cost across the mission; each task's QA already runs prior verifications for the files it touched.
+3. **Budget** (include only when the task list routes to a lane whose `spend` is `metered:<unit>` **and** no `--grant` already covered that unit):
+   - question: "Grant a budget for <unit>? <M> task(s) route to metered lanes."
+   - header: "Budget"
+   - options: two or three concrete grants sized to the task count (e.g. "20", "50"), plus "None — skip those tasks". The automatic "Other" accepts an exact number.
+
+**Resource ledger.** Each granted unit starts at its grant and is decremented by the spend a metered lane reports at task exit. Before dispatching any metered task, check the ledger: **at 0 or below, the lane is closed** — remaining tasks in it are marked `skipped — budget exhausted` and the loop continues with the others. **No grant for a unit means every lane metered in that unit is off for the whole mission** — those tasks are dropped at the gate, not silently attempted.
+
+Be precise about what this enforces: the ledger governs **dispatch**, not consumption. `/pilot` decides whether to start another metered task; it cannot cap spend *inside* a task that is already running — the lane owns that, and a lane that under-reports its spend corrupts the ledger. State the granted units and the running balance in the progress line and the close-out, so an over-spend is visible even though it cannot be prevented here.
+
+Timeout → same risk split as the `/code` Gate policy: launch on the recommended defaults labeled `auto-selected on timeout — not user-confirmed`, **except Ship, whose timeout default is always Hold, and Budget, whose timeout default is always None** (an unattended run must not spend a resource nobody granted). Regression scope is fixed at `smart` for every task — a full regression per task would multiply cost across the mission; each task's QA already runs prior verifications for the files it touched.
 
 ## Step 2 — The loop
 
@@ -502,6 +526,10 @@ Work the task list in order until: tasks exhausted, all success criteria pass, o
 5. Spawn `<PREFIX>-pm` with the feature commit, any UAT-deferred line, the changed paths, and the verbatim QA-evidence block (`/code` Step 3 prompt shape). Its `Decisions:` line carries the mission gate's answers plus anything decided inside the loop — every autonomous branch is labelled `(pilot-auto)`, never `(user)`; an auto-accepted deferral is `defer=accept (pilot-auto)`. The mission gate's own Ship answer keeps its true origin (`user` or `timeout`).
 
 **(b) Tweak lane** — top-level inline work under the `/tweak` lane rules: load the owning domain skill first, verify every change inline with shown evidence, commit in small named steps. Task exit: use the `<PREFIX>-review` skill on the task's diff (fix non-source nits directly; a source finding needing review depth → reclassify the task to the pipeline lane and run (a)), then one `<PREFIX>-log` entry for the task. **Scope guard:** if the work grows into schema/API/auth/migrations, reclassify to the pipeline lane before continuing.
+
+**(b2) Discovered lane** — invoke the lane's command with the task, then hold it to its declared contract. It owes whatever its `close-out` names (a log entry, an artifact, a parked verdict, or nothing) and, if its `spend` is metered, a spend figure to decrement the ledger — a metered lane that reports no spend is treated as having exhausted its remaining balance, so an unreported burn closes the lane instead of running free. The lane's own steps are project-owned and not restated here; the salvage protocol applies to it exactly as to any subagent. If the lane's work turns out to need review depth (it changed source), reclassify to the pipeline lane and run (a).
+
+**Parked verdicts.** A lane may produce measurements and artifacts autonomously, but any **keep / ship / adopt decision it marks human-gated is never decided in-run** — not by the lane, not by this command, not by a default. Park it: carry it into the mission report as an explicit parked decision with the evidence needed to answer it, and record it in the task's log entry as `**Decisions:** <name>=parked (human-gated)`. This is the autonomy contract's irreversible-gate rule applied to lane output — an unanswered gate is never recorded as decided, exactly as a timeout is never recorded as `user`. A parked verdict does not fail the task and does not stop the loop.
 
 **(c) Progress + re-plan.** After each task, emit one status line — `task k/N · <title> · <status> · <commit> · <evidence pointer>` — a report, not a question. Then re-plan: drop later tasks the outcome obsoleted, insert a revealed prerequisite (within `max_tasks`), and if success criteria exist, evaluate them with evidence — stop the loop when all pass. Record every plan amendment for the mission report. For roadmap-driven runs, verify pm flipped the item's status.
 
@@ -522,6 +550,7 @@ Work the task list in order until: tasks exhausted, all success criteria pass, o
 | Deployed | curl the env url/health (2xx), or "no deployable env" / "held" |
 | Roadmap | roadmap-driven runs: item statuses flipped in `docs/roadmap.md` |
 | Ref sync | `Reference Sync:` fields from the handoffs |
+| Spend | per granted unit: `<spent>/<grant>` from the ledger, plus any lane closed on exhaustion |
 
 **(d) Restore stashed WIP.** If pre-existing WIP was stashed at Step 0, `git stash pop` it now; report any conflict instead of resolving it silently.
 
@@ -532,6 +561,7 @@ Report, in this order:
 2. The task table: task · lane · status (`signed-off` / `deferred` / `failed` / `dropped` / `not-reached`) · commit · log entry.
 3. QA `Evidence:` lines per task, verbatim.
 4. Everything auto-decided, explicitly labeled: gate timeouts, auto-accepted deferrals, plan amendments.
+4b. **Parked decisions** — every human-gated verdict a lane produced, each with the evidence needed to answer it and where that evidence lives. These are the reason the user is reading this report; never fold them into the task table and never present one as decided. State the granted-vs-spent figure per unit here too, and name any lane closed on exhaustion.
 5. Failed and unreached tasks as follow-ups, with enough state to resume (`/pilot <remaining goal>` re-derives the plan from the roadmap or criteria).
 6. Serve-envs still running and where (`<url>`).
 7. Ship state: "deployed to prod" only after `<PREFIX>-deploy` confirmed CI completion + health check; "held at UAT per your Ship answer"; or parked — state exactly what awaits confirmation.

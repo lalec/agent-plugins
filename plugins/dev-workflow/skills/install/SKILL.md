@@ -16,14 +16,14 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 - `docs/roadmap.md` stub — source of truth for open items; tracked by `<PREFIX>-dev` (new entries) and `<PREFIX>-pm` (status updates)
 - Domain skills: one per substantive source dir, derived from discovery (not hardcoded)
 - `.claude/hooks/governed-paths.conf` — single source of truth for path→skill ownership (incl. per-skill self-ownership entries), `DEPLOY_PATHS`, and `REF_WATCH`; sourced by skill-guard, path-coverage-check, ref-sync-check, and close-out-gate
-- `.claude/hooks/skill-guard.sh` — PreToolUse Edit+Write: blocks edits to owned paths without skill loaded (agent-scoped markers)
+- `.claude/hooks/skill-guard.sh` — PreToolUse Edit+Write: blocks edits to owned paths without skill loaded (session-scoped markers)
 - `.claude/hooks/path-coverage-check.sh` — PreToolUse Write: blocks new files in governed roots not covered by any pattern
 - `.claude/hooks/dependency-guard.sh` — PreToolUse Bash: blocks `pnpm add` / `pip install` without `<PREFIX>-skill` loaded
 - `.claude/hooks/package-edit-guard.sh` — PreToolUse Edit: blocks direct dependency additions to `package.json` without `<PREFIX>-skill`
 - `.claude/hooks/pre-handoff-check.sh` — PreToolUse Skill + Task/Agent: blocks `<PREFIX>-qa` invocation (skill call or subagent spawn) if uncommitted changes exist, lint fails, or typecheck fails
 - `.claude/hooks/close-out-gate.sh` — PreToolUse Bash: blocks `git push` while commits after the last delivery-log entry touch governed/deploy paths (iterate-lane close-out enforcement; `CLOSEOUT_OVERRIDE=1` escape hatch)
 - `.claude/hooks/ref-sync-check.sh` — PostToolUse Bash: warns after `git commit` on reference-worthy drift (structural changes or `REF_WATCH` matches; modify-only cosmetic commits stay silent) and on deploy-mechanism drift without `deploy-config.yaml` updates
-- `.claude/hooks/skill-mark.sh` — PostToolUse Skill: records invoked skills to an agent-scoped session marker
+- `.claude/hooks/skill-mark.sh` — PostToolUse Skill: records invoked skills to a session-scoped marker
 - `.claude/hooks/post-commit.sh` — PostToolUse Bash: reminds to run `<PREFIX>-log` after every commit
 - `.claude/graph/graph.py` — delivery-graph projector + query engine (copied verbatim from `../../shared/graph.py`); `edges.jsonl` is generated and gitignored
 - `.claude/settings.json` — wires all hooks
@@ -369,14 +369,14 @@ All hooks wired in `.claude/settings.json`.
 
 | Hook | Event | Enforces |
 |---|---|---|
-| `skill-guard.sh` | PreToolUse Edit/Write | Owning skill must be loaded before editing governed paths (agent-scoped markers) |
+| `skill-guard.sh` | PreToolUse Edit/Write | Owning skill must be loaded before editing governed paths (session-scoped markers) |
 | `path-coverage-check.sh` | PreToolUse Write | Blocks new files in governed roots with no matching owner |
 | `dependency-guard.sh` | PreToolUse Bash | Requires `<PREFIX>-skill` before adding packages |
 | `package-edit-guard.sh` | PreToolUse Edit | Requires `<PREFIX>-skill` before editing package files directly |
 | `pre-handoff-check.sh` | PreToolUse Skill + Task/Agent | Blocks `<PREFIX>-qa` (skill call or subagent spawn) if uncommitted changes or lint fails |
 | `close-out-gate.sh` | PreToolUse Bash | Blocks `git push` while governed commits lack a delivery-log entry (`CLOSEOUT_OVERRIDE=1` escape) |
 | `ref-sync-check.sh` | PostToolUse Bash | Warns on reference-worthy drift (structural / `REF_WATCH`) and deploy-config drift |
-| `skill-mark.sh` | PostToolUse Skill | Records invoked skills to an agent-scoped session marker |
+| `skill-mark.sh` | PostToolUse Skill | Records invoked skills to a session-scoped marker |
 | `post-commit.sh` | PostToolUse Bash | Reminds to run `<PREFIX>-log` after every commit |
 
 ## Delivery Log Format
@@ -534,13 +534,13 @@ Walk the checklist before declaring done:
 - [ ] `.claude/hooks/governed-paths.conf` exists and has `GOVERNED_ROOTS` (directory prefixes only, no extension globs) + `DEPLOY_PATHS` (alternation of IaC/CI-CD/Build/Deployment paths, or `''` if none) + `REF_WATCH` (reference-worthy paths, or `''`) + `PATH_MAP` with the `custom-tests.yaml` EXEMPT entry, one self-ownership entry per installed skill (before the `.claude/skills/` catch-all), one entry per domain skill, and standard catch-alls
 - [ ] `.claude/hooks/skill-guard.sh` is executable and sources `governed-paths.conf` — contains NO hardcoded path patterns; marker derivation includes the transcript-basename agent scope
 - [ ] `.claude/hooks/path-coverage-check.sh` is executable and sources `governed-paths.conf` — contains NO hardcoded path patterns
-- [ ] `.claude/hooks/dependency-guard.sh` is executable and checks for `<PREFIX>-skill` in the agent-scoped session marker
-- [ ] `.claude/hooks/package-edit-guard.sh` is executable and checks for `<PREFIX>-skill` in the agent-scoped session marker
+- [ ] `.claude/hooks/dependency-guard.sh` is executable and checks for `<PREFIX>-skill` in the session-scoped session marker
+- [ ] `.claude/hooks/package-edit-guard.sh` is executable and checks for `<PREFIX>-skill` in the session-scoped session marker
 - [ ] `.claude/hooks/pre-handoff-check.sh` is executable, matches **both** `tool_input.skill` and `tool_input.subagent_type` for `<PREFIX>-qa`, checks dirty tree + lint + typecheck
 - [ ] Every domain-skill `## Quality Checklist` command **resolves against the project** — each named `package.json` script exists under `scripts`, each linter/tool is an installed dependency or resolvable path; no rule names a conventional-but-unwired command (e.g. `npm run lint` with no `lint` script). The Quality Checklist lint command and the hook `<LINT_CMD>` **agree**: both name the same verified command, or both are absent
 - [ ] `.claude/hooks/close-out-gate.sh` is executable, fires on `git push`, sources `governed-paths.conf`, and honors `CLOSEOUT_OVERRIDE=1`
 - [ ] `.claude/hooks/ref-sync-check.sh` is executable, sources `governed-paths.conf` — contains NO hardcoded path patterns; source-drift warning fires only on structural (A/D/R) changes or `REF_WATCH` matches; deploy-drift check unchanged
-- [ ] `.claude/hooks/skill-mark.sh` is executable and writes to the agent-scoped marker (same derivation as the guards)
+- [ ] `.claude/hooks/skill-mark.sh` is executable and writes to the session-scoped marker (same derivation as the guards)
 - [ ] `.claude/hooks/post-commit.sh` is executable, references `<PREFIX>-log`, and exits 0 on success paths (recorders never exit non-zero)
 - [ ] `.claude/settings.json` exists and wires all 9 hooks across `PreToolUse`/`PostToolUse` + `Edit`/`Write`/`Bash`/`Skill`/`Task|Agent` matchers
 - [ ] `CLAUDE.md` has `## Plan Mode`, `## Agents`, `## Skills`, and `## Roadmap` sections with correct references

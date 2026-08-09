@@ -23,15 +23,20 @@ read/write call sites. Design rationale: `~/.claude/plans/please-research-how-we
 
 | Project | Upgrade | Post-upgrade `/fix` | Graph build |
 |---|---|---|---|
-| tosk-web | done, pushed | ✅ `0c9169a` — **6/6 acceptance pass** | 156/156, no warnings |
-| jobzeeker | **verified current at `dbdffa0`** — 60-point checklist, no gaps | not yet run | 228/228, no warnings |
-| portrais | done (`3e41b58`), unpushed | not yet run | 189/189, no warnings |
-| tosk-agent | done (`07d8dd1`), unpushed — incl. all of `8b3766b` | not yet run | 93/93, no warnings |
+| tosk-web | current at `e4a8470` (`de415e9`) | ✅ `0c9169a` — 6/6, but on pre-`8b3766b` templates | 157/157, no warnings |
+| tosk-agent | current at `e4a8470` (`7e3b753`) | not yet run | 93/93, no warnings |
+| jobzeeker | current at `e4a8470` — 60-point checklist, no gaps | not yet run | 228/228, no warnings |
+| portrais | user-driven, in progress | not yet run | — |
 
-jobzeeker and portrais were further along than the previous handover recorded. Their newest log
-entries *predate* their upgrade commits, which is why those entries show no `Addresses:`/`Decisions:`
-and list agent names under `Skills:` — old derivation, not a regression. Both still need one
-post-upgrade `/fix` before the acceptance test means anything.
+All three of tosk-web / tosk-agent / jobzeeker verified byte-current against the plugin on 2026-08-09:
+`graph.py` identical, zero `TRANSCRIPT=` in hooks, dev 1.5 convention rule, closed log field set,
+behavioral-surface `paths` in both `code.md` and `fix.md`, build N/N with no warnings.
+
+**Template rollout is done; only the acceptance runs remain.** Every project's newest log entry
+predates its upgrade, which is why those entries show no `Addresses:`/`Decisions:` and list agent
+names under `Skills:` — old derivation, not a regression. tosk-web's 6/6 pass was on pre-`8b3766b`
+templates, so it needs a re-run too: the session-scoped markers and behavioral-surface `paths` have
+never been exercised by a real pipeline anywhere.
 
 **Acceptance test per project** — run one `/fix` (better than `/code`: it also exercises the
 `<PREFIX>-debug` → `history` read site) and check:
@@ -159,26 +164,13 @@ and jobzeeker byte-identical (edge counts and parse coverage unchanged on all th
 
 ## Next
 
-**All four projects are now upgraded.** What remains is verification and propagation.
+**All four projects on current templates** (portrais user-driven). Only the acceptance runs remain.
 
-1. **jobzeeker, portrais, tosk-agent** — one `/fix` each against the 6-point test; push the pending
-   upgrade commit. tosk-agent's is `07d8dd1`.
-2. **jobzeeker, portrais** — re-run `/dev-workflow:upgrade` to pick up `8b3766b` (they were upgraded
-   before it landed: their hooks still carry the per-agent `AGENT` suffix, `graph.py` predates the
-   fence fix, dev step 1.5 lacks the convention rule, and the log field set is not declared closed).
-3. **tosk-web** — same: re-run `/dev-workflow:upgrade` for `8b3766b`, then confirm acceptance
-   points 1–2 still pass with the rewritten hooks.
-4. Run `/plugin update` first in each session — the marketplace clone was at `bd082f7` as of
-   2026-08-05 23:00 and does not yet have `4f5a780`, `8b3766b` or later.
+1. One `/fix` per project against the 6-point test — none has run on post-`8b3766b` templates, so
+   the session-scoped markers and behavioral-surface `paths` are still unexercised in a real
+   pipeline. tosk-web included: its 6/6 pass predates them.
+2. Push where pending, and run `/plugin update` in each session first.
 
-**portrais roadmap hygiene (`b162aeb`) — checked, no interference.** It gave `### ` headings + `**Id:**`
-to two *headless* items (metadata with no heading) and added two new ones: 82 → 86 items, all ids
-unique, and a full cross-check of parsed status against the literal `**Status:**` line matched on
-89/89 items, so none of the long `**Updated: …**` prose lines shadow a real field. Both recovered
-items read `done · 2026-08-06`, which is a later legitimate flip, not a parse artifact. Net effect is
-recovery: two items that were invisible to `roadmap-open` and uncitable by `**Addresses:**` are now
-both. This is what motivated `0adea66`.
-
-**tosk-agent leftover:** `docs/plan-vpc-deployment.md` is still untracked, and the roadmap item
-`agentcore-vpc-networking-deferred-design-in` (added by the pre-upgrade session) points at it. Commit
-the plan doc or the reference dangles. Deliberately left out of the upgrade commit — unrelated scope.
+**tosk-web / tosk-agent leftovers (not mine, left dirty):** tosk-web has `docs/roadmap.md` modified;
+tosk-agent has `.claude/skills/tosk-stats/references/rates.json` modified. Neither relates to the
+upgrade; both deliberately excluded from the upgrade commits.

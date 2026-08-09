@@ -100,9 +100,13 @@ Test beds: **tosk-web** · **tosk-agent** · **portrais** · **jobzeeker**.
   itself the first time a verification can't run in any environment.
 - **`/pilot` against the graph** — no autonomous run yet.
 - **A project with no `python3`** — the documented fallback path has never actually been hit.
-- **The session-scoped marker rename (`8b3766b`)** — verified by construction and against 12 real
-  markers, but no pipeline has yet run with the rewritten hooks. First `/fix` after upgrade proves
-  it: acceptance points 1 and 2.
+- **Behavioral-surface `paths` (`e4a8470`)** — no pipeline has captured a verification since it
+  shipped, so the reduction has never actually run.
+
+**Now validated:** the session-scoped marker rename (`8b3766b`) — tosk-agent `/fix`, session
+`d677c16d`, wrote a single-id marker (`/tmp/tosk-skills-d677c16d-…f75`, not doubled) containing
+`tosk-debug · tosk-backend · tosk-test · tosk-deploy` — all loaded **inside** the `tosk-dev`
+subagent. Subagent skills reach the parent-session marker exactly as the `Skills:` derivation needs.
 
 ---
 
@@ -124,6 +128,7 @@ Test beds: **tosk-web** · **tosk-agent** · **portrais** · **jobzeeker**.
 | Log field set open-ended → declared closed; `Follow-ups:`-style invented fields routed to roadmap / `UAT-deferred:` | `8b3766b` |
 | `Deployed:` absent on a `ship=prod` run — **not a bug**; tosk-web declares no `envs.prod` and has no CI, so nothing deployed | n/a |
 | Headless roadmap items (metadata with no `### ` heading) silently absorbed by the item above → build warns | `0adea66` |
+| A subagent backgrounding a long deploy watch parked the pipeline **silently** — the completion routes to the parent, and salvage only triggered on a *dead* agent → foreground-wait rule + salvage on any non-`## Handoff` return | `ed6f7ba` |
 | `paths` reduction was a flat `.claude/**` exclusion — let docs-only paths drive prior-selection and dropped executable source under `.claude/skills/**/scripts/**` → behavioral-surface rule (upstreamed from jobzeeker) | `e4a8470` |
 
 **Verified on real data:** parse coverage N/N on all four corpora · prior-selection parity against an

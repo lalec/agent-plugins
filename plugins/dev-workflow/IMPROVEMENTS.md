@@ -26,11 +26,13 @@ read/write call sites. Design rationale: `~/.claude/plans/please-research-how-we
 | tosk-web | current at `e4a8470` (`de415e9`) | ✅ `0c9169a` — 6/6, but on pre-`8b3766b` templates | 157/157, no warnings |
 | tosk-agent | current at `e4a8470` (`7e3b753`) | not yet run | 93/93, no warnings |
 | jobzeeker | current at `e4a8470` — 60-point checklist, no gaps | not yet run | 228/228, no warnings |
-| portrais | user-driven, in progress | not yet run | — |
+| portrais | current at `e4a8470` (`ce04ffc`) | not yet run | 208/208, no warnings |
 
-All three of tosk-web / tosk-agent / jobzeeker verified byte-current against the plugin on 2026-08-09:
+**All four verified byte-current** against the plugin on 2026-08-09:
 `graph.py` identical, zero `TRANSCRIPT=` in hooks, dev 1.5 convention rule, closed log field set,
-behavioral-surface `paths` in both `code.md` and `fix.md`, build N/N with no warnings.
+behavioral-surface `paths` in both `code.md` and `fix.md`, graph artifacts ignored (verified with
+`git check-ignore`, not a grep — jobzeeker's repo-wide `__pycache__/` rule covers it and a literal
+grep false-reports a gap), build N/N with no warnings.
 
 **Template rollout is done; only the acceptance runs remain.** Every project's newest log entry
 predates its upgrade, which is why those entries show no `Addresses:`/`Decisions:` and list agent

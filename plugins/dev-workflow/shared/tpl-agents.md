@@ -32,6 +32,7 @@ Development orchestrator for <PROJECT>. Owns the entire development process from
    - (Optional) If project uses Notion MCP, also create a page in the Roadmap database. Remove this sub-step if not applicable.
 3. **Implement** — write code, then run the quality checks defined by each loaded domain skill before proceeding to deploy. Run every check **non-interactively** (`CI=1`, `--yes`/`--no-input` flags, explicit timeouts) — an interactive prompt inside a subagent hangs until the watchdog kills the agent and the whole pipeline stalls.
 4. **Deploy** — invoke `<PREFIX>-deploy` with `target=non-prod` for every change that touches deployed code. The skill handles per-component verify, env iteration (non-prod only), gates, fill-in, triggers, and reachability check; this agent does not re-state those rules. Never deploys prod — that is `<PREFIX>-pm`'s responsibility. Mandatory because `<PREFIX>-qa` tests the non-prod stack — undeployed changes mean QA is testing dead code.
+   **Wait in the foreground.** A slow deploy is waited out **inside this turn** — block on it. Never launch a watch (`gh run watch`, a poll loop, a tail) as a background task and end the turn intending to finish later: a background task's completion notification is delivered to the **parent**, not to this agent, so once the turn ends nothing can wake it and the promise cannot be kept. If the wait genuinely cannot be completed here (it exceeds the turn, or the trigger is out-of-band), emit `Status: blocked` naming the pending run/deploy id in `Notes:` so the orchestrator — which *does* receive the completion — owns the wait. Ending a turn while owing work this agent cannot resume stalls the pipeline silently, which is worse than blocking loudly.
 5. **Reference Sync** — for each project (`<PREFIX>-*`) skill used: if its `## Reference Sync` checklist exists AND files in its owned paths or `references/` were modified this invocation, run the checklist; otherwise skip. Static-content skills (`<PREFIX>-debug`, `<PREFIX>-review`) ship no Reference Sync — nothing to do there. Third-party skills (e.g. `agent-browser`) are not project-managed. Structural reference changes (rename / retire / split) → use `<PREFIX>-skill` first (it owns SKILL.md, skill-manifest.md, and file rename/delete).
 6. **Commit** — commit changes made during this task. Stage by name. If no git repo exists, skip this step and record `Commit: none (no git repo)` in the handoff block.
 7. **Hand off** — emit the `## Handoff` block specified in `## Response Requirements` below. Stop.
@@ -55,6 +56,8 @@ Code review, E2E tests, delivery log → `<PREFIX>-qa` / `<PREFIX>-pm`. Lint and
 ```
 
 Use `Status: blocked` only when implementation could not finish; `Notes:` must state what's needed.
+
+**Never end a turn without this block.** There is no interim, progress, or "will finish once X completes" return — those are unparseable, and because this agent cannot be woken by anything it backgrounded, they park the pipeline with nothing reporting it. If work remains that this agent cannot finish in this turn, that is `Status: blocked` with the reason in `Notes:`, not a status update.
 ```
 
 ---
@@ -124,6 +127,8 @@ Code edits → `<PREFIX>-dev`. Delivery log → `<PREFIX>-pm`. Review never skip
 ```
 
 Use `Status: blocked` if review or tests reported anything that can't be signed off without a code change. Use `signed-off-with-deferrals` only when the sole open items are verifications no available environment can run. `Evidence:` is the compact proof the user reads instead of re-testing — concrete commands and observed output, not claims.
+
+**Never end a turn without this block, and wait for long runs in the foreground.** A slow suite is blocked on inside this turn — never backgrounded with the intent to report later, because a background task's completion is delivered to the orchestrator, not to this agent, so nothing can wake it. An interim or "will report once X finishes" return is unparseable and parks the pipeline silently; if a verification cannot be completed here, that is `blocked` (or `signed-off-with-deferrals` when no environment can run it), never a status update.
 ```
 
 ---

@@ -99,7 +99,9 @@ Task:
 
 While the agent runs, do **not** edit governed source files at the top level — concurrent writers make QA's diff unattributable.
 
-**Salvage protocol (applies to every subagent in this command):** if an agent dies without a `## Handoff` (watchdog kill, session limit, API error), do not absorb its role at the top level. Inspect `git status` / `git log` to see what landed, then continue the same agent via SendMessage or re-spawn it with a salvage prompt naming what is already done and which contract steps remain (quality checks, deploy, Reference Sync, commit, handoff). A salvaged completion counts as `Status: complete` for the steps below.
+**Salvage protocol (applies to every subagent in this command):** if an agent returns **anything that is not a `## Handoff` block** — it died (watchdog kill, session limit, API error) **or** it ended its turn with an interim/progress status — do not absorb its role at the top level. Inspect `git status` / `git log` to see what landed, then continue the same agent via SendMessage or re-spawn it with a salvage prompt naming what is already done and which contract steps remain (quality checks, deploy, Reference Sync, commit, handoff). A salvaged completion counts as `Status: complete` for the steps below.
+
+A **parked** agent is the failure mode to watch for, because nothing announces it: an agent that backgrounds a long wait (a deploy watch, a poll loop) and returns control cannot be woken by that task — its completion notification is delivered here, to the top level, not to the dormant agent. So an interim return is never "still working"; it is a stalled step. Treat the missing `## Handoff` as the trigger and resume the agent. If the outstanding work is a wait, own the wait here and hand the result to the resumed agent — this is the same reason gates and the verification stack live at the top level: **only the top level has the channel** (to the user, to a held server, to an async completion).
 
 ## Step 1.5 — Persist captured verifications
 
@@ -315,7 +317,9 @@ Task:
 
 While the agent runs, do **not** edit governed source files at the top level — concurrent writers make QA's diff unattributable.
 
-**Salvage protocol (applies to every subagent in this command):** if an agent dies without a `## Handoff` (watchdog kill, session limit, API error), do not absorb its role at the top level. Inspect `git status` / `git log` to see what landed, then continue the same agent via SendMessage or re-spawn it with a salvage prompt naming what is already done and which contract steps remain (quality checks, deploy, Reference Sync, commit, handoff). A salvaged completion counts as `Status: complete` for the steps below.
+**Salvage protocol (applies to every subagent in this command):** if an agent returns **anything that is not a `## Handoff` block** — it died (watchdog kill, session limit, API error) **or** it ended its turn with an interim/progress status — do not absorb its role at the top level. Inspect `git status` / `git log` to see what landed, then continue the same agent via SendMessage or re-spawn it with a salvage prompt naming what is already done and which contract steps remain (quality checks, deploy, Reference Sync, commit, handoff). A salvaged completion counts as `Status: complete` for the steps below.
+
+A **parked** agent is the failure mode to watch for, because nothing announces it: an agent that backgrounds a long wait (a deploy watch, a poll loop) and returns control cannot be woken by that task — its completion notification is delivered here, to the top level, not to the dormant agent. So an interim return is never "still working"; it is a stalled step. Treat the missing `## Handoff` as the trigger and resume the agent. If the outstanding work is a wait, own the wait here and hand the result to the resumed agent — this is the same reason gates and the verification stack live at the top level: **only the top level has the channel** (to the user, to a held server, to an async completion).
 
 ## Step 2.5 — Persist captured verifications
 

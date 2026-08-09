@@ -111,7 +111,7 @@ For each captured `{assert, type}`, append an entry to `.claude/skills/<PREFIX>-
 - `task` — `$ARGUMENTS`, written as a **single-quoted** YAML scalar (double any internal `'`) so colons / braces / double-quotes in the description can't break parsing
 - `assert` — the sentence, also **single-quoted** (double any internal `'`). Keep it **symbolic**: reference behavior and configured values ("matches the configured tolerance"), never volatile constants copied from code — those rot within days and QA then wastes a cycle correcting them
 - `type` — the inferred/confirmed type
-- `paths` — the dev `## Handoff` `Files changed:` list, **excluding any `.claude/**` paths** (workflow-internal reference/doc edits must not drive prior-selection)
+- `paths` — the dev `## Handoff` `Files changed:` list, reduced to **behavioral surface only**: paths whose change could actually break the assertion. Exclude **documentation-only paths** (`docs/**`, `*.md` outside source trees, and any other docs-only tree this project keeps) and **workflow-internal reference/doc paths** under `.claude/**` — neither can change runtime behavior, so neither may drive prior-selection. One exception: executable source that happens to live under `.claude/` (e.g. `.claude/skills/**/scripts/**`) **is** behavioral surface and must be kept. If this reduction would leave `paths` empty, the entry is mis-anchored — name the code the assertion is actually about instead of storing the docs that described it
 
 Commit: `test: capture verifications for <task-slug>` (the tree is clean post-dev — a clean follow-up commit). Keep the new entry `name`s to forward to Step 2.
 
@@ -327,7 +327,7 @@ For each captured `{assert, type}`, append an entry to `.claude/skills/<PREFIX>-
 - `task` — `$ARGUMENTS`, written as a **single-quoted** YAML scalar (double any internal `'`) so colons / braces / double-quotes in the description can't break parsing
 - `assert` — the sentence, also **single-quoted** (double any internal `'`). Keep it **symbolic**: reference behavior and configured values ("matches the configured tolerance"), never volatile constants copied from code — those rot within days and QA then wastes a cycle correcting them
 - `type` — the inferred/confirmed type
-- `paths` — the dev `## Handoff` `Files changed:` list, **excluding any `.claude/**` paths** (workflow-internal reference/doc edits must not drive prior-selection)
+- `paths` — the dev `## Handoff` `Files changed:` list, reduced to **behavioral surface only**: paths whose change could actually break the assertion. Exclude **documentation-only paths** (`docs/**`, `*.md` outside source trees, and any other docs-only tree this project keeps) and **workflow-internal reference/doc paths** under `.claude/**` — neither can change runtime behavior, so neither may drive prior-selection. One exception: executable source that happens to live under `.claude/` (e.g. `.claude/skills/**/scripts/**`) **is** behavioral surface and must be kept. If this reduction would leave `paths` empty, the entry is mis-anchored — name the code the assertion is actually about instead of storing the docs that described it
 
 Commit: `test: capture verifications for <task-slug>` (the tree is clean post-dev — a clean follow-up commit). Keep the new entry `name`s to forward to Step 3.
 
@@ -489,7 +489,7 @@ Work the task list in order until: tasks exhausted, all success criteria pass, o
 
 **(a) Pipeline lane** — run the `/code` machinery without its interactive steps (`.claude/commands/code.md` holds the exact mechanics; reuse them, replacing every mid-run AskUserQuestion with the autonomous branch below):
 1. Spawn `<PREFIX>-dev` with the task + its verifications (`/code` Step 1 prompt shape). The salvage protocol and the no-top-level-edits rule apply verbatim.
-2. On `Status: complete`, persist the task's verifications exactly as `/code` Step 1.5 (single-quoted scalars, `.claude/**` excluded from `paths`, `test:` commit). On `Status: blocked`, mark the task **failed** with dev's `Notes:` and go to (c).
+2. On `Status: complete`, persist the task's verifications exactly as `/code` Step 1.5 (single-quoted scalars, `paths` reduced to behavioral surface, `test:` commit). On `Status: blocked`, mark the task **failed** with dev's `Notes:` and go to (c).
 3. Ensure the verification stack as `/code` Step 1.7 — except on an unreachable env, don't ask: leave the affected verifications to report blocked and continue (they surface as deferrals below).
 4. Spawn `<PREFIX>-qa` `mode=initial`, `regression_mode: smart`, with the new verification names + changed paths. Branch on its handoff:
    - `signed-off` → continue to 5.

@@ -10,9 +10,14 @@ listed under **Next**. Everything below is transitional.
 
 ## Where we are (handover, 2026-08-10)
 
-**Plugin:** `lalec/agent-plugins`, `plugins/dev-workflow/`. HEAD `ab4ebe4`; last template-affecting
-commit `dd86bfe` (the two commits since are handover/measurement only — **no template change, so no
-project re-upgrade is needed**). Everything pushed.
+**Plugin:** `lalec/agent-plugins`, `plugins/dev-workflow/`. Everything pushed.
+
+> ⚠️ **Templates changed after the last rollout — all four projects are now behind.** The salvage
+> SendMessage/re-spawn split and the Notion silent-skip both touch `tpl-commands.md` /
+> `tpl-agents.md`, with matching upgrade-checklist items and apply bullets. **Each project needs
+> `/dev-workflow:upgrade` run in its own repo** (the command resolves `.claude` against cwd, so it
+> cannot be driven from here). Until then the byte-current table below describes the *previous*
+> state, not the current one.
 
 **All four projects are byte-current at `dd86bfe`** — verified, not assumed:
 
@@ -187,6 +192,8 @@ Test beds: **tosk-web** · **tosk-agent** · **portrais** · **jobzeeker**.
 | Two upgrade entries still told installs to key markers **per agent**, and the apply bullet's skip condition was inverted (skipped exactly when the bug was present) — leftovers from `8b3766b` | `dd86bfe` |
 | `paths` reduction was a flat `.claude/**` exclusion — let docs-only paths drive prior-selection and dropped executable source under `.claude/skills/**/scripts/**` → behavioral-surface rule (upstreamed from jobzeeker) | `e4a8470` |
 | Cost baseline summed raw transcript rows across every resume in the file — usage repeats per content block, and the file spanned unrelated next-day work → $47.24 for "one `/fix`" was really **$21.56**; collapse on `message.id` (max on `output_tokens`) and cut the window | this pass |
+| Salvage protocol treated SendMessage and re-spawn as equivalent — but SendMessage to a completed agent **always resumes detached**, so the retry leg (QA blocks → dev fixes) silently left the foreground contract and the immediate return was indistinguishable from a parked agent → mechanism split + "never infer state from the resume call" | this pass |
+| Notion mirror sub-steps read as "attempt and report" — dev and pm both emitted "Notion page NOT created" on a project with no Notion MCP, ending every delivery with a phantom manual-sync note → silent-skip, absence is not a finding | this pass |
 | 1-hour cache TTL flagged as "the largest single cost lever" — it is not a lever; forcing 5m costs **more** (−$1.22, −6%) because the top level idles past 5m waiting on subagents (p90 498s, 6/45 gaps) | this pass |
 
 **Verified on real data:** parse coverage N/N on all four corpora · prior-selection parity against an
@@ -229,8 +236,11 @@ and jobzeeker byte-identical (edge counts and parse coverage unchanged on all th
 
 ## Next
 
-Templates and rollout are done. What remains, in order:
+What remains, in order:
 
+0. **Roll the salvage + Notion template fixes to all four projects** — `/dev-workflow:upgrade` in
+   each repo (tosk-web, tosk-agent, jobzeeker, portrais). Both are checklist items with apply
+   bullets; nothing else changed. This supersedes the "templates and rollout are done" state above.
 1. **Exercise the parked-agent fix** — the only unvalidated shipped change. It needs a run where a
    deploy or suite genuinely outlasts a turn. Can't be forced cheaply; watch for it on the next slow
    deploy rather than engineering a repro.

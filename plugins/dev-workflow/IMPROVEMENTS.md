@@ -3,52 +3,62 @@
 Open changes discovered while rolling the delivery graph (Stage 0+1) across real installs.
 Each item: what, the evidence, and what has to be decided. Delete an entry when it ships.
 
-**Delete this file when the rollout closes** — i.e. once all four projects are on the current
-templates and have passed the 6-point acceptance test. All four are upgraded as of 2026-08-06; the
-acceptance runs are what remain. Everything below is transitional.
+**Delete this file when the rollout closes.** Templates are done and rolled out; what remains is
+listed under **Next**. Everything below is transitional.
 
 ---
 
-## Where we are (handover, 2026-08-05 23:35)
+## Where we are (handover, 2026-08-10)
 
-**What shipped.** The delivery graph: `shared/graph.py` (a derived, disposable typed-edge index over
-`docs/project-log.md`, `docs/roadmap.md`, `custom-tests.yaml`, `governed-paths.conf`,
-`deploy-config.yaml` and `git log`), an 8th lifecycle skill `<PREFIX>-graph`, three new fields
-(roadmap `**Id:**`, log `**Addresses:**` / `**Decisions:**`, `custom-tests.yaml` `last:`), and seven
-read/write call sites. Design rationale: `~/.claude/plans/please-research-how-we-refactored-summit.md`.
+**Plugin:** `lalec/agent-plugins`, `plugins/dev-workflow/`. HEAD `9c309ab`; last template-affecting
+commit `dd86bfe`. Everything pushed.
 
-**Plugin repo:** `lalec/agent-plugins`, `plugins/dev-workflow/`. Everything pushed; nothing local-only.
+**All four projects are byte-current at `dd86bfe`** — verified, not assumed:
 
-**Rollout status:**
+```
+              graph.py  TRANSCRIPT=  dev1.5  log-closed  paths  marker-caveat  pilot(lane/ledger/parked)
+tosk-web        ok          0          1         1        2/2         1              2/1/1
+tosk-agent      ok          0          1         1        2/2         1              2/1/1
+jobzeeker       ok          0          1         1        2/2         1              2/1/1
+portrais        ok          0          1         1        2/2         1              2/1/1
+```
 
-| Project | Upgrade | Post-upgrade `/fix` | Graph build |
-|---|---|---|---|
-| tosk-web | current at `dd86bfe` (`67d29cf`) | ✅ `0c9169a` — 6/6, but on pre-`8b3766b` templates | 157/157, no warnings |
-| tosk-agent | current at `dd86bfe` (`2a1aabc`) | not yet run | 93/93, no warnings |
-| jobzeeker | current at `dd86bfe` (`f9d7c3d`) | not yet run | 228/228, no warnings |
-| portrais | current at `dd86bfe` (`f9e3482`) | not yet run | 208/208, no warnings |
+Project-side commits: tosk-web `67d29cf` · tosk-agent `2a1aabc` (1 unpushed) · jobzeeker `f9d7c3d` ·
+portrais `f9e3482`. **Only portrais declares `pilot-lane:` lanes** (`run-check` free, `tune`
+metered:generations); the other three have the registry but nothing to discover.
 
-**All four verified byte-current** against the plugin on 2026-08-09:
-`graph.py` identical, zero `TRANSCRIPT=` in hooks, dev 1.5 convention rule, closed log field set,
-behavioral-surface `paths` in both `code.md` and `fix.md`, graph artifacts ignored (verified with
-`git check-ignore`, not a grep — jobzeeker's repo-wide `__pycache__/` rule covers it and a literal
-grep false-reports a gap), build N/N with no warnings.
+**Validated by real runs:**
 
-**Template rollout is done; only the acceptance runs remain.** Every project's newest log entry
-predates its upgrade, which is why those entries show no `Addresses:`/`Decisions:` and list agent
-names under `Skills:` — old derivation, not a regression. tosk-web's 6/6 pass was on pre-`8b3766b`
-templates, so it needs a re-run too: the session-scoped markers and behavioral-surface `paths` have
-never been exercised by a real pipeline anywhere.
+| Change | Evidence |
+|---|---|
+| Session-scoped markers `8b3766b` | tosk-agent `d677c16d` + tosk-web `b9129d3f` — single-id markers holding subagent-only skills |
+| Behavioral-surface `paths` `e4a8470` | tosk-web + tosk-agent verifications scoped to real source only, no docs/`.claude` |
+| `/pilot` lanes + ledger + parked verdicts `65593aa` | portrais mission: `budget=generations:10 (user)`, 7 spent, `leg-2=skipped … (pilot-auto)`, `keep/adopt=parked (human-gated)` |
+| Deferral path | tosk-agent recorded a real `UAT-deferred:` with `status: blocked` in `last:` |
+| 6-point acceptance | **tosk-agent 6/6** (`2c56aa7`) and **tosk-web 6/6** (`24ace96`, incl. a QA-blocked retest cycle) |
 
-**Acceptance test per project** — run one `/fix` (better than `/code`: it also exercises the
-`<PREFIX>-debug` → `history` read site) and check:
+**Cost baseline — measured, not estimated.** tosk-web's `/fix` (session `b9129d3f`, two QA rounds)
+cost **$47.24**:
 
-1. `**Skills:**` contains `<PREFIX>-log` — the marker-union derivation ran
-2. `**Skills:**` contains `<PREFIX>-review` — subagent skills were captured
-3. `**Addresses:**` carries a real roadmap `**Id:**`, or pm's `Notes:` explains no match
-4. `**Decisions:**` present, any timeout recorded as `(timeout)` not `(user)`
-5. `custom-tests.yaml` gained a `last:` block for each verification that ran
-6. `graph.py build` reports `N/N log entries parsed`, no `WARNING`
+| Component | Model | Output | Cache read | Cost |
+|---|---|---:|---:|---:|
+| top-level `/fix` | opus-5 | 132k | 11.5M | $20.58 |
+| dev | opus-5 | 60k | 15.1M | $13.88 |
+| qa (retest) | opus-5 | 45k | 10.0M | $8.24 |
+| qa (initial) | opus-5 | 29k | 2.9M | $3.48 |
+| pm | sonnet-5 | 10k | 2.2M | $1.06 |
+
+Reading it: **cache traffic is the bill** — 41.6M read + 2.7M write ≈ $30 of the $47, against 868
+new input tokens and 276k output. The QA-blocked **retest cost more than the initial pass**
+($8.24 vs $3.48) because it inherited a larger context, so a second QA round is worse than double on
+that half. `model: sonnet` on pm is doing real work at $1.06. One unexamined lever: the top level
+wrote 1.15M cache tokens at the **1-hour TTL** (2× premium, ~$11.5) while every subagent used 5-minute
+(1.25×) — worth checking whether the deploy waits actually justify it.
+
+Method (repeatable): read `~/.claude/projects/<encoded>/<session>.jsonl` plus
+`<session>/subagents/agent-*.jsonl`, sum `message.usage` per file, price per `message.model`, and
+split cache writes by `cache_creation.ephemeral_5m/1h_input_tokens`. `.meta.json` next to each
+subagent transcript names its `agentType`.
 
 **Landmines:**
 
@@ -56,17 +66,22 @@ never been exercised by a real pipeline anywhere.
   tosk-web's installed `graph.py`. Because every call site falls back silently, nothing reported it.
 - **Fix the plugin, never hand-patch an installed project** — two tosk-web workarounds had to be
   undone once the real parser bugs were fixed upstream.
-- **Propagation:** commit → push → the plugin cache updates → `/dev-workflow:upgrade` in the project.
-  A push alone does not reach a project; a local edit without a push reaches nothing.
-- `~/.claude/projects/**` is blocked by the secretrun guard — transcripts and memory are unreadable
-  from Bash. Don't design anything that depends on reading them.
-- **Sibling sessions run concurrently in these repos.** On 2026-08-05 ~23:30, tosk-agent, portrais
-  and jobzeeker all had live sessions (dirty trees, HEADs moving mid-analysis). Re-read state
-  immediately before acting on it, and never run a build or an upgrade in a repo another session
-  is holding.
-- The plugin work is safe to do from the `agent-plugins` session; the per-project work is not.
-  `/dev-workflow:upgrade` resolves `.claude` relative to cwd and `/fix` is a project-local command —
-  neither can be driven from another repo's session.
+- **Propagation:** commit → push → `/dev-workflow:upgrade` in the project. Editing the plugin
+  templates from this repo and applying them to projects with a scripted, asserted replacement
+  (dry-run first, one assert per edit) worked well for a 15-edit wave across four projects.
+- **Markers prove a *skill* ran, never a *command*.** `skill-mark.sh` fires on the Skill tool, so a
+  user-typed slash command can leave no trace. Reading `pilot`'s absence as "no mission ran" was
+  wrong once already — use the delivery log's `**Decisions:**` and `git log` instead.
+- **Sibling repos share a `<PREFIX>`.** `ls -t /tmp/tosk-skills-* | head -1` crosses tosk-web and
+  tosk-agent. Always scope by session id.
+- **Concurrent sessions are normal in these repos.** Re-read state immediately before acting, and
+  never run a build or upgrade in a repo another session is holding.
+- **`~/.claude/projects/**` is readable again — the user disabled the secretrun plugin (2026-08-10),
+  no session restart needed.** This reverses an earlier landmine and is what made the cost analysis
+  possible. It is conditional: if secretrun is re-enabled, transcripts go dark again and anything
+  built on them must degrade gracefully.
+- Per-project work needs a session **in that repo** — `/dev-workflow:upgrade` resolves `.claude`
+  against cwd, and `/code`/`/fix` are project-local commands.
 
 Test beds: **tosk-web** · **tosk-agent** · **portrais** · **jobzeeker**.
 
@@ -74,7 +89,7 @@ Test beds: **tosk-web** · **tosk-agent** · **portrais** · **jobzeeker**.
 
 ## Open — needs a decision
 
-*(none — all five open decisions were settled in `8b3766b`; see below)*
+*(none — all five original decisions settled in `8b3766b`; see below)*
 
 ---
 
@@ -96,17 +111,14 @@ Test beds: **tosk-web** · **tosk-agent** · **portrais** · **jobzeeker**.
 
 ## Untested
 
-- **`open-deferrals` at `/code`/`/fix` Step 0** — tosk-web's run produced no deferrals. Exercises
-  itself the first time a verification can't run in any environment.
-- **`/pilot` against the graph** — no autonomous run yet.
+- **The parked-agent fix (`ed6f7ba`)** — the one shipped change with no live evidence. Nothing has
+  parked since it landed, which is the good outcome but not proof. Both halves must hold together:
+  the agent-side foreground-wait rule *and* the widened salvage trigger (any non-`## Handoff` return).
+- **`/pilot` lane registry on a project other than portrais** — the other three have the registry
+  but declare no lanes, so discovery has never run against a second shape.
+- **`open-deferrals` at `/code`/`/fix` Step 0** — tosk-agent now has a real open deferral
+  (`execute-valid-registers-and-completes-task`), so the next `/code`/`/fix` there finally exercises it.
 - **A project with no `python3`** — the documented fallback path has never actually been hit.
-- **Behavioral-surface `paths` (`e4a8470`)** — no pipeline has captured a verification since it
-  shipped, so the reduction has never actually run.
-
-**Now validated:** the session-scoped marker rename (`8b3766b`) — tosk-agent `/fix`, session
-`d677c16d`, wrote a single-id marker (`/tmp/tosk-skills-d677c16d-…f75`, not doubled) containing
-`tosk-debug · tosk-backend · tosk-test · tosk-deploy` — all loaded **inside** the `tosk-dev`
-subagent. Subagent skills reach the parent-session marker exactly as the `Skills:` derivation needs.
 
 ---
 
@@ -174,13 +186,24 @@ and jobzeeker byte-identical (edge counts and parse coverage unchanged on all th
 
 ## Next
 
-**All four projects on current templates** (portrais user-driven). Only the acceptance runs remain.
+Templates and rollout are done. What remains, in order:
 
-1. One `/fix` per project against the 6-point test — none has run on post-`8b3766b` templates, so
-   the session-scoped markers and behavioral-surface `paths` are still unexercised in a real
-   pipeline. tosk-web included: its 6/6 pass predates them.
-2. Push where pending, and run `/plugin update` in each session first.
+1. **Exercise the parked-agent fix** — the only unvalidated shipped change. It needs a run where a
+   deploy or suite genuinely outlasts a turn. Can't be forced cheaply; watch for it on the next slow
+   deploy rather than engineering a repro.
+2. **Declare a `pilot-lane:` on a second project** — proves the registry against a shape other than
+   portrais'. jobzeeker is the natural candidate (it has genuinely distinct command types).
+3. **Decide the 1-hour cache TTL question** — the top level's 1.15M cache-write tokens at 2× cost
+   ~$11.5 of a $47 run. Check whether the top level actually idles past 5 minutes; if not, that is
+   the largest single cost lever found so far.
+4. **Then Stage 2 (`/pilot` mission graph) — but re-justify it first.** It is still *decided, not
+   built* (below), and the evidence has moved against it: portrais ran an overnight `/pilot` and a
+   lane mission without losing state, and the real failure we hit was the parked agent, not lost
+   mission state. Build it when a run actually loses its place, not before.
 
-**tosk-web / tosk-agent leftovers (not mine, left dirty):** tosk-web has `docs/roadmap.md` modified;
-tosk-agent has `.claude/skills/tosk-stats/references/rates.json` modified. Neither relates to the
-upgrade; both deliberately excluded from the upgrade commits.
+**Cost work is now possible and wasn't before** — transcripts are readable (see Landmines). A
+natural follow-up is a second measurement on a clean single-round `/fix` to quantify what the
+QA-blocked retest actually costs, since $47.24 is a two-round number with nothing to compare against.
+
+**Housekeeping:** tosk-agent has 1 unpushed commit. jobzeeker and portrais have had live sessions
+throughout — re-read their state before touching either.

@@ -34,7 +34,7 @@ If a question times out unanswered, split by risk:
 
 **Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it in the close-out step — the pre-handoff gate blocks the qa spawn on any dirty tree, so deferring the stash just moves the failure mid-pipeline. If the WIP overlaps paths this task will touch, do not stash it blind — tell the user and run `/tidy` scoped to the overlapping paths first, then resume here.
 
-**Open deferrals:** run `python3 .claude/graph/graph.py open-deferrals` and, if it returns anything, list it for the user in one line — these are verifications an earlier task deferred and nothing has passed since. Surfacing them here is the only point at which they resurface at all. Report, do not gate; skip silently if the script is absent or exits non-zero. (Cheap by design — a few lines of output, not a file read; the Step 0.5 gate stays read-free.)
+**Open deferrals:** run `python3 .claude/graph/graph.py open-deferrals` and, if it returns anything, list it for the user in one line — these are verifications an earlier task deferred and nothing has passed since. Surfacing them here is the only point at which they resurface at all. Report, do not gate — **with one exception: if the same blocker is named by 3+ open deferrals, or any single verification has been deferred 3+ times, say so and ask whether to fix the blocker first.** Repeated deferrals are not a backlog, they are one missing capability (usually a test environment) charging rent on every task that follows; five checks deferred across three deploys is how a feature ships unwalked. Skip silently if the script is absent or exits non-zero. (Cheap by design — a few lines of output, not a file read; the Step 0.5 gate stays read-free.)
 
 **Plan shortcut:** if the session contains a just-approved plan covering this task, plan approval was the confirmation — omit the Confirm question from the Step 0.5 gate.
 
@@ -42,9 +42,19 @@ If a question times out unanswered, split by risk:
 
 **Read-free step — do NOT read `custom-tests.yaml`, `test-commands.md`, or any reference file here.**
 
-First produce 2–3 **candidate verifications** — plain one-line statements of what must be true after the change — from whichever source applies:
-- **A plan exists** (the current session has a just-approved plan with a *Verification* / *Acceptance* section): translate each of its lines into a one-line what-must-hold assertion and use those as the candidates. A plan's lines describe *how it's proven*; restate each as *what must hold* so it reads as a regression invariant.
-- **No plan** (e.g. `/code` invoked first thing in a fresh context): infer the candidates from the task (`$ARGUMENTS`, with any flags already stripped) — the default fallback whenever no plan is in context.
+First write the **acceptance statement**: one sentence naming the end state in the user's terms — who does what, and where they end up. State the outcome, not the change. *"A user picks a look in the gallery and lands on the generate step with a pack built from it"* — never *"the gallery selection has a visible outcome"*. When the task names only a symptom ("clicking it does nothing"), the acceptance statement is the journey that symptom sits in: ask what the click is *for*, and say where it ends. Derive it from whichever source applies:
+- **A plan exists** (the current session has a just-approved plan with a *Verification* / *Acceptance* section): the plan's outcome is the acceptance statement.
+- **No plan** (e.g. `/code` invoked first thing in a fresh context): infer it from the task (`$ARGUMENTS`, with any flags already stripped) — the default fallback whenever no plan is in context.
+
+Then derive 2–3 **candidate verifications** *from that statement*. Each candidate must be a clause of the acceptance statement — never an independent thought about the diff. A plan's lines describe *how it's proven*; restate each as *what must hold* so it reads as a regression invariant.
+
+| Part of the acceptance statement | Type |
+|---|---|
+| The end state the user lands on | **E2E** — mandatory |
+| Each boundary the journey crosses (UI → API, API → stored data) | **Integration** |
+| Each surface the user acts on | **UX** |
+
+**The end-state candidate is not optional, and it is the one that proves the feature.** A set that checks every hop but not where the user lands passes while the journey dead-ends — a button that exists, is clickable, and leads nowhere. If no candidate covers the last step of the statement, the *set* is wrong; fix it before asking. This is the whole point of deriving from an acceptance statement rather than from the diff: the diff cannot tell you the journey has an end.
 
 Then ask everything in **one AskUserQuestion call** (up to three questions) — one gate interaction instead of three sequential ones, so an AFK timeout costs 60 seconds once, not three times:
 
@@ -55,13 +65,13 @@ Then ask everything in **one AskUserQuestion call** (up to three questions) — 
      - label: "Yes, proceed (Recommended)" — description: "Start the full <PREFIX>-dev → <PREFIX>-qa → <PREFIX>-pm pipeline"
      - label: "No, cancel" — description: "Stop here, do not implement"
 2. **Verify**:
-   - question: "What should be verified before this ships?"
+   - question: "Done means: <the acceptance statement>. What proves it before this ships?" — leading with the end state is the point: it is the user's chance to correct the *goal*, which is cheap here and expensive after dev has built to the wrong one.
    - header: "Verify"
    - multiSelect: true
    - options:
-     - one per inferred candidate — label: a short tag (the endpoint/element + expected result); description: the full one-line verification followed by its type (`UX` / `Integration` / `E2E`)
+     - one per derived candidate — label: a short tag (the endpoint/element + expected result); description: the full one-line verification followed by its type (`UX` / `Integration` / `E2E`). Order them so the **end-state (E2E) candidate is first** and pre-selected where the UI allows — it is the one that must not be dropped.
      - a final option — label: "Nothing to verify"; description: "Refactor / docs / no behavior change"
-   - The automatic "Other" field lets the user type their own one-line verification.
+   - The automatic "Other" field lets the user type their own one-line verification, or a corrected acceptance statement — if the reply restates the goal rather than a check, treat it as the new acceptance statement and re-derive the candidates from it.
 3. **Regression**:
    - question: "Run full regression after dev as well?"
    - header: "Regression"
@@ -95,6 +105,8 @@ Task:
   prompt: |
     Implement the following for <PROJECT>: $ARGUMENTS
     Complete the full <PREFIX>-dev workflow (domain skills, implement, deploy, Reference Sync).
+    Done means: <the acceptance statement from Step 0.5> — this is the task, not the diff that
+    approaches it. The journey's last step must be reachable by a user before you report complete.
     Verifications (these must hold when done): <the verifications captured in Step 0.5, or "none">
 
 While the agent runs, do **not** edit governed source files at the top level — concurrent writers make QA's diff unattributable.
@@ -143,13 +155,16 @@ Task:
   prompt: |
     Run code review (<PREFIX>-review) and tests (<PREFIX>-test) for the most recent changes. mode=initial
     regression_mode: <smart | full, from Step 0.5>
+    Done means: <the acceptance statement from Step 0.5> — walk it end to end and report where it
+    actually lands. Green on the individual checks while the journey dead-ends is a `blocked`, not a
+    sign-off; the assertions are evidence for the statement, never a substitute for it.
     New verifications this task: <names from Step 1.5, or "none">
     Changed paths: <the dev Handoff `Files changed:` list>
     Sign off when quality gates pass.
 
 After <PREFIX>-qa returns, parse its `## Handoff` block:
 - `Status: signed-off` → continue to Step 3.
-- `Status: signed-off-with-deferrals` → ask via AskUserQuestion: "QA is clean except these verifications no environment can run: `<UAT-deferred list with reasons>`. Defer to UAT and continue, or stop?" On **Defer** — carry `UAT-deferred: <names> (user-confirmed)` into the Step 3 pm prompt and continue. On timeout — reversible gate: continue, but carry `UAT-deferred: <names> (auto-accepted on timeout — not user-confirmed)`. On **Stop** — halt and report. Never re-spawn qa to relabel its handoff — the deferral status IS the sign-off vocabulary.
+- `Status: signed-off-with-deferrals` → **first check what is being deferred.** If any deferred verification covers the **end state** of the acceptance statement, the feature is unproven, not "clean except environment" — do not offer the deferral. Say which journey cannot be walked and what is missing to walk it, and ask whether to build that (usually a test environment or seed data) or to stop. Hop-level checks (a boundary, a surface) may still be deferred normally. Otherwise ask via AskUserQuestion: "QA is clean except these verifications no environment can run: `<UAT-deferred list with reasons>`. Defer to UAT and continue, or stop?" On **Defer** — carry `UAT-deferred: <names> (user-confirmed)` into the Step 3 pm prompt and continue. On timeout — reversible gate: continue, but carry `UAT-deferred: <names> (auto-accepted on timeout — not user-confirmed)`. On **Stop** — halt and report. Never re-spawn qa to relabel its handoff — the deferral status IS the sign-off vocabulary.
 - `Status: blocked` with code-fix `Notes:` → re-spawn <PREFIX>-dev with the fix request, then on dev complete re-spawn <PREFIX>-qa with `mode=retest` (review already passed, run tests only) — keep the same `regression_mode`. Repeat until signed-off or user aborts.
 
 ## Step 3 — Log & Docs (<PREFIX>-pm)
@@ -240,7 +255,7 @@ If a question times out unanswered, split by risk:
 
 **Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it in the close-out step — the pre-handoff gate blocks the qa spawn on any dirty tree, so deferring the stash just moves the failure mid-pipeline. If the WIP overlaps paths this task will touch, do not stash it blind — tell the user and run `/tidy` scoped to the overlapping paths first, then resume here.
 
-**Open deferrals:** run `python3 .claude/graph/graph.py open-deferrals` and, if it returns anything, list it for the user in one line — these are verifications an earlier task deferred and nothing has passed since. Surfacing them here is the only point at which they resurface at all. Report, do not gate; skip silently if the script is absent or exits non-zero. (Cheap by design — a few lines of output, not a file read; the Step 0.5 gate stays read-free.)
+**Open deferrals:** run `python3 .claude/graph/graph.py open-deferrals` and, if it returns anything, list it for the user in one line — these are verifications an earlier task deferred and nothing has passed since. Surfacing them here is the only point at which they resurface at all. Report, do not gate — **with one exception: if the same blocker is named by 3+ open deferrals, or any single verification has been deferred 3+ times, say so and ask whether to fix the blocker first.** Repeated deferrals are not a backlog, they are one missing capability (usually a test environment) charging rent on every task that follows; five checks deferred across three deploys is how a feature ships unwalked. Skip silently if the script is absent or exits non-zero. (Cheap by design — a few lines of output, not a file read; the Step 0.5 gate stays read-free.)
 
 **Plan shortcut:** if the session contains a just-approved plan covering this fix, plan approval was the confirmation — omit the Confirm question from the Step 0.5 gate.
 
@@ -248,9 +263,19 @@ If a question times out unanswered, split by risk:
 
 **Read-free step — do NOT read `custom-tests.yaml`, `test-commands.md`, or any reference file here.**
 
-First produce 2–3 **candidate verifications** — plain one-line statements of what must be true after the change — from whichever source applies:
-- **A plan exists** (the current session has a just-approved plan with a *Verification* / *Acceptance* section): translate each of its lines into a one-line what-must-hold assertion and use those as the candidates. A plan's lines describe *how it's proven*; restate each as *what must hold* so it reads as a regression invariant.
-- **No plan** (e.g. `/fix` invoked first thing in a fresh context): infer the candidates from the task (`$ARGUMENTS`, with any flags already stripped) — the default fallback whenever no plan is in context. (A bug's verification becomes its never-regress-again invariant.)
+First write the **acceptance statement**: one sentence naming the end state in the user's terms — who does what, and where they end up. **A bug report names a symptom; the acceptance statement names the journey that symptom sits in.** "Clicking them does nothing" is a broken step, not a goal — the goal is *"a user picks a look in the gallery and lands on the generate step with a pack built from it"*. Fixing only the reported symptom is how a run ends with the click working and the journey still dead-ending: ask what the broken step is *for*, and state where it ends. Derive it from whichever source applies:
+- **A plan exists** (the current session has a just-approved plan with a *Verification* / *Acceptance* section): the plan's outcome is the acceptance statement.
+- **No plan** (e.g. `/fix` invoked first thing in a fresh context): infer it from the task (`$ARGUMENTS`, with any flags already stripped) — the default fallback whenever no plan is in context.
+
+Then derive 2–3 **candidate verifications** *from that statement*. Each candidate must be a clause of the acceptance statement — never an independent thought about the diff. A plan's lines describe *how it's proven*; restate each as *what must hold* so it reads as a regression invariant. (A bug's verification becomes its never-regress-again invariant.)
+
+| Part of the acceptance statement | Type |
+|---|---|
+| The end state the user lands on | **E2E** — mandatory |
+| Each boundary the journey crosses (UI → API, API → stored data) | **Integration** |
+| Each surface the user acts on | **UX** |
+
+**The end-state candidate is not optional, and it is the one that proves the fix.** A set that checks the repaired step but not where the user lands passes while the journey dead-ends — the reported symptom is gone and the feature still does not work. If no candidate covers the last step of the statement, the *set* is wrong; fix it before asking. This is the whole point of deriving from an acceptance statement rather than from the bug report: the report names where the journey broke, never where it should end.
 
 Then ask everything in **one AskUserQuestion call** (up to three questions) — one gate interaction instead of three sequential ones, so an AFK timeout costs 60 seconds once, not three times:
 
@@ -261,13 +286,13 @@ Then ask everything in **one AskUserQuestion call** (up to three questions) — 
      - label: "Yes, proceed (Recommended)" — description: "Run <PREFIX>-debug root cause analysis, then fix through the full pipeline"
      - label: "No, cancel" — description: "Stop here, do not investigate"
 2. **Verify**:
-   - question: "What should be verified before this ships?"
+   - question: "Done means: <the acceptance statement>. What proves it before this ships?" — leading with the end state is the point: it is the user's chance to correct the *goal*, which is cheap here and expensive after dev has built to the wrong one.
    - header: "Verify"
    - multiSelect: true
    - options:
-     - one per inferred candidate — label: a short tag (the endpoint/element + expected result); description: the full one-line verification followed by its type (`UX` / `Integration` / `E2E`)
+     - one per derived candidate — label: a short tag (the endpoint/element + expected result); description: the full one-line verification followed by its type (`UX` / `Integration` / `E2E`). Order them so the **end-state (E2E) candidate is first** and pre-selected where the UI allows — it is the one that must not be dropped.
      - a final option — label: "Nothing to verify"; description: "Refactor / docs / no behavior change"
-   - The automatic "Other" field lets the user type their own one-line verification.
+   - The automatic "Other" field lets the user type their own one-line verification, or a corrected acceptance statement — if the reply restates the goal rather than a check, treat it as the new acceptance statement and re-derive the candidates from it.
 3. **Regression**:
    - question: "Run full regression after dev as well?"
    - header: "Regression"
@@ -471,7 +496,7 @@ After the single Step 1 gate, the run is unattended until close-out:
 - **Target-state goal** ("improve X until Y"): derive 2–3 **success criteria** — measurable checks, each with a command or observable that decides pass/fail — then derive the initial tasks that most plausibly move toward them. The loop re-plans between tasks; the criteria, not the initial list, define done.
 - **Plain batch** (an explicit list of things to do): one task per item.
 
-Cap at `max_tasks`. For each task derive: a one-line description, 1–3 candidate verifications (`{assert, type}` — UX / Integration / E2E, same vocabulary as `/code` Step 0.5), and a **lane**.
+Cap at `max_tasks`. For each task derive: a one-line description, an **acceptance statement** (the end state in the user's terms — where the journey lands, not what changes), 1–3 candidate verifications derived *from that statement* (`{assert, type}` — UX / Integration / E2E, same vocabulary and same mandatory end-state rule as `/code` Step 0.5), and a **lane**. The end-state check matters more here than anywhere: this lane runs unattended, so a task that ships a half-journey has no one present to notice it dead-ends.
 
 **Lane registry — discovered, not hardcoded.** Two lanes are always present:
 - `pipeline` — features, bug fixes, schema/API/auth changes, anything needing review depth. Default when unsure.

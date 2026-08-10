@@ -35,8 +35,16 @@ CACHE_READ, WRITE_5M, WRITE_1H = 0.1, 1.25, 2.0
 
 
 def load(path):
-    """Deduped usage rows — one per message.id, first occurrence wins."""
-    seen, rows = set(), []
+    """One row per message.id, collapsing the per-content-block rows.
+
+    Input-side fields (input_tokens, cache_read, cache_creation) are constant
+    across a message's rows — they are known when the request is issued, so any
+    row is authoritative. `output_tokens` is NOT: it is a running partial, and
+    only the final row (the one carrying `stop_reason`) holds the true total.
+    Taking the first row undercounts output ~10x on subagent transcripts.
+    Hence: max() on output, any-row on the rest.
+    """
+    by_id = {}
     for line in open(path):
         try:
             d = json.loads(line)
@@ -46,22 +54,23 @@ def load(path):
         if not isinstance(m, dict):
             continue
         usage, mid = m.get("usage"), m.get("id")
-        if not usage or not mid or mid in seen:
+        if not usage or not mid:
             continue
-        seen.add(mid)
         cc = usage.get("cache_creation") or {}
-        rows.append(
-            dict(
-                ts=d.get("timestamp"),
-                model=m.get("model"),
-                inp=usage.get("input_tokens", 0),
-                read=usage.get("cache_read_input_tokens", 0),
-                w5=cc.get("ephemeral_5m_input_tokens", 0),
-                w1h=cc.get("ephemeral_1h_input_tokens", 0),
-                out=usage.get("output_tokens", 0),
-            )
+        out = usage.get("output_tokens", 0)
+        if mid in by_id:
+            by_id[mid]["out"] = max(by_id[mid]["out"], out)
+            continue
+        by_id[mid] = dict(
+            ts=d.get("timestamp"),
+            model=m.get("model"),
+            inp=usage.get("input_tokens", 0),
+            read=usage.get("cache_read_input_tokens", 0),
+            w5=cc.get("ephemeral_5m_input_tokens", 0),
+            w1h=cc.get("ephemeral_1h_input_tokens", 0),
+            out=out,
         )
-    return rows
+    return list(by_id.values())
 
 
 def cost(rows):
@@ -104,17 +113,22 @@ def label_for(path):
     return os.path.basename(path)
 
 
+RESUME_GAP = 3600  # a gap this long means someone resumed the session later
+
+
+def parse_ts(t):
+    return datetime.fromisoformat(t.replace("Z", "+00:00"))
+
+
 def cadence(rows):
     """Inter-request gaps on the top level — why the 1h cache TTL pays off."""
     stamped = sorted((r for r in rows if r["ts"]), key=lambda r: r["ts"])
     if len(stamped) < 2:
         return
-    parse = lambda t: datetime.fromisoformat(t.replace("Z", "+00:00"))  # noqa: E731
-    gaps = [
-        (parse(b["ts"]) - parse(a["ts"])).total_seconds()
+    gaps = sorted(
+        (parse_ts(b["ts"]) - parse_ts(a["ts"])).total_seconds()
         for a, b in zip(stamped, stamped[1:])
-    ]
-    gaps.sort()
+    )
     over = sum(1 for g in gaps if g > 300)
     print(
         f"\ntop-level cadence: median {gaps[len(gaps) // 2]:.0f}s  "
@@ -123,16 +137,50 @@ def cadence(rows):
     )
 
 
+def warn_if_resumed(rows):
+    """A session file accumulates every resume. Costing the whole file answers
+    'what has this session cost in total', NOT 'what did one run cost' — the
+    number that matters for a per-run baseline. Surface the boundaries so the
+    caller can re-run with --until."""
+    stamped = sorted((r for r in rows if r["ts"]), key=lambda r: r["ts"])
+    breaks = [
+        (a["ts"], b["ts"], (parse_ts(b["ts"]) - parse_ts(a["ts"])).total_seconds())
+        for a, b in zip(stamped, stamped[1:])
+        if (parse_ts(b["ts"]) - parse_ts(a["ts"])).total_seconds() > RESUME_GAP
+    ]
+    if not breaks:
+        return
+    print(
+        f"\n!! {len(breaks)} long idle gap(s) on the top level. A session file accumulates"
+        f"\n   every resume, so the total above may span more than one run. Judge each:"
+        f"\n   a mid-run pause (waiting on QA, a human) counts; a next-day resume does not."
+    )
+    for end, restart, gap in breaks:
+        print(f"     stops {end}  resumes {restart}  ({gap / 3600:.1f}h)")
+    print(f"     cut with:  --until {breaks[-1][0]}")
+
+
 def main():
-    if len(sys.argv) != 2:
+    argv = sys.argv[1:]
+    until = None
+    if "--until" in argv:
+        i = argv.index("--until")
+        until = argv[i + 1]
+        del argv[i : i + 2]
+    if len(argv) != 1:
         sys.exit(__doc__)
-    session = sys.argv[1]
-    top = load(session)
+    session = argv[0]
+
+    def load_win(p):
+        rows = load(p)
+        return [r for r in rows if not until or (r["ts"] and r["ts"] <= until)]
+
+    top = load_win(session)
     components = [("top-level", summarize(top))]
     subagents = sorted(
         glob.glob(os.path.splitext(session)[0] + "/subagents/agent-*.jsonl")
     )
-    components += [(label_for(f), summarize(load(f))) for f in subagents]
+    components += [(label_for(f), summarize(load_win(f))) for f in subagents]
 
     hdr = f"{'component':<20}{'model':<18}{'reqs':>5}{'out':>9}{'read':>12}{'w1h':>10}{'w5':>10}{'cost':>9}"
     print(hdr)
@@ -148,6 +196,7 @@ def main():
         f"{sum(s['cost'] for _, s in components):>8.2f}"
     )
     cadence(top)
+    warn_if_resumed(top)
 
 
 if __name__ == "__main__":

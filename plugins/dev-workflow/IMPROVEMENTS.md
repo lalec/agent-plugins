@@ -38,47 +38,63 @@ metered:generations); the other three have the registry but nothing to discover.
 | Deferral path | tosk-agent recorded a real `UAT-deferred:` with `status: blocked` in `last:` |
 | 6-point acceptance | **tosk-agent 6/6** (`2c56aa7`) and **tosk-web 6/6** (`24ace96`, incl. a QA-blocked retest cycle) |
 
-**Cost baseline — measured, not estimated.** tosk-web's `/fix` (session `b9129d3f`, two QA rounds)
-cost **$20.06**:
+**Cost baseline — measured, not estimated.** tosk-web's `/fix` (session `b9129d3f`, two QA rounds,
+window cut at `2026-08-09T22:04Z`) cost **$21.56**:
 
-| Component | Model | Output | Cache read | Cache write | Cost |
-|---|---|---:|---:|---:|---:|
-| top-level `/fix` | opus-5 | 54.6k | 5.2M | 560k (1h) | $9.58 |
-| dev | opus-5 | 6.3k | 7.2M | 278k (5m) | $5.50 |
-| qa (retest) | opus-5 | 4.7k | 4.9M | 135k (5m) | $3.43 |
-| qa (initial) | opus-5 | 0.6k | 1.2M | 82k (5m) | $1.14 |
-| pm | sonnet-5 | 0.3k | 1.1M | 77k (5m) | $0.42 |
+| Component | Model | Output | Cache read | Cache write | Cost | Share |
+|---|---|---:|---:|---:|---:|---:|
+| top-level `/fix` | opus-5 | 52.4k | 5.0M | 412k (1h) | $7.96 | 37% |
+| dev | opus-5 | 59.0k | 7.2M | 278k (5m) | $6.81 | 32% |
+| qa (retest) | opus-5 | 44.9k | 4.9M | 135k (5m) | $4.43 | 21% |
+| qa (initial) | opus-5 | 29.0k | 1.2M | 82k (5m) | $1.85 | 9% |
+| pm | sonnet-5 | 10.2k | 1.1M | 77k (5m) | $0.51 | 2% |
 
-Reading it: **cache traffic is the bill** — 47% cache read + 44% cache write = **92%** of the total,
-against 89 fresh input tokens and 67k output (8%). The QA-blocked **retest cost 3× the initial pass**
-($3.43 vs $1.14) because it inherited a larger context, so a second QA round is worse than double on
-that half. `model: sonnet` on pm is doing real work at $0.42.
+Reading it: **cache traffic is most of the bill** — 44% cache read + 34% cache write = **78%**,
+against 22% generation and 89 fresh input tokens. The QA-blocked **retest cost 2.4× the initial pass**
+($4.43 vs $1.85) because it inherited a larger context, so a second QA round is worse than double on
+that half. `model: sonnet` on pm is doing real work at $0.51. **No single component dominates** — the
+top level is 37% and the three subagent roles are 63% between them, so there is no one place to
+attack. Cost scales with the pipeline being a pipeline, which is the design working as intended.
 
-Second data point — tosk-agent `d677c16d` (opus-4-8, single QA round): **$23.25**, of which the top
-level alone is $19.02 on 15.9M cache read. Different task and model, so not a controlled comparison,
-but it makes the shape clear: **the top level dominates, not the QA round count.** Chasing QA rounds
-is optimizing the wrong half.
+**Method (repeatable) — two traps, both of which bit.** Read
+`~/.claude/projects/<encoded>/<session>.jsonl` plus `<session>/subagents/agent-*.jsonl`, price per
+`message.model` (opus-5 $5/$25; sonnet-5 at $2/$10 intro through 2026-08-31), cache read at 0.1×,
+cache write at 1.25× (5m) / 2.0× (1h) split by `cache_creation.ephemeral_5m/1h_input_tokens`.
+`.meta.json` next to each subagent transcript names its `agentType`. Then:
 
-**Method (repeatable) — dedupe first.** Read `~/.claude/projects/<encoded>/<session>.jsonl` plus
-`<session>/subagents/agent-*.jsonl`. **Claude Code writes one transcript row per *content block*, and
-every row carries the identical, complete `message.usage` for the whole message** — so summing rows
-multiplies the bill by blocks-per-message (2.3× on `b9129d3f`: 111 rows, 48 real requests). Dedupe on
-`message.id`, keep the first occurrence, *then* sum. Price per `message.model` (opus-5 $5/$25;
-sonnet-5 at $2/$10 intro through 2026-08-31), cache read at 0.1×, cache write at 1.25× (5m) / 2.0×
-(1h), split by `cache_creation.ephemeral_5m/1h_input_tokens`. `.meta.json` next to each subagent
-transcript names its `agentType`. Working script: `plugins/dev-workflow/session-cost.py` (maintainer
-tool at the plugin root — deliberately *not* in `shared/`, which is install-artifact territory).
+1. **Rows are per *content block*, not per request** — collapse on `message.id` first. Input-side
+   fields (`input_tokens`, `cache_read_input_tokens`, `cache_creation`) are identical on every row of
+   a message, so any row is authoritative. **`output_tokens` is not** — it is a running partial, and
+   only the final row (the one carrying `stop_reason`) holds the true total. Take `max()`. Keeping
+   the *first* row instead undercounts output ~10× on subagent transcripts (dev: 6.3k vs the real
+   59k) and is invisible, because the input-side numbers stay correct and the total still looks
+   plausible. The top-level transcript happens to have uniform rows, so a spot-check there confirms
+   nothing about the subagent files.
+2. **A session file accumulates every resume** — `b9129d3f` had a 9.2h gap and then unrelated
+   next-day work appended to it, and it was still being written to *during* this analysis. Costing
+   the whole file answers "what has this session cost in total", not "what did one run cost". Cut the
+   window at the run boundary.
+
+Working script: `plugins/dev-workflow/session-cost.py` (maintainer tool at the plugin root —
+deliberately *not* in `shared/`, which is install-artifact territory). It handles both traps and
+warns on long idle gaps; `--until <iso>` cuts the window.
+
+**Do not treat tosk-agent `d677c16d` as a second baseline.** It spans three work windows across two
+days ($24.22 for the whole file), so it is "a day of work on that repo", not one `/fix`. There is
+currently **one** clean single-run measurement, not two.
 
 **The 1-hour cache TTL question is settled: leave it alone.** Claude Code gates 1h caching behind a
 server-side allowlist defaulting to `["repl_main_thread*", "sdk", "auto_mode", "memdir_relevance"]` —
 main thread only, which is exactly what the transcripts show (top level 1h, every subagent 5m). That
-default matches the workload: the top level's request gaps are median 18s but **p90 652s**, because it
-sits idle waiting on subagents, while subagents run rapid-fire and never need more than 5m. Forcing
-everything to 5m via `FORCE_PROMPT_CACHING_5M=1` (the real env var; there is no settings.json key)
-saves the 0.75× write premium but forces a full prefix re-write at every gap over 5 minutes, and the
-re-write costs more than the premium saved: **−$0.79 on tosk-web (−4%) and −$4.71 on tosk-agent
-(−20%)**. Both sessions agree; the knob only makes it worse. Note 1h caching also auto-disables while
-the org is in usage overage, so a run measured during overage will show 5m writes on the top level.
+default matches the workload: on the clean run window the top level's request gaps are median 18s but
+**p90 498s, with 6 of 45 over five minutes**, because it sits idle waiting on subagents — while the
+subagents run rapid-fire and never need more than 5m. Forcing everything to 5m via
+`FORCE_PROMPT_CACHING_5M=1` (the real env var; there is no settings.json key) saves the 0.75× write
+premium but forces a full prefix re-write at every one of those gaps, and the re-writes cost more
+than the premium saved: **−$1.22 on the run (−6%)**. The knob only makes it worse. It would only pay
+off for a top level with no gaps over 5 minutes, which a pipeline that dispatches subagents does not
+have. Note 1h caching also auto-disables while the org is in usage overage, so a run measured during
+overage will show 5m writes on the top level and is not comparable.
 
 **Landmines:**
 
@@ -89,10 +105,11 @@ the org is in usage overage, so a run measured during overage will show 5m write
 - **Propagation:** commit → push → `/dev-workflow:upgrade` in the project. Editing the plugin
   templates from this repo and applying them to projects with a scripted, asserted replacement
   (dry-run first, one assert per edit) worked well for a 15-edit wave across four projects.
-- **Transcript usage rows are per-content-block, not per-request.** Every row of a message repeats
-  that message's complete `message.usage`. Summing rows inflated the first cost baseline by 2.3×
-  ($47.24 → the real $20.06). Dedupe on `message.id` before summing anything from a transcript —
-  this applies to any future token, latency, or turn-count analysis, not just cost.
+- **Transcript rows are per-content-block, and session files span resumes.** Both traps inflated the
+  first cost baseline ($47.24 for what was really a $21.56 run). Collapse on `message.id` — taking
+  `max()` on `output_tokens`, since that field is a running partial — and cut the window at the run
+  boundary before summing. Applies to any transcript-derived metric, not just cost; see the Method
+  note above for why a spot-check on the top-level file does not catch it.
 - **Markers prove a *skill* ran, never a *command*.** `skill-mark.sh` fires on the Skill tool, so a
   user-typed slash command can leave no trace. Reading `pilot`'s absence as "no mission ran" was
   wrong once already — use the delivery log's `**Decisions:**` and `git log` instead.
@@ -169,8 +186,8 @@ Test beds: **tosk-web** · **tosk-agent** · **portrais** · **jobzeeker**.
 | Markers read as proof a command ran — `skill-mark.sh` only sees Skill-tool invocations, so a user-typed slash command can leave no trace (misled a real `/pilot` audit) → caveat in `<PREFIX>-log` step 3 | `dd86bfe` |
 | Two upgrade entries still told installs to key markers **per agent**, and the apply bullet's skip condition was inverted (skipped exactly when the bug was present) — leftovers from `8b3766b` | `dd86bfe` |
 | `paths` reduction was a flat `.claude/**` exclusion — let docs-only paths drive prior-selection and dropped executable source under `.claude/skills/**/scripts/**` → behavioral-surface rule (upstreamed from jobzeeker) | `e4a8470` |
-| Cost baseline summed transcript rows, but usage is repeated per content block — inflated $20.06 → $47.24 (2.3×) → dedupe on `message.id`, method corrected, `session-cost.py` shipped | this pass |
-| 1-hour cache TTL flagged as "the largest single cost lever" — it is not a lever; forcing 5m costs **more** (−$0.79 / −$4.71 on two sessions) because the top level idles past 5m waiting on subagents (p90 652s) | this pass |
+| Cost baseline summed raw transcript rows across every resume in the file — usage repeats per content block, and the file spanned unrelated next-day work → $47.24 for "one `/fix`" was really **$21.56**; collapse on `message.id` (max on `output_tokens`) and cut the window | this pass |
+| 1-hour cache TTL flagged as "the largest single cost lever" — it is not a lever; forcing 5m costs **more** (−$1.22, −6%) because the top level idles past 5m waiting on subagents (p90 498s, 6/45 gaps) | this pass |
 
 **Verified on real data:** parse coverage N/N on all four corpora · prior-selection parity against an
 independently written parser · byte-identical rebuilds · zero edges without `src` · roadmap-open
@@ -225,11 +242,13 @@ Templates and rollout are done. What remains, in order:
    mission state. Build it when a run actually loses its place, not before.
 
 **Cost work is done for now** — the baseline is corrected and reproducible (`session-cost.py`), and
-the one open cost question (1h TTL) is settled against changing anything. If cost is revisited, the
-target is the **top level**, not the QA round count: it is $9.58 of tosk-web's $20.06 and $19.02 of
-tosk-agent's $23.25, and 92% of every bill is cache traffic rather than generation. The lever that
-would actually move it is shrinking what the top level re-reads each turn, which is a context-design
-question, not a caching-config one — and not worth opening until something else forces it.
+the one open cost question (1h TTL) is settled against changing anything. Nothing about token usage
+currently looks broken: no runaway component, no single dominant cost, 78% cache traffic which is
+what a pipeline that re-reads context each turn is supposed to look like. If cost is revisited, the
+honest framing is that **$21.56 buys a full design → implement → review → test → sign-off → log
+cycle**, and the question is whether that is worth it per task, not which component to shave. The one
+structural lever is reducing how much context each role re-reads per turn — a context-design
+question, not a caching-config one, and not worth opening until something else forces it.
 
 **Housekeeping:** tosk-agent has 1 unpushed commit. jobzeeker and portrais have had live sessions
 throughout — re-read their state before touching either.

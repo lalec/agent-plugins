@@ -1928,9 +1928,12 @@ prose in `**UAT-deferred:**`. **`Decisions:` wins** — it is the structured rec
 a fallback for entries written before that field existed. Where any two records disagree, the
 structured one is authoritative and the other is treated as commentary.
 
-A verification is **open work** when its latest `VERIFIED` edge is not a `pass`, and it arrives there
-by either of two routes: a `DEFERRED` edge (the delivery log formally deferred it), or a latest
-`VERIFIED` edge with `status: blocked` (a run recorded it as unproven). Both produce one row —
+A verification becomes **open work** by either of two routes: a `DEFERRED` edge (the delivery log
+formally deferred it), or a latest `VERIFIED` edge with `status: blocked` (a run recorded it as
+unproven). A later `pass` is the only thing that closes either route, so a verification whose latest
+`VERIFIED` edge is a `pass` is dropped whichever route it came in by. A bare `fail` is **not** a
+route in — a failing verification blocks its own task and is fixed or escalated there, never carried
+as standing open work. Both routes produce one row —
 `open-deferrals` reports it once, carrying `deferred_at`/`accepted_by` for the first and
 `blocked_at`/`reason` for the second. **Blocked belongs in this query:** the vacuous-pass rule makes
 `blocked` the honest outcome whenever an assertion never got exercised, and only some of those are

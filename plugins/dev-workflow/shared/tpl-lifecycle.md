@@ -1586,6 +1586,16 @@ are what the user reads instead of re-testing, so concrete observations, not cla
 every verification this run executed, including `blocked` ones — a blocked run is the outcome that
 most needs a history. Commit the file with `test: record verification outcomes`.
 
+**`pass` means the assertion was exercised and held — not that nothing went wrong.** If the
+condition the assertion is about never arose, the check did not run: it observed an absence, which
+is not evidence. That is `blocked`, with the reason naming what failed to occur. An "at most once"
+invariant on a run where the thing never happened once, a starvation check on a run where no gate
+was open, a replay assertion against a job that was skipped — each is vacuous, and each looks
+identical to a clean pass in the logs: zero bad lines, no violation observed. Recording it as `pass`
+is worse than recording nothing, because a pass **discharges the deferral permanently** and the
+invariant is never proven again. When in doubt about whether the assertion was genuinely exercised,
+it was not — write `blocked`.
+
 ## Prior-selection
 
 Resolve the prior set with the delivery graph:
@@ -1919,7 +1929,10 @@ a fallback for entries written before that field existed. Where any two records 
 structured one is authoritative and the other is treated as commentary.
 
 A verification is an **open deferral** when it has a `DEFERRED` edge and no `VERIFIED` edge with
-`status: pass`. A missing `last:` block means "never run" — never a pass.
+`status: pass`. A missing `last:` block means "never run" — never a pass. A `pass` is the only thing
+that closes a deferral, which is why a vacuous observation must be recorded as `blocked` (see
+`<PREFIX>-test` § Record the outcome): a pass on a check that never exercised its assertion removes
+it from this query for good.
 
 ## Rebuild semantics
 

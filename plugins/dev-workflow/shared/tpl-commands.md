@@ -348,6 +348,10 @@ Task:
     Fix the following in <PROJECT>: $ARGUMENTS
     Root cause has already been investigated — implement the fix.
     Complete the full <PREFIX>-dev workflow (domain skills, implement, deploy, Reference Sync).
+    Done means: <the acceptance statement from Step 0.5> — this is the task, not the diff that
+    approaches it. The journey's last step must be reachable by a user before you report complete.
+    A bug report names a symptom; the statement names the state the user should end in. Removing the
+    symptom without reaching that state is not a fix.
     Verifications (these must hold when done): <the verifications captured in Step 0.5, or "none">
 
 While the agent runs, do **not** edit governed source files at the top level — concurrent writers make QA's diff unattributable.
@@ -396,6 +400,10 @@ Task:
   prompt: |
     Run code review (<PREFIX>-review) and tests (<PREFIX>-test) for the most recent changes. mode=initial
     regression_mode: <smart | full, from Step 0.5>
+    Done means: <the acceptance statement from Step 0.5> — walk it end to end and report where it
+    actually lands. Green on the individual checks while the journey dead-ends is a `blocked`, not a
+    sign-off; the assertions are evidence for the statement, never a substitute for it. The original
+    symptom being gone is not the same as the end state being reached — check the latter.
     New verifications this task: <names from Step 2.5, or "none">
     Changed paths: <the dev Handoff `Files changed:` list>
     Sign off when quality gates pass.

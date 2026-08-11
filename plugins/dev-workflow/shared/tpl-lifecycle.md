@@ -1835,7 +1835,7 @@ python3 .claude/graph/graph.py covers <path>...           verifications whose pa
 python3 .claude/graph/graph.py blast <path>...            owners · verifications+status · deliveries · deferrals
 python3 .claude/graph/graph.py history <path>             what shipped, was verified, or was reverted here
 python3 .claude/graph/graph.py roadmap-open [--for <path>...]   open items; path-affine ones marked ~match
-python3 .claude/graph/graph.py open-deferrals [<path>...] deferred and never since passed
+python3 .claude/graph/graph.py open-deferrals [<path>...] deferred or blocked, not passing since
 ```
 
 Add `--json` to any query for machine-readable output. Queries rebuild automatically when the
@@ -1914,7 +1914,7 @@ model call anywhere in the projector — projection is pure parsing.
 | `ADDRESSES` | task → road | — | log `**Addresses:**` |
 | `SUPERSEDES` | commit → commit | — | `git log --grep=^Revert` |
 | `COVERS` | verif → path | — | `custom-tests.yaml` `paths:` |
-| `VERIFIED` | commit → verif | `status`, `ts` | `custom-tests.yaml` `last:` |
+| `VERIFIED` | commit → verif | `status`, `ts`, `reason` | `custom-tests.yaml` `last:` |
 | `OWNED_BY` | path-pattern → skill | — | `governed-paths.conf` `PATH_MAP` |
 | `HAS_ENV` | comp → env | `url`, `kind` | `deploy-config.yaml` |
 
@@ -1928,11 +1928,21 @@ prose in `**UAT-deferred:**`. **`Decisions:` wins** — it is the structured rec
 a fallback for entries written before that field existed. Where any two records disagree, the
 structured one is authoritative and the other is treated as commentary.
 
-A verification is an **open deferral** when it has a `DEFERRED` edge and no `VERIFIED` edge with
-`status: pass`. A missing `last:` block means "never run" — never a pass. A `pass` is the only thing
-that closes a deferral, which is why a vacuous observation must be recorded as `blocked` (see
-`<PREFIX>-test` § Record the outcome): a pass on a check that never exercised its assertion removes
-it from this query for good.
+A verification is **open work** when its latest `VERIFIED` edge is not a `pass`, and it arrives there
+by either of two routes: a `DEFERRED` edge (the delivery log formally deferred it), or a latest
+`VERIFIED` edge with `status: blocked` (a run recorded it as unproven). Both produce one row —
+`open-deferrals` reports it once, carrying `deferred_at`/`accepted_by` for the first and
+`blocked_at`/`reason` for the second. **Blocked belongs in this query:** the vacuous-pass rule makes
+`blocked` the honest outcome whenever an assertion never got exercised, and only some of those are
+ever also written up as a log deferral — the rest had no standing query at all. `reason` is projected
+onto the `VERIFIED` edge precisely so the row renders the trigger that would close it; a bare
+`blocked` says nothing about whether the block is transient or structural.
+
+A missing `last:` block means "never run" — never a pass, but also **not open work**: there is no
+recorded outcome to act on, and surfacing every never-run entry would bury the ones that have one. A
+`pass` is the only thing that closes either route, which is why a vacuous observation must be
+recorded as `blocked` (see `<PREFIX>-test` § Record the outcome): a pass on a check that never
+exercised its assertion removes it from this query for good.
 
 ## Rebuild semantics
 

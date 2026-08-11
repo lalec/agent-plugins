@@ -14,7 +14,7 @@ must fall back to its pre-graph behaviour if this script is absent or exits non-
     graph.py blast <path>...         owning skills - covering verifs - deliveries - deferrals
     graph.py history <path>          what has been delivered, verified and reverted here
     graph.py roadmap-open [--for <path>...]   open items, path-affine ones marked ~match
-    graph.py open-deferrals [<path>...]       deferred and never since passed
+    graph.py open-deferrals [<path>...]       deferred or blocked, and not passing since
 
 Add --json to any query for machine-readable output.
 """
@@ -515,6 +515,11 @@ def project(src: Sources) -> list[dict]:
                     f"custom-tests.yaml#{name}.last",
                     status=last["status"],
                     ts=last.get("ts", ""),
+                    # `reason` is written only alongside `status: blocked`. It is projected
+                    # because a bare `blocked` in the open-work query says nothing about
+                    # whether the block is transient or structural — the reason names the
+                    # trigger that would close it, which is what makes the row actionable.
+                    reason=last.get("reason", ""),
                 )
             )
 
@@ -625,30 +630,66 @@ def last_status(edges: list[dict]) -> dict[str, dict]:
                 "ts": p.get("ts", ""),
                 "commit": node_id(e["from"]),
             }
+            if p.get("reason"):
+                out[name]["reason"] = p["reason"]
     return out
 
 
-def open_deferrals(edges: list[dict], changed: list[str] | None) -> list[dict]:
-    """Deferred at some point and not passing since. Chronology is the log's own order
-    (newest first), so a DEFERRED edge is open unless a later VERIFIED pass exists."""
-    passed = {n for n, v in last_status(edges).items() if v["status"] == "pass"}
-    seen, out = set(), []
-    for e in by_kind(edges, "DEFERRED"):
-        name = node_id(e["to"])
-        if name in passed or name in seen:
-            continue
+def open_verifications(edges: list[dict], changed: list[str] | None) -> list[dict]:
+    """Unproven, with nothing watching: formally deferred in the delivery log, or recorded
+    `blocked` by the last run that touched it. Two ways in, one row out.
+
+    `blocked` belongs here because the vacuous-pass rule makes it the honest outcome when
+    an assertion never got exercised, and only some of those are also written up as a log
+    deferral — the rest were invisible to every standing query. Both states close the same
+    way: a later `pass` and nothing else, which is why chronology is `last_status` (newest
+    VERIFIED edge wins) for both. A **never-run** verification is deliberately not open
+    work — it has no recorded outcome to act on, and surfacing every one would bury the
+    entries that do."""
+    stat = last_status(edges)
+    rows: dict[str, dict] = {}
+
+    def row(name: str) -> dict | None:
+        if stat.get(name, {}).get("status") == "pass":
+            return None
         if changed and not path_hits_verif(edges, name, changed):
+            return None
+        return rows.setdefault(name, {"verification": name})
+
+    for e in by_kind(edges, "DEFERRED"):
+        r = row(node_id(e["to"]))
+        if r is not None and "deferred_at" not in r:
+            r["deferred_at"] = node_id(e["from"])
+            r["accepted_by"] = e.get("props", {}).get("accepted_by", "unstated")
+            r["src"] = e["src"]
+    for name, v in stat.items():
+        if v["status"] != "blocked":
             continue
-        seen.add(name)
-        out.append(
-            {
-                "verification": name,
-                "deferred_at": node_id(e["from"]),
-                "accepted_by": e.get("props", {}).get("accepted_by", "unstated"),
-                "src": e["src"],
-            }
-        )
-    return out
+        r = row(name)
+        if r is not None:
+            r["blocked_at"] = v["commit"]
+            r["reason"] = v.get("reason", "")
+            r.setdefault("src", f"custom-tests.yaml#{name}.last")
+    return list(rows.values())
+
+
+def clip(text: str, n: int = 160) -> str:
+    """One line's worth. The full reason stays in --json and in custom-tests.yaml."""
+    text = " ".join(text.split())
+    if len(text) <= n:
+        return text
+    cut = text.rfind(" ", 0, n)
+    return text[: cut if cut > 0 else n] + "…"
+
+
+def open_line(r: dict) -> str:
+    bits = []
+    if r.get("deferred_at"):
+        bits.append(f"deferred {r['deferred_at']} ({r['accepted_by']})")
+    if r.get("blocked_at"):
+        why = f" — {clip(r['reason'])}" if r.get("reason") else ""
+        bits.append(f"blocked {r['blocked_at']}{why}")
+    return f"{r['verification']} — {' · '.join(bits)}"
 
 
 def path_hits_verif(edges: list[dict], name: str, changed: list[str]) -> bool:
@@ -740,7 +781,7 @@ def main(argv: list[str]) -> int:
                 {"name": n, **stat.get(n, {"status": "never-run"})} for n in covering(edges, rest)
             ],
             "recent_deliveries": deliveries(edges, rest)[:5],
-            "open_deferrals": open_deferrals(edges, rest),
+            "open_deferrals": open_verifications(edges, rest),
         }
         emit(
             report,
@@ -748,7 +789,7 @@ def main(argv: list[str]) -> int:
             [f"owners: {', '.join(report['owners'])}"]
             + [f"verif: {v['name']} [{v['status']}]" for v in report["verifications"]]
             + [f"delivered: {d['commit']} {d['task']}" for d in report["recent_deliveries"]]
-            + [f"deferred: {d['verification']} ({d['accepted_by']})" for d in report["open_deferrals"]],
+            + [f"open: {open_line(d)}" for d in report["open_deferrals"]],
         )
 
     elif cmd == "history":
@@ -800,12 +841,8 @@ def main(argv: list[str]) -> int:
         )
 
     elif cmd == "open-deferrals":
-        rows = open_deferrals(edges, rest or None)
-        emit(
-            {"deferrals": rows},
-            as_json,
-            [f"{r['verification']} — deferred {r['deferred_at']} ({r['accepted_by']})" for r in rows],
-        )
+        rows = open_verifications(edges, rest or None)
+        emit({"deferrals": rows}, as_json, [open_line(r) for r in rows])
 
     else:
         print(f"unknown command: {cmd}", file=sys.stderr)

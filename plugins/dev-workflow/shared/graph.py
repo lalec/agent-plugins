@@ -34,7 +34,15 @@ VERSION = 1
 
 # A roadmap item is closed only if it says so. Anything else — including vocabulary this
 # project has never seen — counts as still open, so it surfaces instead of disappearing.
-TERMINAL_STATUS = {"done", "closed", "removed", "resolved", "cancelled", "canceled", "shipped"}
+TERMINAL_STATUS = {
+    "done",
+    "closed",
+    "removed",
+    "resolved",
+    "cancelled",
+    "canceled",
+    "shipped",
+}
 
 # --------------------------------------------------------------------------- discovery
 
@@ -97,6 +105,9 @@ MULTI_FIELD_RE = re.compile(
 )
 TOKEN_RE = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)+$")
 BACKTICK_RE = re.compile(r"`([^`]+)`")
+# Name/reason boundary in `UAT-deferred:` — a *spaced* dash. Unspaced hyphens are
+# inside verification names themselves, so the spaces are load-bearing.
+DEFERRAL_REASON_RE = re.compile(r"\s[—–-]\s")
 DEPLOYED_RE = re.compile(r"([A-Za-z0-9_-]+)\s*→\s*([A-Za-z0-9_-]+)\s*·\s*(\S+)")
 DECISION_RE = re.compile(r"([a-z_-]+)\s*=\s*([A-Za-z0-9_-]+)\s*\(([^)]*)\)")
 
@@ -346,7 +357,9 @@ def parse_deploy_config(text: str) -> list[tuple[str, str, dict]]:
             if k in ("url", "run", "deploy", "trigger", "gate"):
                 envs[-1][2][k] = _scalar(v)
     for _, _, props in envs:
-        props["kind"] = "serve" if "run" in props else "ship" if "deploy" in props else "?"
+        props["kind"] = (
+            "serve" if "run" in props else "ship" if "deploy" in props else "?"
+        )
     return envs
 
 
@@ -408,7 +421,11 @@ def edge(etype: str, frm: str, to: str, src: str, commit: str = "", **props) -> 
 
 def tokens(value: str) -> list[str]:
     """Kebab tokens from a `·`-separated or prose field, ignoring italic annotations."""
-    return [t for t in (p.strip().strip("`*_") for p in value.split("·")) if TOKEN_RE.match(t)]
+    return [
+        t
+        for t in (p.strip().strip("`*_") for p in value.split("·"))
+        if TOKEN_RE.match(t)
+    ]
 
 
 def project(src: Sources) -> list[dict]:
@@ -418,6 +435,8 @@ def project(src: Sources) -> list[dict]:
     edges: list[dict] = []
     entries = parse_log(read(src.log))
 
+    tests = parse_custom_tests(read(src.tests))
+
     for e in entries:
         sha, f = e["sha"], e["fields"]
         task = f"task:{slug(e['title'])}"
@@ -426,7 +445,12 @@ def project(src: Sources) -> list[dict]:
         for rid in (r.strip() for r in f.get("Addresses", "").split(",")):
             if rid and TOKEN_RE.match(rid.strip("`")):
                 edges.append(
-                    edge("ADDRESSES", task, f"road:{rid.strip('`')}", f"{where}.Addresses")
+                    edge(
+                        "ADDRESSES",
+                        task,
+                        f"road:{rid.strip('`')}",
+                        f"{where}.Addresses",
+                    )
                 )
 
         # An entry may name several commits (older multi-hash entries) or none at all
@@ -451,7 +475,8 @@ def project(src: Sources) -> list[dict]:
             )
 
         decisions = dict(
-            (gate, by.strip()) for gate, _v, by in DECISION_RE.findall(f.get("Decisions", ""))
+            (gate, by.strip())
+            for gate, _v, by in DECISION_RE.findall(f.get("Decisions", ""))
         )
 
         deferred = f.get("UAT-deferred", "")
@@ -461,19 +486,32 @@ def project(src: Sources) -> list[dict]:
             accepted = decisions.get("defer") or (
                 "timeout"
                 if "timeout" in deferred.lower()
-                else "user" if "user-confirmed" in deferred.lower() else "unstated"
+                else "user"
+                if "user-confirmed" in deferred.lower()
+                else "unstated"
             )
-            for name in BACKTICK_RE.findall(deferred):
-                if TOKEN_RE.match(name.strip()):
-                    edges.append(
-                        edge(
-                            "DEFERRED",
-                            f"commit:{sha}",
-                            f"verif:{name.strip()}",
-                            f"{where}.UAT-deferred",
-                            accepted_by=accepted,
+            # `UAT-deferred:` is `<names> — <reason>`, optionally repeated with `·`.
+            # Reasons routinely quote their own tokens (a repo, a branch, a command), and
+            # `TOKEN_RE` accepts any kebab word — so scanning the whole line minted a
+            # phantom verification from `agent-plugins` inside a trigger description, which
+            # then read as a real open deferral forever. The name/reason boundary is the
+            # spaced dash, so only scan ahead of it. Membership in `custom-tests.yaml` is
+            # NOT a usable guard here: a deferral may legitimately name work that was never
+            # captured as a typed verification, and those are exactly the ones that must
+            # not be lost.
+            for chunk in deferred.split("·"):
+                head = DEFERRAL_REASON_RE.split(chunk, maxsplit=1)[0]
+                for name in BACKTICK_RE.findall(head):
+                    if TOKEN_RE.match(name.strip()):
+                        edges.append(
+                            edge(
+                                "DEFERRED",
+                                f"commit:{sha}",
+                                f"verif:{name.strip()}",
+                                f"{where}.UAT-deferred",
+                                accepted_by=accepted,
+                            )
                         )
-                    )
 
         for gate, value, by in DECISION_RE.findall(f.get("Decisions", "")):
             edges.append(
@@ -490,20 +528,32 @@ def project(src: Sources) -> list[dict]:
     shas = {s for e in entries for s in e["shas"]}
     for sha, paths in git_touches(src.root, shas).items():
         for p in paths:
-            edges.append(edge("TOUCHES", f"commit:{sha}", f"path:{p}", "git log --name-only"))
+            edges.append(
+                edge("TOUCHES", f"commit:{sha}", f"path:{p}", "git log --name-only")
+            )
 
     for newer, older in git_reverts(src.root):
         edges.append(
-            edge("SUPERSEDES", f"commit:{newer}", f"commit:{older}", "git log --grep=^Revert")
+            edge(
+                "SUPERSEDES",
+                f"commit:{newer}",
+                f"commit:{older}",
+                "git log --grep=^Revert",
+            )
         )
 
-    for t in parse_custom_tests(read(src.tests)):
+    for t in tests:
         name = t.get("name", "")
         if not name:
             continue
         for p in t.get("paths", []):
             edges.append(
-                edge("COVERS", f"verif:{name}", f"path:{p}", f"custom-tests.yaml#{name}.paths")
+                edge(
+                    "COVERS",
+                    f"verif:{name}",
+                    f"path:{p}",
+                    f"custom-tests.yaml#{name}.paths",
+                )
             )
         last = t.get("last") or {}
         if last.get("status") and last.get("commit"):
@@ -524,7 +574,9 @@ def project(src: Sources) -> list[dict]:
             )
 
     for pattern, owner in parse_path_map(read(src.conf)):
-        edges.append(edge("OWNED_BY", f"path:{pattern}", f"skill:{owner}", "governed-paths.conf"))
+        edges.append(
+            edge("OWNED_BY", f"path:{pattern}", f"skill:{owner}", "governed-paths.conf")
+        )
 
     for comp, env, props in parse_deploy_config(read(src.deploy)):
         edges.append(
@@ -579,7 +631,11 @@ def load(src: Sources) -> list[dict]:
                 meta = obj["_meta"]
             else:
                 edges.append(obj)
-    stale = not edges or meta.get("version") != VERSION or meta.get("head") != head_sha(src.root)
+    stale = (
+        not edges
+        or meta.get("version") != VERSION
+        or meta.get("head") != head_sha(src.root)
+    )
     if stale:
         edges = project(src)
         write_index(src, edges)
@@ -594,7 +650,9 @@ def path_hits(pattern: str, changed: list[str]) -> bool:
     for c in changed:
         if pattern == c or fnmatch.fnmatch(c, pattern) or fnmatch.fnmatch(pattern, c):
             return True
-        if c.startswith(pattern.rstrip("/") + "/") or pattern.startswith(c.rstrip("/") + "/"):
+        if c.startswith(pattern.rstrip("/") + "/") or pattern.startswith(
+            c.rstrip("/") + "/"
+        ):
             return True
     return False
 
@@ -778,7 +836,8 @@ def main(argv: list[str]) -> int:
         report = {
             "owners": sorted({owner_of(edges, p) for p in rest}),
             "verifications": [
-                {"name": n, **stat.get(n, {"status": "never-run"})} for n in covering(edges, rest)
+                {"name": n, **stat.get(n, {"status": "never-run"})}
+                for n in covering(edges, rest)
             ],
             "recent_deliveries": deliveries(edges, rest)[:5],
             "open_deferrals": open_verifications(edges, rest),
@@ -788,7 +847,10 @@ def main(argv: list[str]) -> int:
             as_json,
             [f"owners: {', '.join(report['owners'])}"]
             + [f"verif: {v['name']} [{v['status']}]" for v in report["verifications"]]
-            + [f"delivered: {d['commit']} {d['task']}" for d in report["recent_deliveries"]]
+            + [
+                f"delivered: {d['commit']} {d['task']}"
+                for d in report["recent_deliveries"]
+            ]
             + [f"open: {open_line(d)}" for d in report["open_deferrals"]],
         )
 
@@ -798,9 +860,14 @@ def main(argv: list[str]) -> int:
             return 2
         reverted = {node_id(e["to"]) for e in by_kind(edges, "SUPERSEDES")}
         items = [
-            {**d, "reverted": d["commit"] in reverted} for d in deliveries(edges, rest[:1])
+            {**d, "reverted": d["commit"] in reverted}
+            for d in deliveries(edges, rest[:1])
         ]
-        report = {"path": rest[0], "owner": owner_of(edges, rest[0]), "deliveries": items}
+        report = {
+            "path": rest[0],
+            "owner": owner_of(edges, rest[0]),
+            "deliveries": items,
+        }
         emit(
             report,
             as_json,

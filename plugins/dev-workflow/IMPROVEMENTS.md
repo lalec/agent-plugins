@@ -28,6 +28,22 @@ Step 7 apply bullet; nothing needs hand-authoring.
 Each of these is correct by construction and unproven in a real run. They are listed in rough order
 of how likely a silent failure is to matter.
 
+- **The agent-owned gate.** Step 0.5 no longer asks the user to pick verifications, and no longer
+  asks the regression scope before dev has run. Confirm states the plan of record and free text is
+  the only override; scope defaults to `auto` and is resolved once by `<PREFIX>-test` from the paths
+  actually changed. Two things to watch on the first real runs: whether the four-row "Other"
+  disposition routes a real reply correctly (a goal correction misread as a check amendment builds
+  the wrong thing silently), and whether `auto` escalates sanely — check an `auto→full` run against
+  the $21.56 baseline with `session-cost.py`.
+- **The end state is non-negotiable.** It cannot be narrowed away by `smart`, by a retest, or by
+  `/pilot`'s fixed-`smart` lane; unreachable is `blocked` with a `reason`, never skipped. The
+  `last.reason` field was being read by `graph.py` and quoted by `/code` Step 0 while nothing told
+  the writer to write it — now required on `blocked`/`fail`, and unproven until a blocked row
+  renders with a real reason.
+- **`/roadmap` as a lane.** It ranks (via `roadmap-open`, with the fallback) and hands the top set
+  to `/pilot --items`, or starts one item through `/code`/`/fix`. The rank rule now exists once, in
+  `roadmap.md § Rank`; `/pilot` cites it. Never run against a roadmap with real dependencies between
+  selected items, which is where the merged rule differs from both old ones.
 - **Acceptance statement, end to end** (`51c1993`). The pipeline now derives verifications from a
   stated end state rather than the diff, dev must walk it before `complete`, qa before sign-off.
   Never exercised on a task where the journey actually dead-ends — which is the case it exists for.
@@ -60,6 +76,14 @@ of how likely a silent failure is to matter.
   later lane mission both completed without losing state, and every real failure so far has been
   something else (a parked agent, a dropped acceptance statement). Build it when a run actually
   loses its place.
+
+  `/roadmap --items` weakened the case further rather than strengthening it. A roadmap-driven
+  mission has no state that needs a file: the ids are permanent, so the unreached set is exactly
+  re-expressible as `/pilot --items <id>,…`, and pm's required roadmap status flip is already an
+  authoritative record of what completed — **the roadmap is the mission state for this lane.**
+  Duplicating it into `mission.json` would be the parallel mechanism Rule 7 forbids. So any future
+  justification must come from a **target-state or plain-batch** mission — the only shapes whose
+  state has no other home.
 
 - **Stage 3 — findings + hotspots: dropped, not deferred.** Redundant with skills + Reference Sync,
   which is semantic rather than statistical, injected at point of use, and aggregated per-domain

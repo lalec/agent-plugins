@@ -501,7 +501,7 @@ description: Autonomous multi-task run — decompose a goal into tasks, route ea
 
 # Pilot
 
-**Usage:** `/pilot <goal>` — a batch of work (e.g. open roadmap items matching a filter) or a target state to reach (improve an area until measurable criteria pass). Flags: `--max-tasks N` caps the run (default 10); `--prod` pre-answers Ship; `--no-push` pre-answers Hold and skips the close-out push; `--grant <unit>=<N>` (repeatable) pre-answers Budget for a metered lane; `--regression full|auto` opts the whole mission out of the fixed `smart` scope.
+**Usage:** `/pilot <goal>` — a batch of work (e.g. open roadmap items matching a filter) or a target state to reach (improve an area until measurable criteria pass). Flags: `--max-tasks N` caps the run (default 10); `--items <id>,<id>` runs exactly those roadmap items (how `/roadmap` hands over a set); `--prod` pre-answers Ship; `--no-push` pre-answers Hold and skips the close-out push; `--grant <unit>=<N>` (repeatable) pre-answers Budget for a metered lane; `--regression full|auto` opts the whole mission out of the fixed `smart` scope.
 
 **Examples:**
 - `/pilot implement all open roadmap items`
@@ -517,14 +517,15 @@ After the single Step 1 gate, the run is unattended until close-out:
 
 ## Step 0 — Flags + entry hygiene
 
-**Flag parse (first):** `--max-tasks N` → cap the task list at N (default 10); `--prod` → `ship_mode = prod`; `--no-push` → `ship_mode = hold` and `no_push = true`; `--grant <unit>=<N>` (repeatable) → seed the resource ledger below. Strip all flags from the goal used below. If neither ship flag is present, `ship_mode` is decided by the Ship question in Step 1.
+**Flag parse (first):** `--max-tasks N` → cap the task list at N (default 10); `--items <id>[,<id>…]` → the task list is these roadmap `**Id:**` values, in this order (see Decompose); `--prod` → `ship_mode = prod`; `--no-push` → `ship_mode = hold` and `no_push = true`; `--grant <unit>=<N>` (repeatable) → seed the resource ledger below; `--regression full|auto` → the mission's test scope, otherwise `smart`. Strip all flags from the goal used below. If neither ship flag is present, `ship_mode` is decided by the Ship question in Step 1.
 
 **Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it at close-out. If the WIP overlaps paths this mission will touch, do not stash it blind — tell the user and run `/tidy` scoped to the overlapping paths first, then resume here.
 
 ## Step 1 — Mission plan + single gate
 
 **Decompose.** Build the task list from whichever source applies:
-- **Roadmap-shaped goal** (the goal names the roadmap or matches its items): read `docs/roadmap.md`, select the open items the goal covers, order by priority then dependency.
+- **Pre-selected items** (`--items <id>[,<id>…]`, how `/roadmap` hands over a set): the ids **are** the selection, already ranked — take them in the given order and read each item's body in `docs/roadmap.md` for its description. Skip selection and ranking only; everything below still applies to each item, including the per-task derivation and the split rule. An id that matches no roadmap item is reported at the gate and dropped — never silently guessed at.
+- **Roadmap-shaped goal** (the goal names the roadmap or matches its items): read `docs/roadmap.md`, select the open items the goal covers, and rank them per `.claude/commands/roadmap.md § Rank` — one rank rule, stated once, so the order a user saw in `/roadmap` is the order a mission runs.
 - **Target-state goal** ("improve X until Y"): derive 2–3 **success criteria** — measurable checks, each with a command or observable that decides pass/fail — then derive the initial tasks that most plausibly move toward them. The loop re-plans between tasks; the criteria, not the initial list, define done.
 - **Plain batch** (an explicit list of things to do): one task per item.
 
@@ -629,7 +630,7 @@ Report, in this order:
 3. QA `Evidence:` lines per task, verbatim.
 4. Everything auto-decided, explicitly labeled: gate timeouts, auto-accepted deferrals, plan amendments.
 4b. **Parked decisions** — every human-gated verdict a lane produced, each with the evidence needed to answer it and where that evidence lives. These are the reason the user is reading this report; never fold them into the task table and never present one as decided. State the granted-vs-spent figure per unit here too, and name any lane closed on exhaustion.
-5. Failed and unreached tasks as follow-ups, with enough state to resume (`/pilot <remaining goal>` re-derives the plan from the roadmap or criteria).
+5. Failed and unreached tasks as follow-ups, with enough state to resume. On an `--items` mission, give the remaining set as `/pilot --items <id>,<id>` — the ids are permanent, so that line is exact and copy-pasteable; otherwise `/pilot <remaining goal>` re-derives the plan from the roadmap or criteria.
 6. Serve-envs still running and where (`<url>`).
 7. Ship state: "deployed to prod" only after `<PREFIX>-deploy` confirmed CI completion + health check; "held at UAT per your Ship answer"; or parked — state exactly what awaits confirmation.
 8. Recommend a fresh session before the next mission — a completed pilot has consumed most of this one.
@@ -704,39 +705,51 @@ Route based on selection:
 
 ```markdown
 ---
-description: Review open roadmap items and pick the next one to work on
+description: Rank the open roadmap items and either run the top ones as a <PREFIX> mission or start one through the full pipeline
 ---
 
 # Roadmap
 
-**Usage:** `/roadmap` or `/roadmap <filter>`
+**Usage:** `/roadmap` or `/roadmap <filter>` — `<filter>` narrows the open set before ranking. Flags are passed straight through to `/pilot` (`--max-tasks N`, `--prod`, `--no-push`).
 
 **Examples:**
 - `/roadmap`
 - `/roadmap high priority`
-- `/roadmap integrations`
+- `/roadmap integrations --max-tasks 4`
 
-## Step 1 — Read roadmap
+This command **selects**; it never implements. Work happens in `/code`, `/fix`, or `/pilot` — so nothing here models a loop, a budget, or a retry: those belong to `/pilot` and duplicating them would put two answers in the repo for one question.
 
-Read `docs/roadmap.md`. If it does not exist, tell the user: "No roadmap found — create `docs/roadmap.md` first." and stop.
+## Step 1 — Read the open set
 
-## Step 2 — Rank and present
+Run `python3 .claude/graph/graph.py roadmap-open` — it returns the open and in-progress items with priority, status, and which prior deliveries touched the same paths. **Fall back** to reading `docs/roadmap.md` directly if the script is absent or exits non-zero; the graph is an accelerator here, never a gate. If there is no roadmap at all, say "No roadmap found — create `docs/roadmap.md` first." and stop.
 
-From all open or in-progress items, select the top 3 ranked by:
-1. Priority (high → medium → low)
-2. Then by category: integration > improvement > tech-debt > other
+**Filter.** When `$ARGUMENTS` (flags stripped) is non-empty, keep only items whose title, category, priority, or `**Id:**` matches it case-insensitively. If nothing matches, say so and rank the unfiltered set rather than reporting an empty roadmap — a typo'd filter must not read as "no open work".
 
-Use the AskUserQuestion tool:
+## Step 2 — Rank
 
-- question: "Which roadmap item should we work on next?"
-- header: "Roadmap — Top 3"
-- options: one per top-ranked item, label = item title, description = category · priority · status
-- Add a final option: label: "None of these" — description: "Show more items or cancel"
+Order the open set by, in this order:
+1. **Priority** — high → medium → low
+2. **Dependency** — an item another selected item depends on comes first. This outranks category because it is a correctness constraint, not a preference: running a dependent first wastes the run.
+3. **Category** — integration > improvement > tech-debt > other
 
-## Step 3 — Route
+This is the project's single rank rule: `/pilot` cites this section rather than restating it, so a mission runs items in the order the user was shown them.
 
-- **Selected item** — determine whether it's a new feature (→ `/code`) or a bug/regression (→ `/fix`), then tell the user: "Starting: [item title]" and invoke the appropriate command
-- **None of these** — ask if the user wants to see more items or cancel
+## Step 3 — Present and route
+
+Take the top `max_tasks` items (default 10) and ask once, via AskUserQuestion:
+
+- question: "Top of the roadmap: `<numbered list — title · category · priority>`. How should these run?"
+- header: "Roadmap"
+- options:
+  - label: "Run the top <N> as a mission (Recommended when 2+ qualify)" — description: "Hand the set to /pilot: one gate up front, then unattended through the lanes"
+  - label: "Just the first one" — description: "Start `<title>` through the full pipeline now, with its own gate"
+  - label: "None of these" — description: "Show more items or cancel"
+
+Recommend the mission when 2+ items qualify, and the single item when only one does. Route the answer:
+
+- **Mission** → invoke `/pilot --items <id>,<id>,…` with the ranked `**Id:**` values and any flags the user passed. **Do not pre-answer `/pilot`'s gate** — it asks a different question (this plan, with the lanes and verifications it derives) than the one just answered here (which items).
+- **Just the first one** → classify it as a new feature (→ `/code`) or a bug/regression (→ `/fix`) — this classification is the one thing this command knows that `/pilot` does not — then say "Starting: `<item title>`" and invoke that command. A lone item is better served by `/code`'s own gate than by a mission whose autonomy contract suppresses the questions a present user could answer.
+- **None of these** → ask whether to show more items or cancel.
 ```
 
 ---

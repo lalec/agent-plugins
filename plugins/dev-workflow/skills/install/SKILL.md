@@ -308,6 +308,11 @@ Also create `docs/workflow.md` if not present — generate with real content usi
 /code or /fix
       │
       ▼
+  (top level) single gate — states the acceptance statement and the verifications derived from it;
+              free text amends them. Regression scope is not asked: it is pinned by --regression
+              or resolved later from the paths that actually changed
+      │
+      ▼
   <PREFIX>-dev ── domain skills ── implement ── <PREFIX>-deploy(non-prod) ── Reference Sync
       │
       ▼
@@ -350,7 +355,7 @@ Gate timeouts split by risk: reversible gates proceed with defaults labeled `aut
 | `<PREFIX>-review` | Code review reception, reviewer dispatch, verification gates |
 | `<PREFIX>-debug` | Systematic debugging — four-phase root cause investigation |
 | `<PREFIX>-deploy` | Deploy authority — caller-driven env selection (`target=non-prod` from `<PREFIX>-dev`, `target=prod` from the `/code\|/fix --prod` command step); reads `references/deploy-config.yaml` (unified env schema: `run:` serve-envs / `deploy:` ship-envs), fills missing values, gates prod inline via `AskUserQuestion`, verifies reachability |
-| `<PREFIX>-test` | Smoke (always) · per-task verifications via `custom-tests.yaml` · on-demand regression |
+| `<PREFIX>-test` | Smoke (always) · per-task verifications via `custom-tests.yaml`, end-state check never narrowed away · regression scope pinned by the caller or resolved from the changed paths |
 | `<PREFIX>-skill` | Meta-skill — skill system governance and path ownership |
 | `<PREFIX>-docs` | Documentation sync — README and workflow.md |
 | `<PREFIX>-graph` | Delivery graph — projects the log, verifications, ownership and deploy config into a queryable edge index (`covers` / `blast` / `history` / `roadmap-open` / `open-deferrals`); derived and disposable, every caller falls back without it |
@@ -394,16 +399,17 @@ Each entry in `docs/project-log.md`:
 **Deployed:** <component> → <env> · <url>  ← omit line if no deploy happened
 **Addresses:** <roadmap **Id:** value(s)>  ← omit line if no tracked item is addressed
 **UAT-deferred:** <verification names + how confirmed>  ← omit line if nothing deferred
-**Decisions:** <gate>=<value> (<user|timeout|pilot-auto>) · …  ← omit line if no gate was answered
+**Decisions:** <gate>=<value> (<user|timeout|agent|pilot-auto>) · …  ← omit line if no gate came up
 **Checklist:** <skill> — <what changed>  ← omit line if nothing updated
 ```
 
 The hash is the primary feature/fix commit, never a `test:`/`log:`/`docs:` bookkeeping commit.
 
 `**Addresses:**` cites the roadmap item's permanent `**Id:**` — that citation is what links a
-shipped commit back to the scope it closed. `**Decisions:**` records how each gate was answered;
-a timeout or an autonomous choice is never written as `user`, and a gate deliberately left for a
-human is written `<gate>=parked (human-gated)` rather than being decided.
+shipped commit back to the scope it closed. `**Decisions:**` records how each gate was settled;
+a timeout, a pipeline-derived value (`agent` — the regression scope resolved from the changed paths
+is the standing case), or an autonomous choice is never written as `user`, and a gate deliberately
+left for a human is written `<gate>=parked (human-gated)` rather than being decided.
 
 This field set is **closed**. Leftover scope goes to `docs/roadmap.md` as its own item, and a
 verification that could not be run goes to `**UAT-deferred:**` — not into an invented field. The
@@ -554,7 +560,8 @@ Walk the checklist before declaring done:
 - [ ] `<PREFIX>-graph/SKILL.md` exists with `references/graph-schema.md`; the schema reference documents every edge type `graph.py` emits with its source artifact
 - [ ] `<PREFIX>-log/SKILL.md` entry format has `**Addresses:**` and `**Decisions:**`, and its Process runs `graph.py build` after committing the entry
 - [ ] `<PREFIX>-log/SKILL.md` derives `**Skills:**` from the `/tmp/<PREFIX>-skills-*` markers scoped **by session id**, not by file mtime (two sibling repos sharing a prefix share the marker namespace, and an mtime window cross-contaminates them). It must **not** contain `PROJECT_ENCODED` or a `~/.claude/projects/*.jsonl` grep (that source cannot see subagent skill loads and is blocked outright by a secret guard), and must filter with `grep -E '^<PREFIX>-'` so slash-command names are excluded
-- [ ] `<PREFIX>-test` `custom-tests.md` schema documents the `last:` block, and the execution protocol writes it after each run
+- [ ] `<PREFIX>-test` `custom-tests.md` schema documents the `last:` block **including `reason`** (required on `blocked`/`fail` — `graph.py` and `/code` Step 0 both read it), and the execution protocol writes it after each run
+- [ ] `<PREFIX>-test` `custom-tests.md` has a `## Regression scope` section, and `<PREFIX>-test/SKILL.md`'s tier table marks the end-state verification non-negotiable
 - [ ] Every graph call site (`<PREFIX>-test` prior-selection, `<PREFIX>-dev` step 1, `<PREFIX>-pm` step 1.5, `<PREFIX>-debug` Phase 1, `/code` + `/fix` Step 0) states an explicit fallback for a missing or failing script — the graph is never a gate
 - [ ] `docs/workflow.md` exists (even as a stub)
 - [ ] `.claude/skills/<PREFIX>-deploy/references/deploy-config.yaml` exists and parses as valid YAML. If any IaC/CI/CD/Build/Deployment categories were discovered or any component can be run locally, the file has at least one component; every env declares exactly one of `run:`/`deploy:` plus a `url`; every locally-runnable component has at least one non-prod env (`envs.local` serve-env or a cloud non-prod ship-env); there is no top-level `local:` block, no `cloud:` prefix in `verify:`, and no placeholder text. If the project has no deploy mechanism and no local run command, the file contains `components: {}` plus an explanatory leading comment.
@@ -569,7 +576,7 @@ Walk the checklist before declaring done:
 - [ ] `<PREFIX>-qa.md` step 6 (Hand off) is a one-line pointer to `## Response Requirements`; the structured `## Handoff` block format (`Status: signed-off | blocked`, Review, Tests, Reference Sync, Notes) lives in a terminal `## Response Requirements` section after `## Boundaries`
 - [ ] `<PREFIX>-pm.md` step 1 (Verify QA evidence) reads `**QA-evidence:**` from the invocation prompt — does **not** grep session jsonl (subagent skill invocations don't reach the parent session)
 - [ ] `.claude/commands/code.md` and `fix.md` parse `--prod` and `--no-push` flags in Step 0 and have a final "Deploy to prod (only if `--prod`)" step that invokes `<PREFIX>-deploy target=prod` at the top level after pm
-- [ ] `.claude/commands/code.md` and `fix.md` Step 0.5 is a **single** AskUserQuestion call (confirm + verify + regression + Ship together — not sequential gates); `ship_mode` drives the prod step, whose pre-authorization conditions are verified (not assumed); Step 0 stashes pre-existing WIP; the close-out restores it
+- [ ] `.claude/commands/code.md` and `fix.md` Step 0.5 is a **single** AskUserQuestion call carrying at most Confirm + Ship — the Confirm question states the acceptance statement and the verifications the command derived, and there is **no** Verify picker and **no** Regression question (`regression_mode` defaults to `auto` and is resolved by `<PREFIX>-test` from the changed paths, or pinned by `--regression`); `ship_mode` drives the prod step, whose pre-authorization conditions are verified (not assumed); Step 0 stashes pre-existing WIP; the close-out restores it
 - [ ] `<PREFIX>-deploy/SKILL.md` gate contains the Pre-authorization clause (`preauth` accepted only from the top-level command, never inferred)
 - [ ] `.claude/commands/code.md` and `fix.md` contain a "Gate policy" section (reversible → proceed + `auto-selected on timeout — not user-confirmed` label; irreversible → park; never present a timeout as consent) and a final "Close out: push + verified scorecard" step (push via `<PREFIX>-deploy` § Push policy; scorecard facts each checked against reality)
 - [ ] `<PREFIX>-qa.md` has a `## Invocation modes` section with `mode: initial` (default, full pipeline) and `mode: retest` (skip review, run tests only — for re-runs after a dev fix)

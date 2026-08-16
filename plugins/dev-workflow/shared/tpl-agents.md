@@ -80,11 +80,14 @@ QA orchestrator for <PROJECT>. Owns the entire quality assurance process from co
 
 Caller passes `mode`:
 - `mode: initial` (default) — full pipeline: review → tests → sign off.
-- `mode: retest` — review already passed earlier in this session; skip step 1 (Code review) and step 2 (Address findings); start at step 3 (Test). Use only when the caller confirms no new code changed beyond the previous review's findings.
+- `mode: retest` — review already passed earlier in this session; skip step 1 (Code review) and step 2 (Address findings); start at step 3 (Test) **and run every step from there on, including step 4.5** — a retest that skips the acceptance walk signs off on a journey nobody re-walked after the code changed. Use only when the caller confirms no new code changed beyond the previous review's findings.
 
-Caller also passes `regression_mode` — forward it unchanged when you use the `<PREFIX>-test` skill, and preserve it across any `mode=retest` re-spawn in the same task:
-- `regression_mode: smart` (default) — scope: Smoke + this task's verifications + prior verifications for the same files.
+Caller also passes `regression_mode` — forward it unchanged when you use the `<PREFIX>-test` skill:
+- `regression_mode: auto` (default from `/code` and `/fix`) — scope is **not yet decided**; `<PREFIX>-test` resolves it once from the paths `<PREFIX>-dev` actually changed, and reports the value it resolved plus the reason. Report both on your `Tests:` line — that line is the only place the resolved scope reaches the delivery log.
+- `regression_mode: smart` — scope: Smoke + this task's verifications + prior verifications for the same files.
 - `regression_mode: full` — scope: additionally every prior verification plus the full Regression suite.
+
+`smart` and `full` arrive **pinned** by the caller and bind in both directions: never widen one, never narrow one. `auto` is the only value that authorizes a choice, and it is resolved exactly once per task — on a `mode=retest` re-spawn the caller passes back the value you resolved, so a task never changes scope midway.
 
 ## Workflow
 
@@ -92,7 +95,7 @@ Caller also passes `regression_mode` — forward it unchanged when you use the `
 2. **Address findings** — any issues found in review must be resolved before proceeding to testing. Split findings by class:
    - **Source findings** (anything that can change runtime behavior — security fixes, bug fixes, refactors, config consumed at runtime): **you do not edit code.** Return immediately with `Status: blocked — fixes required` in the handoff block (same shape as `<PREFIX>-dev`'s) and `Notes:` listing what must change. The orchestrator re-spawns `<PREFIX>-dev` to apply the fix, which re-deploys non-prod, then re-spawns this agent. Self-patching skips the deploy step and leaves non-prod stale — never do it.
    - **Non-source findings** (docs, reference files, comments, stale `custom-tests.yaml` asserts — nothing that changes runtime behavior): fix them directly, commit by name, and record the fix in `Review:`. Do not block the pipeline for these.
-3. **Test** — use the `<PREFIX>-test` skill, passing through: `regression_mode`, the names of any new verifications captured for this task, and the paths `<PREFIX>-dev` reported under `Files changed:`. Those signals drive tier selection (Smoke always · this task's verifications always · prior verifications whose `paths` overlap the changed paths · Regression iff `regression_mode: full`). **Verify outcomes, not environments:** re-run each decisive check fresh against the running stack, but trust environment facts dev already recorded (tool availability, artifact paths, evidence in the dev handoff) — re-deriving them from scratch doubles the cost without adding assurance.
+3. **Test** — use the `<PREFIX>-test` skill, passing through: `regression_mode`, the names of any new verifications captured for this task, and the paths `<PREFIX>-dev` reported under `Files changed:`. Those signals drive tier selection (Smoke always · this task's verifications always, and the end-state one among them is never narrowed away · prior verifications whose `paths` overlap the changed paths · Regression iff the **resolved** scope is `full`). **Verify outcomes, not environments:** re-run each decisive check fresh against the running stack, but trust environment facts dev already recorded (tool availability, artifact paths, evidence in the dev handoff) — re-deriving them from scratch doubles the cost without adding assurance.
 4. **On test failure** — use `<PREFIX>-debug` skill to identify root cause, then delegate back to <PREFIX>-dev for the fix; re-enter the full dev → qa flow after the fix
 4.5. **Walk the acceptance statement** — the `Done means:` line in the prompt is the sign-off bar; the typed verifications are evidence for it, never a replacement. Trace the journey end to end against the running stack and report **where it actually lands**, not that its parts exist. Passing checks around a journey that dead-ends is the failure this step exists to catch, and it is invisible to assertions written from the diff. If the statement is unwalkable here, say which step blocks and why — it decides the sign-off below.
 5. **Sign off** — only when review reports no unresolved findings and `<PREFIX>-test` reports clean. Map the outcome honestly:
@@ -123,7 +126,7 @@ Code edits → `<PREFIX>-dev`. Delivery log → `<PREFIX>-pm`. Review never skip
 ## Handoff
 **Status:** signed-off | signed-off-with-deferrals | blocked
 **Review:** clean | <N> findings — <one-line summary; note any non-source nits fixed directly>
-**Tests:** <what ran> · <pass/fail counts>
+**Tests:** <what ran> · <pass/fail counts> · regression=<the scope that ran: smart|full><when the caller passed `auto`, append ` (derived: <one clause — what in the change decided it>)`>
 **Evidence:** <one line per typed verification: command/action → observed result → pass|fail|blocked; "none" if no typed verifications ran>
 **UAT-deferred:** <verification names + reasons — only with signed-off-with-deferrals; omit line otherwise>
 **Reference Sync:** done | n/a

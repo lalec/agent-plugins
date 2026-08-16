@@ -15,7 +15,7 @@ description: Implement a feature through the full <PREFIX>-dev → <PREFIX>-qa �
 
 # Feature Implementation
 
-**Usage:** `/code <description>` — the Step 0.5 gate asks whether to ship after sign-off. `--prod` pre-answers Ship; `--no-push` pre-answers Hold and skips the close-out push.
+**Usage:** `/code <description>` — the Step 0.5 gate states what will be verified and asks whether to ship after sign-off. `--prod` pre-answers Ship; `--no-push` pre-answers Hold and skips the close-out push; `--regression full|smart` pins the test scope that is otherwise resolved from the change itself.
 
 **Examples:**
 - `/code add export to CSV button on assessment list`
@@ -25,20 +25,20 @@ description: Implement a feature through the full <PREFIX>-dev → <PREFIX>-qa �
 ## Gate policy (governs every AskUserQuestion in this command)
 
 If a question times out unanswered, split by risk:
-- **Reversible** (confirm, verification capture, regression flag, ship choice, UAT-defer): proceed with the recommended default and label every downstream record `auto-selected on timeout — not user-confirmed` (handoffs, delivery log, final report). **Never present a timeout as user consent** — not to a subagent, not in a log, not in the report.
+- **Reversible** (confirm, ship choice, UAT-defer): proceed with the recommended default and label every downstream record `auto-selected on timeout — not user-confirmed` (handoffs, delivery log, final report). **Never present a timeout as user consent** — not to a subagent, not in a log, not in the report.
 - **Irreversible** (prod deploy; any push that fires a prod CI deploy): **park** — do not proceed and do not decide. End the turn stating exactly what awaits confirmation and how to resume; on the user's next message, resume from the parked step. Park only after actually asking at the moment of the irreversible action — never skip the ask because an earlier, unrelated gate timed out; the user may have returned.
 
 ## Step 0 — Flags + entry hygiene
 
-**Flag parse (first):** if `$ARGUMENTS` contains `--prod`, set `ship_mode = prod`; if it contains `--no-push`, set `ship_mode = hold` and `no_push = true`. Strip both flags from the task description used in every step below. If neither flag is present, `ship_mode` is decided by the Ship question in the Step 0.5 gate.
+**Flag parse (first):** if `$ARGUMENTS` contains `--prod`, set `ship_mode = prod`; if it contains `--no-push`, set `ship_mode = hold` and `no_push = true`. If it contains `--regression full` or `--regression smart`, pin `regression_mode` to that value. Strip every flag from the task description used in every step below. If no ship flag is present, `ship_mode` is decided by the Ship question in the Step 0.5 gate; if no `--regression` flag is present, `regression_mode` is `auto` and the scope is resolved from the change itself (Step 0.5).
 
 **Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it in the close-out step — the pre-handoff gate blocks the qa spawn on any dirty tree, so deferring the stash just moves the failure mid-pipeline. If the WIP overlaps paths this task will touch, do not stash it blind — tell the user and run `/tidy` scoped to the overlapping paths first, then resume here.
 
 **Open deferrals:** run `python3 .claude/graph/graph.py open-deferrals` and, if it returns anything, list it for the user in one line — these are verifications that are still unproven and nothing has passed since: either an earlier task formally deferred them, or a run recorded them `blocked` (which is what the vacuous-pass rule mandates when the assertion never got exercised). A blocked row carries its `reason` — the trigger that would close it — so quote that, not just the name. Surfacing them here is the only point at which they resurface at all. Report, do not gate — **with one exception: if the same *fixable* blocker is named by 3+ open deferrals, or any single verification has been deferred 3+ times, say so and ask whether to fix the blocker first.** Repeated deferrals of that kind are not a backlog, they are one missing capability (usually a test environment) charging rent on every task that follows; five checks deferred across three deploys is how a feature ships unwalked. **Fixable means someone could build it** — seed data, an auth strategy, a `stack:` block, a missing non-prod env. A structural fact is not a blocker to escalate: a component that only ships to prod, or a journey that ends on a schedule, will produce deferrals forever and asking every third run is noise, not signal. Those are discharged by the post-deploy prod walk and by triggered follow-ups respectively — count them, never nag about them. Skip silently if the script is absent or exits non-zero. (Cheap by design — a few lines of output, not a file read; the Step 0.5 gate stays read-free.)
 
-**Plan shortcut:** if the session contains a just-approved plan covering this task, plan approval was the confirmation — omit the Confirm question from the Step 0.5 gate.
+**Plan shortcut:** if the session contains a just-approved plan covering this task **and that plan carries its own Verification / Acceptance section**, plan approval was the confirmation — omit the Confirm question from the Step 0.5 gate. Both halves are required: Confirm is the only place the derived verifications are shown, so omitting it on a plan that never stated an end state would ship a set the user has never seen — and with `--prod` or `--no-push` also pre-answering Ship, the gate would fall to zero questions.
 
-## Step 0.5 — Single gate: confirm + capture verifications + regression flag
+## Step 0.5 — Single gate: confirm the plan of record
 
 **Read-free step — do NOT read `custom-tests.yaml`, `test-commands.md`, or any reference file here.**
 
@@ -46,7 +46,7 @@ First write the **acceptance statement**: one sentence naming the end state in t
 - **A plan exists** (the current session has a just-approved plan with a *Verification* / *Acceptance* section): the plan's outcome is the acceptance statement.
 - **No plan** (e.g. `/code` invoked first thing in a fresh context): infer it from the task (`$ARGUMENTS`, with any flags already stripped) — the default fallback whenever no plan is in context.
 
-Then derive 2–3 **candidate verifications** *from that statement*. Each candidate must be a clause of the acceptance statement — never an independent thought about the diff. A plan's lines describe *how it's proven*; restate each as *what must hold* so it reads as a regression invariant.
+Then derive 2–3 **verifications** *from that statement*. Each must be a clause of the acceptance statement — never an independent thought about the diff. A plan's lines describe *how it's proven*; restate each as *what must hold* so it reads as a regression invariant.
 
 | Part of the acceptance statement | Type |
 |---|---|
@@ -54,31 +54,28 @@ Then derive 2–3 **candidate verifications** *from that statement*. Each candid
 | Each boundary the journey crosses (UI → API, API → stored data) | **Integration** |
 | Each surface the user acts on | **UX** |
 
-**The end-state candidate is not optional, and it is the one that proves the feature.** A set that checks every hop but not where the user lands passes while the journey dead-ends — a button that exists, is clickable, and leads nowhere. If no candidate covers the last step of the statement, the *set* is wrong; fix it before asking. This is the whole point of deriving from an acceptance statement rather than from the diff: the diff cannot tell you the journey has an end.
+**The end-state verification is not optional, and it is the one that proves the feature.** A set that checks every hop but not where the user lands passes while the journey dead-ends — a button that exists, is clickable, and leads nowhere. If nothing covers the last step of the statement, the *set* is wrong; fix it before asking. This is the whole point of deriving from an acceptance statement rather than from the diff: the diff cannot tell you the journey has an end.
 
-Then ask everything in **one AskUserQuestion call** (up to three questions) — one gate interaction instead of three sequential ones, so an AFK timeout costs 60 seconds once, not three times:
+**You derive the set — the user does not assemble it.** The gate states what will be verified and the free-text reply amends it; there is no pick-list, because choosing between checks you just derived is work the user should not have to do, and a picker invites dropping the end state one option at a time.
 
-1. **Confirm** (omit this question when the plan shortcut applies):
-   - question: "Ready to implement: $ARGUMENTS?"
+**No behavioral surface is the only exemption.** A task that changes nothing a user or caller can observe (docs, comments, a rename with no observable effect) derives an empty set — then say so **and name why** in the Confirm text, so an empty set is a visible claim rather than a silent omission. Anything that changes behavior has an end state; "no check came to mind" is not the same fact as "there is nothing to check".
+
+Then ask in **one AskUserQuestion call** (at most two questions) — one gate interaction, so an AFK timeout costs 60 seconds once for the whole run:
+
+1. **Confirm** (omit this question only when the plan shortcut applies):
+   - question: the plan of record, on its own lines —
+     ```
+     Done means: <the acceptance statement>.
+     Verifying: <assert> (E2E) · <assert> (Integration) · <assert> (UX)
+     Regression: <"resolved after implementation, from the paths actually changed" | "full — pinned by --regression" | "smart — pinned by --regression">
+     Proceed?
+     ```
+     With an empty set, the `Verifying:` line reads `nothing — <why this task has no behavioral surface>`. Leading with the end state is the point: this is the user's chance to correct the *goal*, which is cheap here and expensive after dev has built to the wrong one.
    - header: "Confirm"
    - options:
-     - label: "Yes, proceed (Recommended)" — description: "Start the full <PREFIX>-dev → <PREFIX>-qa → <PREFIX>-pm pipeline"
+     - label: "Yes, proceed (Recommended)" — description: "Run the full <PREFIX>-dev → <PREFIX>-qa → <PREFIX>-pm pipeline and verify exactly the checks above"
      - label: "No, cancel" — description: "Stop here, do not implement"
-2. **Verify**:
-   - question: "Done means: <the acceptance statement>. What proves it before this ships?" — leading with the end state is the point: it is the user's chance to correct the *goal*, which is cheap here and expensive after dev has built to the wrong one.
-   - header: "Verify"
-   - multiSelect: true
-   - options:
-     - one per derived candidate — label: a short tag (the endpoint/element + expected result); description: the full one-line verification followed by its type (`UX` / `Integration` / `E2E`). Order them so the **end-state (E2E) candidate is first** and pre-selected where the UI allows — it is the one that must not be dropped.
-     - a final option — label: "Nothing to verify"; description: "Refactor / docs / no behavior change"
-   - The automatic "Other" field lets the user type their own one-line verification, or a corrected acceptance statement — if the reply restates the goal rather than a check, treat it as the new acceptance statement and re-derive the candidates from it.
-3. **Regression**:
-   - question: "Run full regression after dev as well?"
-   - header: "Regression"
-   - options:
-     - label: "No (Recommended)" — description: "Smoke + this task's verifications + prior verifications for the same files"
-     - label: "Yes" — description: "Everything above + the full regression suite (all prior verifications + broad checks)"
-4. **Ship** (omit when `--prod` or `--no-push` already decided it):
+2. **Ship** (omit when `--prod` or `--no-push` already decided it):
    - question: "Ship after QA sign-off?"
    - header: "Ship"
    - options:
@@ -86,15 +83,24 @@ Then ask everything in **one AskUserQuestion call** (up to three questions) — 
      - label: "Hold at UAT" — description: "End committed but not pushed/deployed; ship later with --prod or by asking"
 
 Branch on the answers:
+- Confirm = **Yes** or **timeout** → the stated set is the set. Gate policy: reversible — proceed on the recommended defaults, **except Ship, whose timeout default is always Hold** (shipping needs a real answer; holding is free to reverse), labeled `auto-selected on timeout — not user-confirmed`. Silence is acceptance *only because the set was shown* — which is why the plan shortcut may never omit Confirm on a plan that stated no end state.
 - Confirm = **No, cancel** → tell the user it was cancelled and stop (discard the other answers).
-- Confirm = **Other / custom input** → incorporate the comment, restate the updated description, and re-ask the full gate once.
-- Timeout → Gate policy: reversible — proceed on the recommended defaults, **except Ship, whose timeout default is always Hold** (shipping needs a real answer; holding is free to reverse), labeled `auto-selected on timeout — not user-confirmed`.
+- Confirm = **Other / custom input** → read the reply as exactly one of the rows below. When it could be read two ways, take the **earliest** matching row: re-asking costs one interaction, building to the wrong end state costs a pipeline.
 
-For every Verify option the user selects (and any "Other" text), take the one-line verification and its `type` — already known for the proposed ones; for a custom line, infer `type` from the wording (**UX** (frontend only) · **Integration** (backend: endpoint or stored data) · **E2E** (a UI action with a backend effect)). Hold the `{assert, type}` pairs in context — **do not write or commit anything yet**. If only "Nothing to verify" is chosen (or nothing is selected), capture nothing and continue.
+| The free-text reply… | Do |
+|---|---|
+| restates the goal or the end state | it is the **new acceptance statement** — re-derive the whole set from it, restate, and re-ask the gate **once** |
+| names, replaces, or removes checks | amend the set, then proceed without re-asking. The end-state rule still binds: if the amendment leaves the last step of the statement uncovered, say so and put a check back |
+| names test scope ("run full regression", "smoke only") | pin `regression_mode` to it and proceed |
+| declines automated verification ("I'll verify live") | the UAT-only path below |
 
 **Honor the user's answer.** A free-text reply that declines automated verification ("I'll verify live", "I'll test by eye") is a decision: record this task as `UAT-only`, capture nothing, and skip Step 1.5 — do not persist synthesized entries against the user's stated intent.
 
-Capture the Regression answer as `regression_mode` = `smart` (No) or `full` (Yes). This answer **binds test scope downstream**: it is forwarded to `<PREFIX>-qa` and `<PREFIX>-test`, and neither may widen it (see `<PREFIX>-test` Rules — a full unit-suite re-run is not a permissible "superset").
+Hold the resulting `{assert, type}` pairs in context — **do not write or commit anything yet**. For a verification the user supplied in free text, infer `type` from the wording (**UX** (frontend only) · **Integration** (backend: endpoint or stored data) · **E2E** (a UI action with a backend effect)).
+
+**Regression scope is not asked here, and not decided here.** At this point <PREFIX>-dev has not run, so there is no changed-path list and any answer would be a guess about a diff that does not exist yet. Carry the value pinned by `--regression`, else the default `regression_mode: auto`:
+- `auto` authorizes `<PREFIX>-test` to resolve the scope **once**, from the paths dev actually changed (see `<PREFIX>-test` → *Regression scope*). The resolved value, and its reason, come back on the qa handoff's `Tests:` line.
+- A **pinned** value binds in **both directions** — nothing downstream may widen it and nothing may narrow it (see `<PREFIX>-test` Rules — a full unit-suite re-run is not a permissible "superset").
 
 Capture the Ship answer as `ship_mode` = `prod` (Ship) or `hold`. A user-answered **Ship** is standing consent for the close-out — but it is conditional, and the conditions are verified mechanically at Step 4: it collapses back to a fresh ask if the run wasn't clean.
 
@@ -122,7 +128,7 @@ A **parked** agent is the failure mode to watch for, because nothing announces i
 
 ## Step 1.5 — Persist captured verifications
 
-Run only if verifications were captured in Step 0.5 (not `skip`, not `UAT-only`) **and** <PREFIX>-dev finished — `Status: complete` or a salvaged completion (captured verifications must never be lost to an agent death). If dev blocked, skip — nothing is written.
+Run unless the task was recorded `UAT-only` or the derived set was empty (no behavioral surface) — and only once <PREFIX>-dev has finished — `Status: complete` or a salvaged completion (captured verifications must never be lost to an agent death). If dev blocked, skip — nothing is written.
 
 For each captured `{assert, type}`, append an entry to `.claude/skills/<PREFIX>-test/references/custom-tests.yaml`:
 - `name` — auto-slug from the verification
@@ -154,7 +160,7 @@ Task:
   subagent_type: <PREFIX>-qa
   prompt: |
     Run code review (<PREFIX>-review) and tests (<PREFIX>-test) for the most recent changes. mode=initial
-    regression_mode: <smart | full, from Step 0.5>
+    regression_mode: <auto | smart | full, from Step 0.5 — `auto` unless --regression pinned it>
     Done means: <the acceptance statement from Step 0.5> — walk it end to end and report where it
     actually lands. Green on the individual checks while the journey dead-ends is a `blocked`, not a
     sign-off; the assertions are evidence for the statement, never a substitute for it.
@@ -168,7 +174,7 @@ After <PREFIX>-qa returns, parse its `## Handoff` block:
   - **A non-prod env for that component exists** and the end state still wasn't walked → the gap is fixable and is being avoided. Do not offer the deferral. Say which journey cannot be walked and what is missing (usually seed data, auth, or a `stack:` block), and ask whether to build that or stop. **This is the only case that blocks.**
   - **No non-prod env is declared** (the component ships only to prod) → nothing was avoided; the project cannot prove this before shipping and never could. Carry the end-state check forward as `prod-walk: <verification name>` into Step 4 and continue. It is **not** discharged here and **not** handed to the user.
   - **The end state is triggered out-of-band** (a schedule, a webhook, an external callback) → it cannot be walked on demand at any point in this run. Defer it, but only with a **named trigger, expected observable, and where to look** (e.g. "next 03:00 run writes a summary row for yesterday; check the jobs collection"). A deferral without those three is not a deferral, it is a shrug — send it back rather than accepting it. Otherwise ask via AskUserQuestion: "QA is clean except these verifications no environment can run: `<UAT-deferred list with reasons>`. Defer to UAT and continue, or stop?" On **Defer** — carry `UAT-deferred: <names> (user-confirmed)` into the Step 3 pm prompt and continue. On timeout — reversible gate: continue, but carry `UAT-deferred: <names> (auto-accepted on timeout — not user-confirmed)`. On **Stop** — halt and report. Never re-spawn qa to relabel its handoff — the deferral status IS the sign-off vocabulary.
-- `Status: blocked` with code-fix `Notes:` → re-spawn <PREFIX>-dev with the fix request, then on dev complete re-spawn <PREFIX>-qa with `mode=retest` (review already passed, run tests only) — keep the same `regression_mode`. Repeat until signed-off or user aborts.
+- `Status: blocked` with code-fix `Notes:` → re-spawn <PREFIX>-dev with the fix request, then on dev complete re-spawn <PREFIX>-qa with `mode=retest` (review already passed, run tests only) — passing **the scope qa resolved on the first pass**, taken from its `Tests:` line, never `auto` again. Re-sending `auto` would let the scope flip mid-task, and the delivery log records one `regression=` value for the task. Repeat until signed-off or user aborts.
 
 ## Step 3 — Log & Docs (<PREFIX>-pm)
 
@@ -180,7 +186,7 @@ Task:
     Verify QA phases ran. Write delivery log via <PREFIX>-log. Update docs if architectural changes were made.
     Feature commit: <the dev Handoff `Commit:` hash — the delivery-log hash, not any later bookkeeping commit>
     UAT-deferred: <names + how confirmed, from Step 2 — omit line if none>
-    Decisions: regression=<smart|full> (<user|timeout>) · ship=<prod|hold> (<user|timeout>)<append ` · defer=accept (<user|timeout>)` when the Step 2 deferral gate ran>
+    Decisions: regression=<the scope qa resolved, smart|full> (<agent|user|timeout> — `agent` when Step 0.5 carried `auto`, `user` only when --regression pinned it) · ship=<prod|hold> (<user|timeout>)<append ` · defer=accept (<user|timeout>)` when the Step 2 deferral gate ran>
     Changed paths: <the dev Handoff `Files changed:` list>
 
     **QA-evidence:**
@@ -223,7 +229,7 @@ Runs on every completion, regardless of `ship_mode`.
 Report, in this order:
 1. The Step 5 scorecard — each fact with its evidence, any ✗ called out first.
 2. QA's `Evidence:` lines verbatim (verification traces, screenshot paths) — this is what lets the user skip re-testing.
-3. Anything auto-decided on a gate timeout, explicitly labeled.
+3. Anything auto-decided on a gate timeout, explicitly labeled — and, separately, anything the pipeline derived rather than asked (the regression scope when `regression_mode` was `auto`, with the reason from qa's `Tests:` line). Both are honest to report; neither may be described as the user's choice.
 4. UAT-deferred verifications as explicit follow-ups.
 5. If a serve-env was started in Step 1.7: it is still running, and where (`<url>`).
 6. If shipped (`ship_mode: prod`): "deployed to prod" only after `<PREFIX>-deploy` confirmed CI completion + health check. If held (`ship_mode: hold`): "held at UAT per your Ship answer — say ship (or re-run with `--prod`) when ready." If parked: state exactly what awaits your confirmation.
@@ -241,7 +247,7 @@ description: Investigate and fix a bug or performance issue through <PREFIX>-deb
 
 # Bug Fix
 
-**Usage:** `/fix <description>` — the Step 0.5 gate asks whether to ship after sign-off. `--prod` pre-answers Ship; `--no-push` pre-answers Hold and skips the close-out push.
+**Usage:** `/fix <description>` — the Step 0.5 gate states what will be verified and asks whether to ship after sign-off. `--prod` pre-answers Ship; `--no-push` pre-answers Hold and skips the close-out push; `--regression full|smart` pins the test scope that is otherwise resolved from the change itself.
 
 **Examples:**
 - `/fix pipeline table takes too long to load`
@@ -251,20 +257,20 @@ description: Investigate and fix a bug or performance issue through <PREFIX>-deb
 ## Gate policy (governs every AskUserQuestion in this command)
 
 If a question times out unanswered, split by risk:
-- **Reversible** (confirm, verification capture, regression flag, ship choice, UAT-defer): proceed with the recommended default and label every downstream record `auto-selected on timeout — not user-confirmed` (handoffs, delivery log, final report). **Never present a timeout as user consent** — not to a subagent, not in a log, not in the report.
+- **Reversible** (confirm, ship choice, UAT-defer): proceed with the recommended default and label every downstream record `auto-selected on timeout — not user-confirmed` (handoffs, delivery log, final report). **Never present a timeout as user consent** — not to a subagent, not in a log, not in the report.
 - **Irreversible** (prod deploy; any push that fires a prod CI deploy): **park** — do not proceed and do not decide. End the turn stating exactly what awaits confirmation and how to resume; on the user's next message, resume from the parked step. Park only after actually asking at the moment of the irreversible action — never skip the ask because an earlier, unrelated gate timed out; the user may have returned.
 
 ## Step 0 — Flags + entry hygiene
 
-**Flag parse (first):** if `$ARGUMENTS` contains `--prod`, set `ship_mode = prod`; if it contains `--no-push`, set `ship_mode = hold` and `no_push = true`. Strip both flags from the description used in every step below. If neither flag is present, `ship_mode` is decided by the Ship question in the Step 0.5 gate.
+**Flag parse (first):** if `$ARGUMENTS` contains `--prod`, set `ship_mode = prod`; if it contains `--no-push`, set `ship_mode = hold` and `no_push = true`. If it contains `--regression full` or `--regression smart`, pin `regression_mode` to that value. Strip every flag from the description used in every step below. If no ship flag is present, `ship_mode` is decided by the Ship question in the Step 0.5 gate; if no `--regression` flag is present, `regression_mode` is `auto` and the scope is resolved from the change itself (Step 0.5).
 
 **Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it in the close-out step — the pre-handoff gate blocks the qa spawn on any dirty tree, so deferring the stash just moves the failure mid-pipeline. If the WIP overlaps paths this task will touch, do not stash it blind — tell the user and run `/tidy` scoped to the overlapping paths first, then resume here.
 
 **Open deferrals:** run `python3 .claude/graph/graph.py open-deferrals` and, if it returns anything, list it for the user in one line — these are verifications that are still unproven and nothing has passed since: either an earlier task formally deferred them, or a run recorded them `blocked` (which is what the vacuous-pass rule mandates when the assertion never got exercised). A blocked row carries its `reason` — the trigger that would close it — so quote that, not just the name. Surfacing them here is the only point at which they resurface at all. Report, do not gate — **with one exception: if the same *fixable* blocker is named by 3+ open deferrals, or any single verification has been deferred 3+ times, say so and ask whether to fix the blocker first.** Repeated deferrals of that kind are not a backlog, they are one missing capability (usually a test environment) charging rent on every task that follows; five checks deferred across three deploys is how a feature ships unwalked. **Fixable means someone could build it** — seed data, an auth strategy, a `stack:` block, a missing non-prod env. A structural fact is not a blocker to escalate: a component that only ships to prod, or a journey that ends on a schedule, will produce deferrals forever and asking every third run is noise, not signal. Those are discharged by the post-deploy prod walk and by triggered follow-ups respectively — count them, never nag about them. Skip silently if the script is absent or exits non-zero. (Cheap by design — a few lines of output, not a file read; the Step 0.5 gate stays read-free.)
 
-**Plan shortcut:** if the session contains a just-approved plan covering this fix, plan approval was the confirmation — omit the Confirm question from the Step 0.5 gate.
+**Plan shortcut:** if the session contains a just-approved plan covering this fix **and that plan carries its own Verification / Acceptance section**, plan approval was the confirmation — omit the Confirm question from the Step 0.5 gate. Both halves are required: Confirm is the only place the derived verifications are shown, so omitting it on a plan that never stated an end state would ship a set the user has never seen — and with `--prod` or `--no-push` also pre-answering Ship, the gate would fall to zero questions.
 
-## Step 0.5 — Single gate: confirm + capture verifications + regression flag
+## Step 0.5 — Single gate: confirm the plan of record
 
 **Read-free step — do NOT read `custom-tests.yaml`, `test-commands.md`, or any reference file here.**
 
@@ -272,7 +278,7 @@ First write the **acceptance statement**: one sentence naming the end state in t
 - **A plan exists** (the current session has a just-approved plan with a *Verification* / *Acceptance* section): the plan's outcome is the acceptance statement.
 - **No plan** (e.g. `/fix` invoked first thing in a fresh context): infer it from the task (`$ARGUMENTS`, with any flags already stripped) — the default fallback whenever no plan is in context.
 
-Then derive 2–3 **candidate verifications** *from that statement*. Each candidate must be a clause of the acceptance statement — never an independent thought about the diff. A plan's lines describe *how it's proven*; restate each as *what must hold* so it reads as a regression invariant. (A bug's verification becomes its never-regress-again invariant.)
+Then derive 2–3 **verifications** *from that statement*. Each must be a clause of the acceptance statement — never an independent thought about the diff. A plan's lines describe *how it's proven*; restate each as *what must hold* so it reads as a regression invariant. (A bug's verification becomes its never-regress-again invariant.)
 
 | Part of the acceptance statement | Type |
 |---|---|
@@ -280,31 +286,28 @@ Then derive 2–3 **candidate verifications** *from that statement*. Each candid
 | Each boundary the journey crosses (UI → API, API → stored data) | **Integration** |
 | Each surface the user acts on | **UX** |
 
-**The end-state candidate is not optional, and it is the one that proves the fix.** A set that checks the repaired step but not where the user lands passes while the journey dead-ends — the reported symptom is gone and the feature still does not work. If no candidate covers the last step of the statement, the *set* is wrong; fix it before asking. This is the whole point of deriving from an acceptance statement rather than from the bug report: the report names where the journey broke, never where it should end.
+**The end-state verification is not optional, and it is the one that proves the fix.** A set that checks the repaired step but not where the user lands passes while the journey dead-ends — the reported symptom is gone and the feature still does not work. If nothing covers the last step of the statement, the *set* is wrong; fix it before asking. This is the whole point of deriving from an acceptance statement rather than from the bug report: the report names where the journey broke, never where it should end.
 
-Then ask everything in **one AskUserQuestion call** (up to three questions) — one gate interaction instead of three sequential ones, so an AFK timeout costs 60 seconds once, not three times:
+**You derive the set — the user does not assemble it.** The gate states what will be verified and the free-text reply amends it; there is no pick-list, because choosing between checks you just derived is work the user should not have to do, and a picker invites dropping the end state one option at a time.
 
-1. **Confirm** (omit this question when the plan shortcut applies):
-   - question: "Ready to investigate and fix: $ARGUMENTS?"
+**No behavioral surface is the only exemption.** A task that changes nothing a user or caller can observe (docs, comments, a rename with no observable effect) derives an empty set — then say so **and name why** in the Confirm text, so an empty set is a visible claim rather than a silent omission. Anything that changes behavior has an end state; "no check came to mind" is not the same fact as "there is nothing to check". A reported bug is behavior by definition, so an empty set here is nearly always wrong.
+
+Then ask in **one AskUserQuestion call** (at most two questions) — one gate interaction, so an AFK timeout costs 60 seconds once for the whole run:
+
+1. **Confirm** (omit this question only when the plan shortcut applies):
+   - question: the plan of record, on its own lines —
+     ```
+     Done means: <the acceptance statement>.
+     Verifying: <assert> (E2E) · <assert> (Integration) · <assert> (UX)
+     Regression: <"resolved after implementation, from the paths actually changed" | "full — pinned by --regression" | "smart — pinned by --regression">
+     Investigate and fix?
+     ```
+     With an empty set, the `Verifying:` line reads `nothing — <why this task has no behavioral surface>`. Leading with the end state is the point: this is the user's chance to correct the *goal*, which is cheap here and expensive after dev has built to the wrong one.
    - header: "Confirm"
    - options:
-     - label: "Yes, proceed (Recommended)" — description: "Run <PREFIX>-debug root cause analysis, then fix through the full pipeline"
+     - label: "Yes, proceed (Recommended)" — description: "Run <PREFIX>-debug root cause analysis, then fix through the full pipeline and verify exactly the checks above"
      - label: "No, cancel" — description: "Stop here, do not investigate"
-2. **Verify**:
-   - question: "Done means: <the acceptance statement>. What proves it before this ships?" — leading with the end state is the point: it is the user's chance to correct the *goal*, which is cheap here and expensive after dev has built to the wrong one.
-   - header: "Verify"
-   - multiSelect: true
-   - options:
-     - one per derived candidate — label: a short tag (the endpoint/element + expected result); description: the full one-line verification followed by its type (`UX` / `Integration` / `E2E`). Order them so the **end-state (E2E) candidate is first** and pre-selected where the UI allows — it is the one that must not be dropped.
-     - a final option — label: "Nothing to verify"; description: "Refactor / docs / no behavior change"
-   - The automatic "Other" field lets the user type their own one-line verification, or a corrected acceptance statement — if the reply restates the goal rather than a check, treat it as the new acceptance statement and re-derive the candidates from it.
-3. **Regression**:
-   - question: "Run full regression after dev as well?"
-   - header: "Regression"
-   - options:
-     - label: "No (Recommended)" — description: "Smoke + this task's verifications + prior verifications for the same files"
-     - label: "Yes" — description: "Everything above + the full regression suite (all prior verifications + broad checks)"
-4. **Ship** (omit when `--prod` or `--no-push` already decided it):
+2. **Ship** (omit when `--prod` or `--no-push` already decided it):
    - question: "Ship after QA sign-off?"
    - header: "Ship"
    - options:
@@ -312,15 +315,24 @@ Then ask everything in **one AskUserQuestion call** (up to three questions) — 
      - label: "Hold at UAT" — description: "End committed but not pushed/deployed; ship later with --prod or by asking"
 
 Branch on the answers:
+- Confirm = **Yes** or **timeout** → the stated set is the set. Gate policy: reversible — proceed on the recommended defaults, **except Ship, whose timeout default is always Hold** (shipping needs a real answer; holding is free to reverse), labeled `auto-selected on timeout — not user-confirmed`. Silence is acceptance *only because the set was shown* — which is why the plan shortcut may never omit Confirm on a plan that stated no end state.
 - Confirm = **No, cancel** → tell the user the fix was cancelled and stop (discard the other answers).
-- Confirm = **Other / custom input** → incorporate the comment, restate the updated description, and re-ask the full gate once.
-- Timeout → Gate policy: reversible — proceed on the recommended defaults, **except Ship, whose timeout default is always Hold** (shipping needs a real answer; holding is free to reverse), labeled `auto-selected on timeout — not user-confirmed`.
+- Confirm = **Other / custom input** → read the reply as exactly one of the rows below. When it could be read two ways, take the **earliest** matching row: re-asking costs one interaction, building to the wrong end state costs a pipeline.
 
-For every Verify option the user selects (and any "Other" text), take the one-line verification and its `type` — already known for the proposed ones; for a custom line, infer `type` from the wording (**UX** (frontend only) · **Integration** (backend: endpoint or stored data) · **E2E** (a UI action with a backend effect)). Hold the `{assert, type}` pairs in context — **do not write or commit anything yet**. If only "Nothing to verify" is chosen (or nothing is selected), capture nothing and continue.
+| The free-text reply… | Do |
+|---|---|
+| restates the goal or the end state | it is the **new acceptance statement** — re-derive the whole set from it, restate, and re-ask the gate **once** |
+| names, replaces, or removes checks | amend the set, then proceed without re-asking. The end-state rule still binds: if the amendment leaves the last step of the statement uncovered, say so and put a check back |
+| names test scope ("run full regression", "smoke only") | pin `regression_mode` to it and proceed |
+| declines automated verification ("I'll verify live") | the UAT-only path below |
 
 **Honor the user's answer.** A free-text reply that declines automated verification ("I'll verify live", "I'll test by eye") is a decision: record this task as `UAT-only`, capture nothing, and skip Step 2.5 — do not persist synthesized entries against the user's stated intent.
 
-Capture the Regression answer as `regression_mode` = `smart` (No) or `full` (Yes). This answer **binds test scope downstream**: it is forwarded to `<PREFIX>-qa` and `<PREFIX>-test`, and neither may widen it (see `<PREFIX>-test` Rules — a full unit-suite re-run is not a permissible "superset").
+Hold the resulting `{assert, type}` pairs in context — **do not write or commit anything yet**. For a verification the user supplied in free text, infer `type` from the wording (**UX** (frontend only) · **Integration** (backend: endpoint or stored data) · **E2E** (a UI action with a backend effect)).
+
+**Regression scope is not asked here, and not decided here.** At this point <PREFIX>-dev has not run, so there is no changed-path list and any answer would be a guess about a diff that does not exist yet. Carry the value pinned by `--regression`, else the default `regression_mode: auto`:
+- `auto` authorizes `<PREFIX>-test` to resolve the scope **once**, from the paths dev actually changed (see `<PREFIX>-test` → *Regression scope*). The resolved value, and its reason, come back on the qa handoff's `Tests:` line.
+- A **pinned** value binds in **both directions** — nothing downstream may widen it and nothing may narrow it (see `<PREFIX>-test` Rules — a full unit-suite re-run is not a permissible "superset").
 
 Capture the Ship answer as `ship_mode` = `prod` (Ship) or `hold`. A user-answered **Ship** is standing consent for the close-out — but it is conditional, and the conditions are verified mechanically at Step 5: it collapses back to a fresh ask if the run wasn't clean.
 
@@ -367,7 +379,7 @@ A **parked** agent is the failure mode to watch for, because nothing announces i
 
 ## Step 2.5 — Persist captured verifications
 
-Run only if verifications were captured in Step 0.5 (not `skip`, not `UAT-only`) **and** <PREFIX>-dev finished — `Status: complete` or a salvaged completion (captured verifications must never be lost to an agent death). If dev blocked, skip — nothing is written.
+Run unless the task was recorded `UAT-only` or the derived set was empty (no behavioral surface) — and only once <PREFIX>-dev has finished — `Status: complete` or a salvaged completion (captured verifications must never be lost to an agent death). If dev blocked, skip — nothing is written.
 
 For each captured `{assert, type}`, append an entry to `.claude/skills/<PREFIX>-test/references/custom-tests.yaml`:
 - `name` — auto-slug from the verification
@@ -399,7 +411,7 @@ Task:
   subagent_type: <PREFIX>-qa
   prompt: |
     Run code review (<PREFIX>-review) and tests (<PREFIX>-test) for the most recent changes. mode=initial
-    regression_mode: <smart | full, from Step 0.5>
+    regression_mode: <auto | smart | full, from Step 0.5 — `auto` unless --regression pinned it>
     Done means: <the acceptance statement from Step 0.5> — walk it end to end and report where it
     actually lands. Green on the individual checks while the journey dead-ends is a `blocked`, not a
     sign-off; the assertions are evidence for the statement, never a substitute for it. The original
@@ -416,7 +428,7 @@ After <PREFIX>-qa returns, parse its `## Handoff` block:
   - **The end state is triggered out-of-band** (a schedule, a webhook, an external callback) → it cannot be walked on demand at any point in this run. Defer it, but only with a **named trigger, expected observable, and where to look** (e.g. "next 03:00 run writes a summary row for yesterday; check the jobs collection"). A deferral without those three is not a deferral, it is a shrug — send it back rather than accepting it.
 
   Otherwise ask via AskUserQuestion: "QA is clean except these verifications no environment can run: `<UAT-deferred list with reasons>`. Defer to UAT and continue, or stop?" On **Defer** — carry `UAT-deferred: <names> (user-confirmed)` into the Step 4 pm prompt and continue. On timeout — reversible gate: continue, but carry `UAT-deferred: <names> (auto-accepted on timeout — not user-confirmed)`. On **Stop** — halt and report. Never re-spawn qa to relabel its handoff — the deferral status IS the sign-off vocabulary.
-- `Status: blocked` with code-fix `Notes:` → re-spawn <PREFIX>-dev with the fix request, then on dev complete re-spawn <PREFIX>-qa with `mode=retest` (review already passed, run tests only) — keep the same `regression_mode`. Repeat until signed-off or user aborts.
+- `Status: blocked` with code-fix `Notes:` → re-spawn <PREFIX>-dev with the fix request, then on dev complete re-spawn <PREFIX>-qa with `mode=retest` (review already passed, run tests only) — passing **the scope qa resolved on the first pass**, taken from its `Tests:` line, never `auto` again. Re-sending `auto` would let the scope flip mid-task, and the delivery log records one `regression=` value for the task. Repeat until signed-off or user aborts.
 
 ## Step 4 — Log & Docs (<PREFIX>-pm)
 
@@ -428,7 +440,7 @@ Task:
     Verify QA phases ran. Write delivery log via <PREFIX>-log. Update docs if architectural changes were made.
     Feature commit: <the dev Handoff `Commit:` hash — the delivery-log hash, not any later bookkeeping commit>
     UAT-deferred: <names + how confirmed, from Step 3 — omit line if none>
-    Decisions: regression=<smart|full> (<user|timeout>) · ship=<prod|hold> (<user|timeout>)<append ` · defer=accept (<user|timeout>)` when the Step 3 deferral gate ran>
+    Decisions: regression=<the scope qa resolved, smart|full> (<agent|user|timeout> — `agent` when Step 0.5 carried `auto`, `user` only when --regression pinned it) · ship=<prod|hold> (<user|timeout>)<append ` · defer=accept (<user|timeout>)` when the Step 3 deferral gate ran>
     Changed paths: <the dev Handoff `Files changed:` list>
 
     **QA-evidence:**
@@ -471,7 +483,7 @@ Runs on every completion, regardless of `ship_mode`.
 Report, in this order:
 1. The Step 6 scorecard — each fact with its evidence, any ✗ called out first.
 2. QA's `Evidence:` lines verbatim (verification traces, screenshot paths) — this is what lets the user skip re-testing.
-3. Anything auto-decided on a gate timeout, explicitly labeled.
+3. Anything auto-decided on a gate timeout, explicitly labeled — and, separately, anything the pipeline derived rather than asked (the regression scope when `regression_mode` was `auto`, with the reason from qa's `Tests:` line). Both are honest to report; neither may be described as the user's choice.
 4. UAT-deferred verifications as explicit follow-ups.
 5. If a serve-env was started in Step 2.7: it is still running, and where (`<url>`).
 6. If shipped (`ship_mode: prod`): "deployed to prod" only after `<PREFIX>-deploy` confirmed CI completion + health check. If held (`ship_mode: hold`): "held at UAT per your Ship answer — say ship (or re-run with `--prod`) when ready." If parked: state exactly what awaits your confirmation.
@@ -489,7 +501,7 @@ description: Autonomous multi-task run — decompose a goal into tasks, route ea
 
 # Pilot
 
-**Usage:** `/pilot <goal>` — a batch of work (e.g. open roadmap items matching a filter) or a target state to reach (improve an area until measurable criteria pass). Flags: `--max-tasks N` caps the run (default 10); `--prod` pre-answers Ship; `--no-push` pre-answers Hold and skips the close-out push; `--grant <unit>=<N>` (repeatable) pre-answers Budget for a metered lane.
+**Usage:** `/pilot <goal>` — a batch of work (e.g. open roadmap items matching a filter) or a target state to reach (improve an area until measurable criteria pass). Flags: `--max-tasks N` caps the run (default 10); `--prod` pre-answers Ship; `--no-push` pre-answers Hold and skips the close-out push; `--grant <unit>=<N>` (repeatable) pre-answers Budget for a metered lane; `--regression full|auto` opts the whole mission out of the fixed `smart` scope.
 
 **Examples:**
 - `/pilot implement all open roadmap items`
@@ -516,7 +528,7 @@ After the single Step 1 gate, the run is unattended until close-out:
 - **Target-state goal** ("improve X until Y"): derive 2–3 **success criteria** — measurable checks, each with a command or observable that decides pass/fail — then derive the initial tasks that most plausibly move toward them. The loop re-plans between tasks; the criteria, not the initial list, define done.
 - **Plain batch** (an explicit list of things to do): one task per item.
 
-Cap at `max_tasks`. For each task derive: a one-line description, an **acceptance statement** (the end state in the user's terms — where the journey lands, not what changes), 1–3 candidate verifications derived *from that statement* (`{assert, type}` — UX / Integration / E2E, same vocabulary and same mandatory end-state rule as `/code` Step 0.5), and a **lane**. The end-state check matters more here than anywhere: this lane runs unattended, so a task that ships a half-journey has no one present to notice it dead-ends.
+Cap at `max_tasks`. For each task derive: a one-line description, an **acceptance statement** (the end state in the user's terms — where the journey lands, not what changes), 1–3 verifications derived *from that statement* (`{assert, type}` — UX / Integration / E2E, same vocabulary and same mandatory end-state rule as `/code` Step 0.5), and a **lane**. The end-state check matters more here than anywhere: this lane runs unattended, so a task that ships a half-journey has no one present to notice it dead-ends.
 
 **Lane registry — discovered, not hardcoded.** Two lanes are always present:
 - `pipeline` — features, bug fixes, schema/API/auth changes, anything needing review depth. Default when unsure.
@@ -564,7 +576,7 @@ Discovered lanes are project-owned: this command knows how to *find and dispatch
 
 Be precise about what this enforces: the ledger governs **dispatch**, not consumption. `/pilot` decides whether to start another metered task; it cannot cap spend *inside* a task that is already running — the lane owns that, and a lane that under-reports its spend corrupts the ledger. State the granted units and the running balance in the progress line and the close-out, so an over-spend is visible even though it cannot be prevented here.
 
-Timeout → same risk split as the `/code` Gate policy: launch on the recommended defaults labeled `auto-selected on timeout — not user-confirmed`, **except Ship, whose timeout default is always Hold, and Budget, whose timeout default is always None** (an unattended run must not spend a resource nobody granted). Regression scope is fixed at `smart` for every task — a full regression per task would multiply cost across the mission; each task's QA already runs prior verifications for the files it touched.
+Timeout → same risk split as the `/code` Gate policy: launch on the recommended defaults labeled `auto-selected on timeout — not user-confirmed`, **except Ship, whose timeout default is always Hold, and Budget, whose timeout default is always None** (an unattended run must not spend a resource nobody granted). Regression scope is fixed at `smart` for every task unless `--regression` said otherwise — a full regression per task would multiply cost across the mission, and `auto` would escalate on evidence nobody is present to read; each task's QA already runs prior verifications for the files it touched. This is a deliberate asymmetry with `/code`/`/fix`, whose default is `auto`: there, a person sees the resolved scope and its reason.
 
 ## Step 2 — The loop
 
@@ -574,7 +586,7 @@ Work the task list in order until: tasks exhausted, all success criteria pass, o
 1. Spawn `<PREFIX>-dev` with the task + its verifications (`/code` Step 1 prompt shape). The salvage protocol and the no-top-level-edits rule apply verbatim.
 2. On `Status: complete`, persist the task's verifications exactly as `/code` Step 1.5 (single-quoted scalars, `paths` reduced to behavioral surface, `test:` commit). On `Status: blocked`, mark the task **failed** with dev's `Notes:` and go to (c).
 3. Ensure the verification stack as `/code` Step 1.7 — except on an unreachable env, don't ask: leave the affected verifications to report blocked and continue (they surface as deferrals below).
-4. Spawn `<PREFIX>-qa` `mode=initial`, `regression_mode: smart`, with the new verification names + changed paths. Branch on its handoff:
+4. Spawn `<PREFIX>-qa` `mode=initial`, `regression_mode:` the mission scope (`smart` unless `--regression` set it), with the new verification names + changed paths. Branch on its handoff:
    - `signed-off` → continue to 5.
    - `signed-off-with-deferrals` → **auto-accept** (no mid-run gate): carry `UAT-deferred: <names> (auto-accepted — pilot run, not user-confirmed)` into the pm prompt and the mission report, then continue to 5.
    - `blocked` with code-fix `Notes:` → re-spawn `<PREFIX>-dev` with the fix, then `<PREFIX>-qa` `mode=retest`. At most **2 fix cycles per task**; still blocked → mark the task **failed** with qa's notes. If the failure leaves the tree broken (smoke fails), `git revert` the task's commits before moving on. If later tasks depend on this one, stop the loop and go to Step 3.
@@ -756,6 +768,7 @@ description: Sanctioned lightweight lane for iterative work — pixel nudges, co
 Run when the user says done, or asks to push or deploy. (The `close-out-gate` hook blocks push and deploy until a delivery-log entry covers the burst — iterate freely, but nothing leaves the machine without this.)
 
 1. **Review the burst** — use the `<PREFIX>-review` skill on the accumulated diff since the last delivery-log entry. Fix non-source nits directly; a source finding that needs real review depth → route to `/fix`.
+1.5. **Walk the end state, once** — name the journey this burst was for and trace it end to end against the running stack, with shown evidence. Each tweak was verified inline where it landed; none of them proves the journey still arrives, and a burst of individually-correct nudges is exactly how a path breaks between its steps. If it does not arrive, that is a `/fix`, not a close-out note. (No `custom-tests.yaml` entry is captured here — this lane persists nothing; the walk is evidence in the log entry.)
 2. **Log** — one `<PREFIX>-log` entry covering the whole burst (name the commits it spans).
 3. **Docs + references** — use `<PREFIX>-docs` to check staleness; use `<PREFIX>-skill` for reference sync scoped to the affected skills.
 4. **Push + scorecard** — same close-out as `/code` Step 5: push policy via the `<PREFIX>-deploy` skill § Push policy (a push that fires prod CI is an irreversible gate — ask, park on timeout), then the verified scorecard (committed / pushed / logged / docs / ref-sync, each evidence-checked).

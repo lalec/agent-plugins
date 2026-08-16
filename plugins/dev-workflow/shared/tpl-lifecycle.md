@@ -80,12 +80,12 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
 
 - **Title** — short, plain English. Not the raw commit message — rephrase for a human skimming the log.
 - **Body** — 1–3 sentences. Add context beyond the title: *why* it was needed, *what problem* it solves, any non-obvious decisions.
-- **Tests** — be honest. "manual smoke" is a real test. Common values: `lint + type check (clean)`, `manual smoke in browser`, `E2E: <scenario>`, `none`. If a gate decision was auto-selected on a timeout, say so here — never record it as user-confirmed.
+- **Tests** — be honest. "manual smoke" is a real test. Common values: `lint + type check (clean)`, `manual smoke in browser`, `E2E: <scenario>`, `none`. If a gate decision was auto-selected on a timeout, say so here — never record it as user-confirmed. Same for a scope the pipeline derived rather than asked: when QA's handoff reports `regression=<value> (derived: <reason>)`, carry that reason here, so the log says *why* the run was as broad as it was.
 - **Skills** — only skills confirmed present in the marker union from Process step 3, separated by ` · `. Use `—` if none found; never reconstruct from memory. This field is the source of the delivery graph's `USED` edges, and it is the **only** record that a no-file-trace skill like `<PREFIX>-review` or `<PREFIX>-debug` ran — git cannot recover it, so an inaccurate list here is unrecoverable later.
 - **Deployed** — one line per component deployed this session, taken verbatim from the deploy-owning skill's report (e.g. `backend → test · https://test-api.example.com`). Omit the line entirely when no deploy happened.
 - **Addresses** — the `**Id:**` of each `docs/roadmap.md` item this task advances or closes, comma-separated (e.g. `verification-email-on-signup, stripe-receipt-sender`). This is the durable roadmap↔delivery link: without it the connection survives only as a status flip that nothing can trace back. Use the ids the pm step confirmed; omit the line when the task addresses no tracked item, and say so in the pm handoff rather than guessing an id.
 - **UAT-deferred** — verifications QA could not run in any environment, carried from the pipeline (e.g. `` `login-flow-e2e` (user-confirmed) ``). Backtick each verification name so it stays machine-readable. These are open follow-ups; omit the line when none.
-- **Decisions** — one term per gate that came up this task, as `<gate>=<value> (<how>)`, joined by ` · ` — e.g. `regression=smart (user) · ship=hold (timeout) · defer=accept (user)`. `<how>` is `user` (a real answer), `timeout` (a default taken on silence), or `pilot-auto` (decided autonomously mid-mission). A gate that was deliberately **not** decided is recorded as `<gate>=parked (human-gated)` — an autonomous lane may produce the evidence for a keep/ship verdict but never the verdict itself. **An unanswered gate is never recorded as decided, and a timeout or auto-decision is never recorded as `user`** — this line is the only durable record of whether a shipped change was actually consented to. Omit the line when no gate came up.
+- **Decisions** — one term per gate that came up this task, as `<gate>=<value> (<how>)`, joined by ` · ` — e.g. `regression=full (agent) · ship=hold (timeout) · defer=accept (user)`. `<how>` is `user` (a real answer), `timeout` (a default taken on silence), `agent` (derived by the pipeline from evidence rather than asked — the regression scope resolved from the changed paths is the standing case), or `pilot-auto` (decided autonomously mid-mission). A gate that was deliberately **not** decided is recorded as `<gate>=parked (human-gated)` — an autonomous lane may produce the evidence for a keep/ship verdict but never the verdict itself. **An unanswered gate is never recorded as decided, and a timeout or auto-decision is never recorded as `user`** — this line is the only durable record of whether a shipped change was actually consented to. Omit the line when no gate came up.
 - **Checklist** — one `skill — note` per skill whose reference files were updated. Omit the line entirely if nothing was updated.
 
 **The field set above is closed — do not invent new fields.** The delivery graph projects known fields and silently ignores unknown ones, so an invented field looks fine and contributes nothing. Work that is *left over* rather than *done* already has two homes: scope someone will pick up later belongs in `docs/roadmap.md` as its own item (the body sentence may name it), and a verification that could not be run belongs in `**UAT-deferred:**`. A field like `Follow-ups:` restating a roadmap item it already created is duplication, not a record. If a genuinely new field is needed, it must be added to this template, the `docs/workflow.md` template, and the upgrade checklist in the same change.
@@ -98,7 +98,7 @@ Required steps before writing the log entry:
 4. [ ] Body is 1–3 sentences, no `What:` label
 5. [ ] `Deployed:` line included when a deploy occurred this session (env + url sourced from the deploy-owning skill's report); omitted otherwise
 6. [ ] `Addresses:` carries the roadmap `**Id:**` the pm step confirmed, or the line is omitted — never a guessed id
-7. [ ] `Decisions:` records every answered gate with its true `user` / `timeout` / `pilot-auto` origin
+7. [ ] `Decisions:` records every gate that came up with its true `user` / `timeout` / `agent` / `pilot-auto` origin
 8. [ ] `Checklist:` line omitted when nothing was updated
 9. [ ] No field outside the closed set above — leftover scope went to `docs/roadmap.md`, unrunnable verifications to `UAT-deferred:`
 10. [ ] `docs/project-log.md` committed with `log: <short title>`
@@ -1413,7 +1413,9 @@ Testing authority for <PROJECT>. Runs three tiers — **Smoke** (always), **Func
 |---|---|---|
 | **Smoke** | `references/test-commands.md § Smoke` | Always, every invocation |
 | **Functional Feature** | `references/custom-tests.yaml` | This task's verifications always; prior verifications whose `paths:` intersect the changed paths named in the prompt |
-| **Regression** | `references/test-commands.md § Regression` + every `custom-tests.yaml` verification | Only when the caller passes `regression_mode: full` |
+| **Regression** | `references/test-commands.md § Regression` + every `custom-tests.yaml` verification | Only when the resolved scope is `full` — passed as `regression_mode: full`, or resolved from the change when the caller passes `auto` (see `references/custom-tests.md § Regression scope`) |
+
+**The end-state verification is non-negotiable.** Among this task's verifications, the one that asserts where the journey ends runs in **every** resolved scope including `smart`, on **every** invocation including `mode=retest`, and is never traded away for time. If its target is unreachable, it is reported `blocked` with a `reason` — never skipped, never quietly narrowed to the hop before it. A scope decision may change how much *else* runs; it may never decide whether the feature itself was proven.
 
 If the prompt names no changed paths and no new verifications (a bare smoke request), run Smoke only — plus Regression when `regression_mode: full`.
 
@@ -1425,16 +1427,17 @@ Always-run baseline: service/endpoint reachability + log check. Curl templates a
 
 ## Functional Feature Tests
 
-Per-task verifications captured up-front by `/code` and `/fix` and accumulated in `references/custom-tests.yaml`. This skill resolves *how* to verify each one at runtime — read `references/custom-tests.md` for the schema, the execution protocol (type → tool → pass criterion, including the UX/E2E screenshot rule), and the prior-selection rule before running this tier.
+Per-task verifications captured up-front by `/code` and `/fix` and accumulated in `references/custom-tests.yaml`. This skill resolves *how* to verify each one at runtime — read `references/custom-tests.md` for the schema, the execution protocol (type → tool → pass criterion, including the UX/E2E screenshot rule), the prior-selection rule, and — when the caller passes `regression_mode: auto` — the regression-scope rule, before running this tier.
 
 ## Regression
 
-Full broad suite — `references/test-commands.md § Regression` (hand-authored) plus every verification in `custom-tests.yaml`. Run only when the caller passes `regression_mode: full`. The hand-authored part holds broad invariants *not yet* captured per-task; retire a hand-authored flow only once a `custom-tests.yaml` entry covers that journey — don't duplicate a check that already runs as a typed verification.
+Full broad suite — `references/test-commands.md § Regression` (hand-authored) plus every verification in `custom-tests.yaml`. Run only when the resolved scope is `full`. The hand-authored part holds broad invariants *not yet* captured per-task; retire a hand-authored flow only once a `custom-tests.yaml` entry covers that journey — don't duplicate a check that already runs as a typed verification.
 
 ## Rules
 
 - Run tests after every significant change before closing the task.
 - **Never re-run domain unit/lint suites** — those are `<PREFIX>-dev`'s Quality Checklist gates, already run before handoff. This skill's tiers are Smoke, Functional Feature, and Regression only; a full unit suite is not an acceptable "superset" substitute for the selected tier set — it re-proves what dev proved and overrides the caller's `regression_mode`.
+- **`regression_mode: smart` and `full` are pinned — `auto` is the only one you decide.** A pinned value binds in both directions: never widen it, never narrow it. On `auto`, resolve the scope once per task from the paths actually changed (`references/custom-tests.md § Regression scope`) and **report the value you resolved plus the one-clause reason** — that report is what the caller puts on its `Tests:` line and the delivery log records as an agent-derived decision. An unreported resolution reads as if the caller chose it.
 - Never start automated actions against live targets without explicit user confirmation.
 - Use representative placeholder inputs for smoke tests; live/real targets require explicit opt-in.
 - In the `/code`/`/fix` pipeline this skill runs inside the `<PREFIX>-qa` subagent and **must not** ask the user interactively — resolve each verification deterministically; if a target cannot be resolved, report that verification as blocked rather than prompting. Interactive disambiguation is allowed only when this skill is invoked directly at top level (see `references/custom-tests.md`).
@@ -1444,7 +1447,7 @@ Full broad suite — `references/test-commands.md § Regression` (hand-authored)
 Verify before finishing any `<PREFIX>-test` invocation that touches API handlers or test infrastructure:
 - [ ] `references/test-commands.md` Smoke / Regression / Functional Feature Subjects match current handlers, endpoints, and run scripts
 - [ ] `references/custom-tests.yaml` verifications reflect current behavior; stale `type`/`paths` corrected
-- [ ] Every verification executed this invocation has its `last:` block written (including `blocked` ones)
+- [ ] Every verification executed this invocation has its `last:` block written (including `blocked` ones, each with its `reason`)
 - [ ] `references/custom-tests.md` execution protocol matches the types in use
 - [ ] `references/sync-checklist.md` trigger rules reflect current API surface and test tooling
 
@@ -1527,6 +1530,8 @@ tests:
     paths: ["<changed path/glob>"]   # from dev's `Files changed:` (minus .claude/**); drives prior-selection
     last:                            # written by this skill after every run it executes
       status: pass | fail | blocked  #   the outcome recorded in the Evidence trace
+      reason: '<why>'                #   REQUIRED on blocked (and on fail): what failed to occur,
+                                     #   or what would close it. Omit on pass
       commit: <sha7>                 #   HEAD at the moment it ran
       ts: YYYY-MM-DDTHH:MM:SSZ       #   UTC
 ```
@@ -1542,6 +1547,12 @@ break unquoted *and* double-quoted YAML. Single quotes survive all of those.
 has been blocked for six consecutive runs is indistinguishable from one that has never run. It
 records only the outcome, never the target. Absent on entries that have not run since the field
 was introduced — treat a missing `last` as "never run", not as a pass.
+
+`reason` is what makes a `blocked` row actionable: it is quoted back at the next `/code` or `/fix`
+Step 0 and rendered by `graph.py open-deferrals`, so a blocked entry without one surfaces as a name
+with no way to act on it — the reader learns a check is unproven and nothing about what would prove
+it. Name the trigger that would close it ("no non-prod env for the worker"; "no refresh was due
+during the run"), never a restatement of the assert. Single-quoted, same reason as `assert`.
 
 ## Execution (per verification, every run)
 
@@ -1581,10 +1592,11 @@ the observed result (HTTP status + relevant body fragment, or the screenshot pat
 → `pass | fail | blocked`. These lines flow into the qa handoff `Evidence:` field verbatim — they
 are what the user reads instead of re-testing, so concrete observations, not claims.
 
-**Record the outcome:** after running a verification, write its `last:` block (`status`, `commit`
-= `git rev-parse --short HEAD`, `ts` = UTC now) back to its `custom-tests.yaml` entry. Write it for
-every verification this run executed, including `blocked` ones — a blocked run is the outcome that
-most needs a history. Commit the file with `test: record verification outcomes`.
+**Record the outcome:** after running a verification, write its `last:` block (`status`, `reason`
+whenever the status is `blocked` or `fail`, `commit` = `git rev-parse --short HEAD`, `ts` = UTC now)
+back to its `custom-tests.yaml` entry. Write it for every verification this run executed, including
+`blocked` ones — a blocked run is the outcome that most needs a history, and it is the one that most
+needs its `reason`. Commit the file with `test: record verification outcomes`.
 
 **`pass` means the assertion was exercised and held — not that nothing went wrong.** If the
 condition the assertion is about never arose, the check did not run: it observed an absence, which
@@ -1610,6 +1622,39 @@ manual rule if the script is missing or exits non-zero.
 
 The rule it implements: include a prior verification when its stored `paths:` set intersects the
 changed-paths list passed by the caller. This task's own verifications always run.
+
+## Regression scope
+
+Only when the caller passes `regression_mode: auto`. A pinned `smart` or `full` is the caller's
+decision and binds in both directions — do not re-derive it, do not widen it, do not narrow it.
+
+`auto` is resolved **once per task**, from the paths `<PREFIX>-dev` actually changed. Deciding it
+here rather than at the gate is the whole point: at gate time the diff does not exist yet, so any
+answer would be a guess about a change nobody had made.
+
+```bash
+python3 .claude/graph/graph.py blast <changed paths…>
+```
+
+Escalate to `full` when either holds, else `smart`:
+- the changed paths are owned by **more than one skill** — a change that crosses ownership
+  boundaries can break something no single domain's checks cover;
+- any prior verification covering those paths has `last.status` of `fail` or `blocked` — the area
+  already has an unproven invariant, so this is the run that should re-prove it.
+
+**Fallback ladder**, in order, because the graph is an accelerator and never a gate:
+1. `graph.py blast` as above;
+2. script missing or non-zero → resolve owners by first match against `PATH_MAP` in
+   `<CONFIG_DIR>/hooks/governed-paths.conf`, and apply the same two-part test;
+3. neither available → `smart`, saying the derivation was unavailable.
+
+**Never default to `full` when the signal is missing.** A missing accelerator would then silently
+multiply the cost of every task, and the reason would read as evidence when it is the absence of
+evidence.
+
+Report the resolved value **and a one-clause reason** ("touches two owning skills"; "prior check
+`<name>` is blocked") back to the caller. Unreported, an escalation looks like the caller's own
+choice, and the delivery log records as `user` a decision no user made.
 
 ## Interactive fallback — top-level only
 

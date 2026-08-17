@@ -1,0 +1,21 @@
+{
+  "updated": "2026-08-10",
+  "currency": "USD",
+  "note": "List prices per million tokens, Anthropic first-party API. `cache` values are multipliers on the input price (5-minute vs 1-hour cache writes cost differently; reads are ~0.1x). `fast` is the fast-mode variant of a model, selected when a transcript records usage.speed == 'fast'. Models absent from this table are reported with their token counts and no cost, never a guessed one — add an entry here (or point $SECRETRUN_PRICES at your own copy) to price them. Claude Sonnet 5 carries an introductory $2/$10 through 2026-08-31; the standard rate is listed.",
+  "cache": {
+    "write_5m": 1.25,
+    "write_1h": 2.0,
+    "read": 0.1
+  },
+  "models": {
+    "claude-fable-5": { "in": 10, "out": 50 },
+    "claude-mythos-5": { "in": 10, "out": 50 },
+    "claude-opus-5": { "in": 5, "out": 25, "fast": { "in": 10, "out": 50 } },
+    "claude-opus-4-8": { "in": 5, "out": 25, "fast": { "in": 10, "out": 50 } },
+    "claude-opus-4-7": { "in": 5, "out": 25 },
+    "claude-opus-4-6": { "in": 5, "out": 25 },
+    "claude-sonnet-5": { "in": 3, "out": 15 },
+    "claude-sonnet-4-6": { "in": 3, "out": 15 },
+    "claude-haiku-4-5": { "in": 1, "out": 5 }
+  }
+}

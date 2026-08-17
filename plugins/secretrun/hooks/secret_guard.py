@@ -58,7 +58,9 @@ def _check(command):
     # 3) Reading the Claude transcript (plaintext history) with a file reader.
     if _TRANSCRIPT.search(command) and _READERS.search(command):
         _deny("reading ~/.claude/projects/** can pull previously-seen secrets "
-              "back into context. This path is off-limits.")
+              "back into context. This path is off-limits — use "
+              "`secretrun sessions` / `secretrun session <id>` for safe, redacted "
+              "session metadata, or `secretrun usage` for token counts and cost.")
 
     # 4) `secretrun add` with a value on the command line or piped in.
     if re.search(r"\bsecretrun\s+add\b", low):

@@ -12,7 +12,10 @@ THE GOTCHA THIS EXISTS TO PREVENT: Claude Code writes one transcript row per
 *content block*, and every row for a message carries the identical, complete
 `message.usage` for the whole message. Summing rows therefore multiplies the
 bill by blocks-per-message (2.3x on the run that set the original baseline).
-Always dedupe on `message.id` first. See IMPROVEMENTS.md.
+Always dedupe on `message.id` first, taking `max()` on `output_tokens` (rows carry
+a running partial, so the first row undercounts subagent output ~10x while looking
+plausible), and cut the window at the run boundary — session files accumulate
+every resume.
 """
 
 import glob

@@ -115,16 +115,81 @@ sibling `edr` plugin).
 5. **Daily use.** Nothing — the `using-secrets` skill auto-triggers and Claude runs
    `secretrun NAME -- cmd`.
 
+### MCP servers (no token in the config file)
+
+MCP server entries normally force a plaintext token into the config's `env`
+block. Instead, make `secretrun` the server's launcher — the MCP client starts
+it, it resolves the NAME, and the value exists only in the server process's env:
+
+```json
+{ "mcpServers": {
+    "brevo": {
+      "command": "/absolute/path/to/secretrun",
+      "args": ["BREVO_MCP_TOKEN", "--",
+               "npx", "mcp-remote", "https://mcp.brevo.com/v1/brevo/mcp",
+               "--header", "Authorization:Bearer ${BREVO_MCP_TOKEN}"]
+    }
+} }
+```
+
+Store the token once with `secretrun add BREVO_MCP_TOKEN` and drop the `env`
+block entirely. The pieces that make this work:
+
+- **Servers that read an env var** (the usual `"env": {"API_KEY": "…"}` case)
+  need nothing else: `secretrun API_KEY -- npx <server>` replaces the block.
+- **`${…}` placeholders in args** (the `mcp-remote --header` pattern) pass
+  through intact: Claude Code leaves an unset `${VAR}` as literal text (the
+  missing-variable warning in `claude mcp list` is expected), and Claude
+  Desktop does no expansion at all — so the placeholder reaches `mcp-remote`,
+  which interpolates it from the env secretrun injected. The value is never in
+  the config, in `claude`'s env, or in any argv.
+- **`command` must be an absolute path** (`which secretrun` in a session prints
+  it): MCP clients launch servers with the login environment, before the
+  plugin's SessionStart PATH hook applies.
+- The server's stdio passes through the masker line-by-line, so a token echoed
+  in an error reaches the model as `[REDACTED:NAME]`.
+
 ### CLI
 
 ```
 secretrun NAME [NAME...] [-b BACKEND] [--stdin NAME] -- cmd args...
 secretrun add NAME [-b BACKEND]     # hidden prompt (TTY) or macOS dialog (no TTY)
-secretrun ls  [-b BACKEND]          # list stored names (never values)
+secretrun ls  [-b BACKEND]          # list stored names (keychain: local index, no dump)
 secretrun rm  NAME [-b BACKEND]
+secretrun sync [-b BACKEND]         # rebuild keychain name index (only bulk keychain read)
 secretrun check                     # verify .secretrun.json entries resolve
+secretrun sessions [--all]          # list Claude sessions as redacted metadata
+secretrun session <id>              # one session's metadata (files, git, label)
+secretrun usage [--all] [--since D] # tokens + cost per session and model
 secretrun-admin doctor | harden --project|--global
 ```
+
+**Debugging sessions.** The hardening blocks raw reads of `~/.claude/projects/**`
+(transcripts are plaintext history that can pull previously-seen secret values
+back into context). `secretrun sessions` / `secretrun session <id>` are the
+sanctioned alternative: they read transcripts *inside the wrapper* and surface
+only structural metadata (id, cwd, timestamps, files touched, git commands) plus
+a shape-redacted one-line label — never raw message content. Same contract as
+`run`: the wrapper is the only process that touches the sensitive source, and it
+masks what it emits.
+
+**Token usage and cost.** `secretrun usage` answers "what did this cost?" from the
+same transcripts while emitting **numbers only** — no labels, no paths, no content,
+so it is strictly narrower than `sessions`. It reads each assistant turn's
+`usage` block (deduped by message id — Claude Code repeats the same usage on one
+record per content block), splits cache writes by TTL because 1-hour writes cost
+2× input vs 1.25× for 5-minute, and prices per model:
+
+```
+SESSION    LAST ACTIVE      MODEL             INPUT   OUTPUT  CACHE-W   CACHE-R   COST USD
+7ca3e1ee   2026-08-10 06:52 opus-5               43    26.5k   400.4k      6.5M       7.92
+```
+
+Prices are **data, never inferred**: `share/prices.json` (per-MTok list prices +
+cache multipliers, with a dated `updated` field printed in the footer). Override
+it with `$SECRETRUN_PRICES` or `~/.secretrun/prices.json`. A model missing from
+the table reports its tokens with a `—` cost and is named in the footer, so an
+out-of-date table shows up as a gap rather than a wrong number.
 
 Backends: `keychain` (default, macOS `security`), `aws` (Secrets Manager),
 `gcp` (Secret Manager). Pluggable via the resolver map in `bin/secretrun`.
@@ -139,6 +204,20 @@ empty trusted-app list:
 ```
 security add-generic-password -s secretrun -a NAME -T "" -w   # then enter value
 ```
+
+(Run `secretrun sync` afterward so `ls` picks up a secret stored this way.)
+
+### Listing without dumping the keychain
+
+`secretrun ls` reads a local **names-only** index (`~/.secretrun/keychain-names.json`;
+set `$SECRETRUN_HOME` to relocate) rather than enumerating the keychain — so it
+emits no `security dump-keychain`, the call endpoint EDR/DLP tools flag as bulk
+credential enumeration. `add`/`rm` keep the index current; it is bootstrapped once
+on first `ls`, and `secretrun sync` rebuilds it authoritatively (the only command
+that reads the keychain in bulk — run it after storing a secret outside secretrun).
+Secret **values are never written** to the index; names are not secret (the manifest
+already commits them). The `aws`/`gcp` backends list via their own APIs and are
+unaffected.
 
 ### Optional: sandbox
 

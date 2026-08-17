@@ -4,3 +4,6 @@ docs/
 # Python bytecode (shared/graph.py is executed during template validation)
 __pycache__/
 *.pyc
+
+# Per-plugin working backlogs — local notes, not public repo content
+IMPROVEMENTS.md

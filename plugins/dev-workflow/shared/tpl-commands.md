@@ -589,7 +589,11 @@ Work the task list in order until: tasks exhausted, all success criteria pass, o
 3. Ensure the verification stack as `/code` Step 1.7 — except on an unreachable env, don't ask: leave the affected verifications to report blocked and continue (they surface as deferrals below).
 4. Spawn `<PREFIX>-qa` `mode=initial`, `regression_mode:` the mission scope (`smart` unless `--regression` set it), with the new verification names + changed paths. Branch on its handoff:
    - `signed-off` → continue to 5.
-   - `signed-off-with-deferrals` → **auto-accept** (no mid-run gate): carry `UAT-deferred: <names> (auto-accepted — pilot run, not user-confirmed)` into the pm prompt and the mission report, then continue to 5.
+   - `signed-off-with-deferrals` → **auto-accept the deferral, but first route each deferred verification by declared project fact** — the same three branches as `/code` Step 2, read from `deploy-config.yaml`, not judged. Auto-accept means no mid-run *gate*; it does not mean every unrun check is equivalent:
+     - **A non-prod env exists and the end state still wasn't walked** → this is not a deferral, it is an unproven feature. Treat it exactly like `blocked`: re-spawn dev, spend a fix cycle, and if it still can't be walked mark the task **failed**. Never auto-accept this branch — an unattended run is the worst place to let a feature ship unwalked, because nobody is present to notice.
+     - **No non-prod env is declared** (the component ships only to prod) → carry it forward as `prod-walk: <verification name>` into Step 3(a) and walk it **after** the prod deploy. It is not discharged here.
+     - **The end state is triggered out-of-band** (schedule, webhook, external callback) → defer with a named trigger, expected observable, and where to look. Without those three it is not a deferral; send it back to qa's `Notes:` rather than accepting a shrug.
+     Carry `UAT-deferred: <names> (auto-accepted — pilot run, not user-confirmed)` into the pm prompt and the mission report for the branches that were genuinely deferred, then continue to 5.
    - `blocked` with code-fix `Notes:` → re-spawn `<PREFIX>-dev` with the fix, then `<PREFIX>-qa` `mode=retest`. At most **2 fix cycles per task**; still blocked → mark the task **failed** with qa's notes. If the failure leaves the tree broken (smoke fails), `git revert` the task's commits before moving on. If later tasks depend on this one, stop the loop and go to Step 3.
 5. Spawn `<PREFIX>-pm` with the feature commit, any UAT-deferred line, the changed paths, and the verbatim QA-evidence block (`/code` Step 3 prompt shape). Its `Decisions:` line carries the mission gate's answers plus anything decided inside the loop — every autonomous branch is labelled `(pilot-auto)`, never `(user)`; an auto-accepted deferral is `defer=accept (pilot-auto)`. The mission gate's own Ship answer keeps its true origin (`user` or `timeout`).
 
@@ -607,6 +611,8 @@ Work the task list in order until: tasks exhausted, all success criteria pass, o
 
 **(a) Deploy to prod** — only if `ship_mode = prod`. Invoke the `<PREFIX>-deploy` skill **here at the top level** with `target=prod`. Pass `preauth: user shipped at the mission gate` **only when all of these hold** — verified now, not assumed: every completed task is `signed-off` (no deferrals, no failed tasks), Ship was user-answered (not a timeout default), and the commits being shipped are exactly the reviewed set (nothing after the sign-offs except capture/log commits). Otherwise the skill gates normally — the user is often back by close-out; on no answer it returns `gate: unanswered — parked` → park per the `/code` Gate policy. If no `prod` env is declared or the user declines, report that and finish at UAT.
 
+**(a2) Prod walk** — run when Step 2 carried any `prod-walk:` items **and** (a) actually deployed. This is the only moment in the mission when a prod-only journey can be proven, so it is not optional: for each carried verification, walk its task's acceptance statement against the deployed prod system at the top level and update the entry's `last:` accordingly — a `pass` discharges it; a failure records `status: fail` with the reason and becomes a named follow-up in the report, never a silent close and never a mid-close-out fix round. Commit the outcomes with `test: record verification outcomes`. If (a) did not deploy — `ship_mode: hold`, no prod env, a declined or parked gate — the items stay deferred: say so explicitly, naming what would discharge them, rather than letting them read as accepted. Deploying to prod and then not walking the checks only prod can answer wastes the single opportunity the mission had to prove them.
+
 **(b) Push.** Skip if `no_push` or no remote is configured. Resolve via the `<PREFIX>-deploy` skill § Push policy: if pushing fires a prod CI deploy, pushing IS shipping — push only if (a) ran and its gate (or pre-authorization) approved; otherwise ask now (irreversible gate — park on silence). If push does not trigger prod, push now.
 
 **(c) Scorecard.** Verify each fact against reality — never echo handoff claims:
@@ -617,6 +623,7 @@ Work the task list in order until: tasks exhausted, all success criteria pass, o
 | Pushed | `git rev-list --count @{upstream}..HEAD` → 0, or "not pushed — <reason>" |
 | Deployed | curl the env url/health (2xx), or "no deployable env" / "held" |
 | Roadmap | roadmap-driven runs: item statuses flipped in `docs/roadmap.md` |
+| Prod walk | every `prod-walk:` item carried from Step 2 now has a `last:` written at the deployed commit — or the reason none ran. A carried item still showing the pre-deploy `blocked` is the failure this row exists to catch |
 | Ref sync | `Reference Sync:` fields from the handoffs |
 | Spend | per granted unit: `<spent>/<grant>` from the ledger, plus any lane closed on exhaustion |
 
@@ -628,7 +635,7 @@ Report, in this order:
 1. Goal outcome — met / partial / stopped — with success-criteria evidence if criteria were set.
 2. The task table: task · lane · status (`signed-off` / `deferred` / `failed` / `dropped` / `not-reached`) · commit · log entry.
 3. QA `Evidence:` lines per task, verbatim.
-4. Everything auto-decided, explicitly labeled: gate timeouts, auto-accepted deferrals, plan amendments.
+4. Everything auto-decided, explicitly labeled: gate timeouts, auto-accepted deferrals, plan amendments. State each deferral's route — walked at prod in (a2), or still open on a named out-of-band trigger — so "deferred" never covers two different facts.
 4b. **Parked decisions** — every human-gated verdict a lane produced, each with the evidence needed to answer it and where that evidence lives. These are the reason the user is reading this report; never fold them into the task table and never present one as decided. State the granted-vs-spent figure per unit here too, and name any lane closed on exhaustion.
 5. Failed and unreached tasks as follow-ups, with enough state to resume. On an `--items` mission, give the remaining set as `/pilot --items <id>,<id>` — the ids are permanent, so that line is exact and copy-pasteable; otherwise `/pilot <remaining goal>` re-derives the plan from the roadmap or criteria.
 6. Serve-envs still running and where (`<url>`).

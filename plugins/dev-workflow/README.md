@@ -13,19 +13,19 @@ A multi-agent delivery workflow for Claude Code. It runs your plan through a tea
 | Component | What it does |
 |---|---|
 | `myapp-dev` | **The builder.** Loads the right domain skills, writes the code, runs each skill's quality checks, deploys non-prod, syncs reference docs — then hands off a structured report, so QA always tests a live stack. |
-| `myapp-qa` | **The gatekeeper.** Reviews the code and runs the test tiers before signing off. Routes any required fix back to `myapp-dev` instead of patching it itself. |
+| `myapp-qa` | **The gatekeeper.** Reviews the code and runs the test tiers before signing off, then walks the end state itself — the check that proves the feature runs on every pass, including retests, and reports *blocked* with a reason rather than being skipped for time. Routes any required fix back to `myapp-dev` instead of patching it itself. |
 | `myapp-pm` | **The closer.** Confirms QA actually ran, ships prod when asked, writes the delivery log, refreshes docs, and advances the roadmap — the audit trail writes itself. |
 | 8 lifecycle skills | `log`, `review`, `debug`, `deploy`, `test`, `skill`, `docs`, `graph` — one per delivery concern, shared by every agent. |
 | Delivery graph | `myapp-graph` turns the records you already keep — the delivery log, captured verifications, path ownership, deploy config, git — into a typed edge index the agents query instead of re-reading files. Answers "what verifies this file", "what shipped here", "which deferrals are still open", "which roadmap items relate to these paths". Derived and disposable: rebuilt from scratch in under a second, and every caller falls back to its old behaviour if it's missing. |
 | Domain skills | One per source directory, generated from your actual structure. Each owns its paths, carries reference docs, and defines the lint/type/test checks `myapp-dev` runs before deploy — and improves itself as the code evolves. |
 | 9 hooks | Make the workflow self-enforcing: skills must load before edits, bad installs are blocked, handoffs are gated, ref-sync drift is flagged, and nothing pushes without a delivery-log close-out. |
-| `/code`, `/fix` | Drive the full pipeline (dev → qa → pm) from one line — confirm, capture verifications, auto-retest after fixes, then close out with a push + evidence-backed scorecard. Add `--prod` to ship after sign-off, `--no-push` to keep it local. |
-| `/pilot` | The autonomous multi-task lane — feed it a goal (a roadmap batch, or "improve X until Y"), confirm the mission plan once, and it works task after task unattended: each routed to the full pipeline or the tweak lane, with one batched close-out and a full mission report at the end. |
+| `/code`, `/fix` | Drive the full pipeline (dev → qa → pm) from one line — one gate that *states* what done means and what will prove it, auto-retest after fixes, then close out with a push + evidence-backed scorecard. Add `--prod` to ship after sign-off, `--no-push` to keep it local, `--regression full` to force the broad suite. |
+| `/pilot` | The autonomous multi-task lane — feed it a goal (a roadmap batch, or "improve X until Y"), confirm the mission plan once, and it works task after task unattended: each routed to the full pipeline or the tweak lane, with one batched close-out and a full mission report at the end. A check that only production can answer is carried through the deploy and walked on the other side, so unattended never means unproven. |
 | `/tweak` | The sanctioned lightweight lane for iterative rounds — pixel nudges, copy, small hotfixes — verified inline (screenshots/curl), with one batched close-out enforced at push time. |
 | `/revert` | Sanctioned rollback: `git revert` (never reset), scoped re-verification, and a logged reversal. |
 | `/tidy` | Resolve leftover WIP — sweeps the dirty tree, stashes, worktrees and stale branches, probes git history to establish what each item actually *is* (superseded ≠ accidental), then routes every one to commit / deliver / discard / ignore. |
 | `/design` | Generate 2–3 HTML variants, open them in the browser, route the winner to `/code` *(if a design skill is present)*. |
-| `/roadmap` | Rank open roadmap items by priority and pick the next thing to work on. |
+| `/roadmap` | The way in from tracked work. Ranks the open items, then either runs the top ones as a `/pilot` mission or starts a single one through the full pipeline — so a morning's worth of roadmap is one decision instead of one gate per item. |
 | `/wrap` | Close out ad-hoc work done outside `/code`/`/fix` — reviews the diff when source changed, runs `myapp-log` + `myapp-docs` + `myapp-skill` reference sync, then pushes per the deploy skill's push policy with a verified scorecard (`--no-push` to skip). |
 | Living docs | `docs/roadmap.md` (open scope), `docs/project-log.md` (delivery history), `docs/workflow.md` (pipeline map) — all kept current by the agents. |
 
@@ -86,6 +86,8 @@ The upgrade is idempotent. It captures your existing prefix and skills, presents
 ```
 Runs: `myapp-dev` → `myapp-qa` → `myapp-pm`
 
+One gate up front, and it tells you rather than asks: here is what *done* means, here are the checks that will prove it, ship after sign-off or hold? Type into the free-text field to correct the goal, swap a check, or say you'll verify it live — otherwise silence is agreement.
+
 ### Fix a bug
 ```
 /fix <describe the bug or regression>
@@ -97,6 +99,8 @@ Runs: `myapp-debug` → `myapp-dev` → `myapp-qa` → `myapp-pm`
 /pilot <goal — e.g. implement all open roadmap items, or improve an area until measurable criteria pass>
 ```
 Decomposes the goal into tasks, asks one up-front gate (confirm plan + ship policy), then works unattended: each task routed to the full pipeline or the tweak lane, per-task delivery-log entries, no mid-run questions. Prod deploy and push happen only at the single close-out, gated as usual. `--max-tasks N` caps the run; ends with a mission report of every task, its status, and its evidence.
+
+Anything QA couldn't run is sorted rather than waved through: a check a local environment *could* have run sends the task back for another fix round, a prod-only check is walked right after the deploy, and only a check waiting on an outside trigger is deferred — with the trigger named, so you know what would close it.
 
 ### Iterate on something small
 ```
@@ -122,11 +126,12 @@ Sweeps uncommitted changes, stashes, worktrees and stale branches, then investig
 ```
 Generates 2–3 HTML variants, opens in browser, routes chosen direction to `/code`.
 
-### Pick the next roadmap item
+### Work the roadmap
 ```
 /roadmap
+/roadmap high priority --max-tasks 4
 ```
-Reads `docs/roadmap.md`, ranks by priority, presents top 3, routes to `/code` or `/fix`.
+Ranks the open items — priority first, then dependency order so nothing runs before the thing it needs, then category — and offers two ways forward: hand the top set to `/pilot` as one unattended mission, or start a single item through `/code`/`/fix` with its own gate. A filter narrows the set before ranking. Only the selecting happens here; the run limits, retries and budget all belong to `/pilot`.
 
 ### Wrap up ad-hoc work
 ```
@@ -136,18 +141,32 @@ Close-out for changes made outside the `/code`/`/fix` pipelines — manual data 
 
 ---
 
+## What gets verified
+
+You describe the outcome; the workflow works out what would prove it. Each task states one sentence of *done* — where the user ends up, not what changed — and derives its checks as clauses of that sentence. They're kept as plain assertions and re-run against the live stack every time they're relevant, so a route change can't quietly make one stale.
+
+| | |
+|---|---|
+| **Who writes them** | The agents, from the stated outcome. You correct them at the gate if they're wrong — you never assemble them from a list. |
+| **What always runs** | Smoke, this task's checks, and any earlier check covering the same files. The end-state one is never traded away for time. |
+| **How wide it goes** | Decided after the code is written, from what actually changed: a change crossing two domains, or landing where a check is already failing, pulls in the full suite. `--regression full` forces it. |
+| **When it can't run** | Recorded *blocked*, with the reason and what would close it — never as a pass. A check whose condition never arose didn't pass; it didn't run. |
+| **What reopens** | Anything still unproven resurfaces at the start of the next `/code` or `/fix` in that repo, so a deferral has to be closed rather than forgotten. |
+
+---
+
 ## How the hooks enforce correctness
 
 | Hook | Fires on | Blocks if |
 |---|---|---|
-| `skill-guard.sh` | Edit / Write | Editing an owned path without the owning skill loaded (markers scoped per agent) |
+| `skill-guard.sh` | Edit / Write | Editing an owned path without the owning skill loaded (markers scoped per session, so a skill loaded inside a subagent still counts) |
 | `path-coverage-check.sh` | Write | New file in a governed root with no matching PATH_MAP entry |
 | `dependency-guard.sh` | Bash | `pnpm add` / `pip install` without `myapp-skill` loaded |
 | `package-edit-guard.sh` | Edit | Adding packages to `package.json` directly without `myapp-skill` |
 | `pre-handoff-check.sh` | Skill + Task/Agent | Invoking or spawning `myapp-qa` with uncommitted changes, lint errors, or type errors |
 | `close-out-gate.sh` | Bash | `git push` while commits since the last delivery-log entry touch governed/deploy paths (`CLOSEOUT_OVERRIDE=1` escape hatch) |
 | `ref-sync-check.sh` | Bash (post) | Warns after commit on reference-worthy drift — structural changes or `REF_WATCH` matches — without reference updates, or deploy-mechanism drift without `deploy-config.yaml` updates. Path patterns sourced from `governed-paths.conf`. |
-| `skill-mark.sh` | Skill (post) | Records loaded skills to an agent-scoped session marker (used by all guards) |
+| `skill-mark.sh` | Skill (post) | Records loaded skills to a session-scoped marker (used by all guards, and by `myapp-log` to fill the delivery log's skills line) |
 | `post-commit.sh` | Bash (post) | Reminds to run `myapp-log` after every commit |
 
 All path→skill ownership lives in one file: `.claude/hooks/governed-paths.conf`. Edit there to add or change ownership — hooks pick it up automatically.

@@ -13,7 +13,7 @@ A multi-agent delivery workflow for Claude Code. It runs your plan through a tea
 | Component | What it does |
 |---|---|
 | `myapp-dev` | **The builder.** Loads the right domain skills, writes the code, runs each skill's quality checks, deploys non-prod, syncs reference docs — then hands off a structured report, so QA always tests a live stack. |
-| `myapp-qa` | **The gatekeeper.** Reviews the code and runs the test tiers before signing off, then walks the end state itself — the check that proves the feature runs on every pass, including retests, and reports *blocked* with a reason rather than being skipped for time. Routes any required fix back to `myapp-dev` instead of patching it itself. |
+| `myapp-qa` | **The gatekeeper.** Reviews the code and runs the test tiers before signing off, then walks the end state itself — the check that proves the feature runs on every pass, including retests, and reports *blocked* with a reason rather than being skipped for time. A UI change that stands up a second way to do something your app already does comes back as a finding rather than a sign-off. Routes any required fix back to `myapp-dev` instead of patching it itself. |
 | `myapp-pm` | **The closer.** Confirms QA actually ran, ships prod when asked, writes the delivery log, refreshes docs, and advances the roadmap — the audit trail writes itself. |
 | 8 lifecycle skills | `log`, `review`, `debug`, `deploy`, `test`, `skill`, `docs`, `graph` — one per delivery concern, shared by every agent. |
 | Delivery graph | `myapp-graph` turns the records you already keep — the delivery log, captured verifications, path ownership, deploy config, git — into a typed edge index the agents query instead of re-reading files. Answers "what verifies this file", "what shipped here", "which deferrals are still open", "which roadmap items relate to these paths". The index is derived and disposable — rebuilt from scratch in under a second, gitignored, and every caller falls back to its old behaviour if it's missing; the script itself is committed, so a clean-up can't quietly remove the thing all those fallbacks are hiding the absence of. Rebuilding also warns about roadmap items it couldn't index, which is how a malformed entry stops being invisible. |
@@ -24,7 +24,7 @@ A multi-agent delivery workflow for Claude Code. It runs your plan through a tea
 | `/tweak` | The sanctioned lightweight lane for iterative rounds — pixel nudges, copy, small hotfixes — verified inline (screenshots/curl), with one batched close-out enforced at push time. |
 | `/revert` | Sanctioned rollback: `git revert` (never reset), scoped re-verification, and a logged reversal. |
 | `/tidy` | Resolve leftover WIP — sweeps the dirty tree, stashes, worktrees and stale branches, probes git history to establish what each item actually *is* (superseded ≠ accidental), then routes every one to commit / deliver / discard / ignore. |
-| `/design` | Generate 2–3 HTML variants, open them in the browser, route the winner to `/code` *(if a design skill is present)*. |
+| `/design` | Generate 2–3 HTML variants, open them in the browser, route the winner to `/code`. Each one is held to how your app already does things — the existing pattern is looked up before a new one is proposed, and icons come from your icon set or a generation skill rather than being drawn by hand *(if a design skill is present)*. |
 | `/roadmap` | The way in from tracked work. Ranks the open items, then either runs the top ones as a `/pilot` mission or starts a single one through the full pipeline — so a morning's worth of roadmap is one decision instead of one gate per item. |
 | `/wrap` | Close out ad-hoc work done outside `/code`/`/fix` — reviews the diff when source changed, runs `myapp-log` + `myapp-docs` + `myapp-skill` reference sync, then pushes per the deploy skill's push policy with a verified scorecard (`--no-push` to skip). |
 | Living docs | `docs/roadmap.md` (open scope), `docs/project-log.md` (delivery history), `docs/workflow.md` (pipeline map) — all kept current by the agents. |
@@ -40,6 +40,7 @@ A multi-agent delivery workflow for Claude Code. It runs your plan through a tea
 - [`agent-browser`](https://github.com/vercel-labs/agent-browser) plugin installed — used by `<PREFIX>-test` for E2E browser automation
 - [`skill-creator`](https://github.com/anthropics/skills/tree/main/skills/skill-creator) skill installed — used by `<PREFIX>-skill` to author and update skills
 - [`ui-ux-pro-max`](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) skill installed — used by `<PREFIX>-design` for design intelligence (styles, palettes, font pairings, design-system generation) *(conditional: only if a design skill is installed; can be replaced with any design skill — update the reference in `<PREFIX>-design/SKILL.md` after install)*
+- `visual-assets` skill installed, with `GEMINI_API_KEY` exported — used by `<PREFIX>-design` to generate icons and artwork at the exact size a platform needs, so a new icon sits in the same family as the ones beside it *(conditional: only if a design skill is installed; can be replaced with any image-generation skill — update the reference in `<PREFIX>-design/SKILL.md` after install)*
 
 ---
 
@@ -125,6 +126,8 @@ Sweeps uncommitted changes, stashes, worktrees and stale branches, then investig
 /design <describe the UI to design>
 ```
 Generates 2–3 HTML variants, opens in browser, routes chosen direction to `/code`.
+
+Before anything is proposed, `myapp-design` looks at how your app already handles what you're asking for — the confirm dialog it already has, the empty state it already shows — and either matches it, migrates the older ones to the better form, or records why this one deliberately differs. That record grows with the app, so the next person to touch a surface starts where the last one left off instead of inventing a second answer. Icons work from the same principle: your icon set wins when it has one, and when it doesn't, the asset skill generates one from your palette with the neighbouring icons as reference. Nothing is drawn by hand — an icon composed from a description comes out logically right and graphically wrong.
 
 ### Work the roadmap
 ```

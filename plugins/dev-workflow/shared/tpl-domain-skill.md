@@ -159,12 +159,12 @@ Example `<REFERENCES_LIST>` for the same skill:
 
 Substitute into `<DESIGN_DELEGATION>` in the Domain skill stub **only** for the skill that owns the Frontend category, and **only when** a `<PREFIX>-design` skill exists in this install. Otherwise replace `<DESIGN_DELEGATION>` with an empty string (drop the placeholder line entirely).
 
-Substitute `<PREFIX>` before insertion. This block enforces that visual decisions are made by `<PREFIX>-design` rather than re-invented inside the frontend skill (the gap that lets agents hard-code hex values into CSS files the frontend owns).
+Substitute `<PREFIX>` before insertion. This block enforces that visual **and** interaction decisions are made by `<PREFIX>-design` rather than re-invented inside the frontend skill — the gap that lets agents hard-code hex values into CSS files the frontend owns, stand up a second dialog pattern beside the one the app already has, or draw an icon from a description.
 
 ~~~markdown
 ## Visual Decisions — Delegate to <PREFIX>-design
 
-`<PREFIX>-design` is the single authority for visual values. Before this skill declares CSS custom properties, picks colors/gradients, chooses fonts, or adjusts spacing/radius/shadow scales, **invoke `<PREFIX>-design`** and read `references/design-tokens.md`.
+`<PREFIX>-design` is the single authority for visual values, interaction patterns, and icons. Before this skill declares CSS custom properties, picks colors/gradients, chooses fonts, adjusts spacing/radius/shadow scales, adds a user-facing surface, or adds an icon, **invoke `<PREFIX>-design`** and read `references/design-tokens.md` + `references/ux-patterns.md`.
 
 Specifically — invoke `<PREFIX>-design` first when about to:
 - Add or modify any `--color-*`, `--font-*`, `--space-*`, `--radius-*`, `--shadow-*` (or similar) custom property
@@ -172,8 +172,12 @@ Specifically — invoke `<PREFIX>-design` first when about to:
 - Define or tweak a gradient
 - Pick a font family, weight, or size
 - Introduce a new visual surface (card, panel, modal background)
+- Add or change a **user-facing surface or interaction pattern** — a dialog, an empty state, a loading state, inline validation, a toast, a nav entry, where the primary action sits
+- Add, replace, or restyle an **icon**
 
-This skill's job is to **apply** tokens defined by `<PREFIX>-design`, not to invent them. If the value already exists in `design-tokens.md`, reference it via `var(--token-name)`. If it doesn't, stop — invoke `<PREFIX>-design` to define it (which adds it to the tokens file), then return here to apply it.
+This skill's job is to **apply** what `<PREFIX>-design` decides, not to invent it. If the value already exists in `design-tokens.md`, reference it via `var(--token-name)`. If it doesn't, stop — invoke `<PREFIX>-design` to define it (which adds it to the tokens file), then return here to apply it.
+
+The same holds for behavior: apply the verdict the design skill's consistency sweep returned (match / migrate / diverge) and never introduce a second way to do something this app already does. Icons come from the project's declared icon set or the asset skill `<PREFIX>-design` names — this skill never authors icon geometry and never substitutes an emoji for one.
 
 ~~~
 

@@ -109,10 +109,10 @@ The IaC, CI/CD, Build tooling, and Deployment scripts/config categories are owne
 
 A category may belong to multiple skills if it spans them (e.g. Auth shared between FE/BE) — record it under each owning skill. Single-component projects collapse to fewer skills (FE-only → just `<PREFIX>-frontend`; the deploy capability is always provided by the `<PREFIX>-deploy` lifecycle skill).
 
-**Design skill rule:** If the Frontend category is present, also propose a `<PREFIX>-design` skill. This is always separate from the frontend skill — the frontend skill owns files, the design skill owns visual decisions (palette, tokens, typography). Enforcement is two-pronged:
+**Design skill rule:** If the Frontend category is present, also propose a `<PREFIX>-design` skill. This is always separate from the frontend skill — the frontend skill owns files, the design skill owns visual values (palette, tokens, typography), interaction patterns across the whole app, and icon sourcing. Enforcement is two-pronged:
 
 1. **Mechanical (path-based)** — the design skill owns specific design token files (e.g. `^src/tokens\.css$`, `^src/theme\.css$`, `^app/styles/theme\.css$`) — list those before the frontend catch-all in `PATH_MAP` so they take priority. If no dedicated token file exists in the project, **propose creating one** at a sensible location for the stack (e.g. `<frontend-root>/tokens.css` for plain HTML/CSS, `app/styles/tokens.css` for Next.js, `src/styles/tokens.css` for Vite/Astro). Confirm location with user. If the user declines, `<PREFIX>-design` gets no `PATH_MAP` entry — mechanical enforcement is impossible and the install relies on instructional enforcement only.
-2. **Instructional (skill-internal delegation)** — always required. The skill that owns the Frontend category receives the `<DESIGN_DELEGATION>` block (see `../../shared/tpl-domain-skill.md § Design delegation block`) wired in Phase 3a step 1. This block forbids the frontend skill from inventing CSS custom properties, colors, gradients, or typography, and routes all such decisions to `<PREFIX>-design`. This survives even when no dedicated token file exists.
+2. **Instructional (skill-internal delegation)** — always required. The skill that owns the Frontend category receives the `<DESIGN_DELEGATION>` block (see `../../shared/tpl-domain-skill.md § Design delegation block`) wired in Phase 3a step 1. This block forbids the frontend skill from inventing CSS custom properties, colors, gradients, or typography, from standing up a second interaction pattern beside one the app already has, and from authoring icon artwork — routing all of it to `<PREFIX>-design`. This survives even when no dedicated token file exists, and it is the only enforcement patterns and icons get, since neither lives in a single file a `PATH_MAP` entry could guard.
 
 Present the confirmation summary and **wait for user confirmation before creating anything**. The output must:
 - Open with a `---` horizontal rule on its own line, followed by a blank line before `Project:`
@@ -193,7 +193,7 @@ Create these files (skip if already present, offer to overwrite if stale):
 .claude/skills/<PREFIX>-docs/SKILL.md
 .claude/skills/<PREFIX>-graph/SKILL.md        ← from tpl-lifecycle.md § tosk-graph; also create references/graph-schema.md
 .claude/graph/graph.py                        ← copy ../../shared/graph.py VERBATIM — no substitution (it glob-discovers skill dirs), so it stays byte-identical across projects and diffs cleanly on upgrade
-.claude/skills/<PREFIX>-design/SKILL.md       ← only if a frontend/website domain skill was confirmed in Phase 1c; also create references/design-tokens.md stub
+.claude/skills/<PREFIX>-design/SKILL.md       ← only if a frontend/website domain skill was confirmed in Phase 1c; also create references/design-tokens.md and references/ux-patterns.md stubs
 .claude/commands/code.md          ← from tpl-commands.md § /code, substitute <PROJECT> and <PREFIX>
 .claude/commands/fix.md           ← from tpl-commands.md § /fix, substitute <PROJECT> and <PREFIX>
 .claude/commands/pilot.md         ← from tpl-commands.md § /pilot, substitute <PROJECT> and <PREFIX>
@@ -204,6 +204,10 @@ Create these files (skip if already present, offer to overwrite if stale):
 .claude/commands/wrap.md          ← from tpl-commands.md § /wrap, substitute <PROJECT> and <PREFIX>
 .claude/commands/design.md        ← from tpl-commands.md § /design (only if a design domain skill was discovered in Phase 1)
 ```
+
+### Seed `<PREFIX>-design/references/ux-patterns.md`
+
+Only when a `<PREFIX>-design` skill was confirmed. Create it from the stub in `../../shared/tpl-lifecycle.md § <PREFIX>-design/SKILL.md`, then fill the two `§ Iconography` fields that are discoverable **now**: the icon set the project already depends on (read the manifest for the dependency and one call site for the import convention — never name a set the project doesn't have), and the directory generated assets belong in (the frontend's existing static/asset dir). An empty field is honest; an invented one sends every future icon to the wrong place. `§ Inventory` stays empty — it fills as `<PREFIX>-design` runs, one row per pattern decision.
 
 ### Populate `deploy-config.yaml`
 
@@ -426,7 +430,7 @@ Substitute `<DOMAIN_SKILL_TABLE>` with a markdown table built from `DOMAIN_SKILL
 | Skill | Owns |
 |---|---|
 | `<PREFIX>-<name>` | `<path-pattern>` |
-| `<PREFIX>-design` | *(no path ownership — visual decisions only)* |  ← only if design skill was created
+| `<PREFIX>-design` | *(no path ownership — visual + UX-pattern + icon decisions)* |  ← only if design skill was created
 ```
 
 ---
@@ -536,6 +540,9 @@ Walk the checklist before declaring done:
 - [ ] If `<PREFIX>-design` was created: `.claude/skills/<PREFIX>-design/SKILL.md` and `references/design-tokens.md` exist; `/design` command invokes `<PREFIX>-design` (not the frontend skill)
 - [ ] If `<PREFIX>-design` was created: the skill that owns the Frontend category contains a `## Visual Decisions — Delegate to <PREFIX>-design` section (instructional delegation — closes the gap where the frontend skill could invent hex values without routing through design)
 - [ ] If `<PREFIX>-design` was created: its SKILL.md description starts with "MUST be invoked" (mandatory invocation language — not the legacy permissive "Use when...")
+- [ ] If `<PREFIX>-design` was created: `references/ux-patterns.md` exists with `## Inventory`, `## Consistency sweep`, and `## Iconography`; the sweep names all three verdicts (match / migrate / diverge) and `§ Iconography` forbids hand-authored icon geometry, routes anything the icon set doesn't cover to the asset skill named in SKILL.md, and carries both guards (no interview from a subagent; a missing API key is `blocked`, never a hand-drawn fallback)
+- [ ] If `<PREFIX>-design` was created: its `## When this skill MUST be invoked` list covers **surfaces / interaction patterns and icons**, not only values, and the skill names both external skills by role (design intelligence + asset generation) with the replace-either-name note
+- [ ] If `<PREFIX>-design` was created: the frontend skill's `## Visual Decisions` block carries the interaction-pattern and icon triggers, and `<PREFIX>-review/SKILL.md` has the `ux-patterns.md` branch in its `## Read Map` **and** `## References`. If **no** design skill was created, `<PREFIX>-review` must mention `ux-patterns.md` nowhere — a branch to a file the project has no owner for is a dead route
 - [ ] No leftover `<DESIGN_DELEGATION>` placeholder in any installed skill (frontend skill has it substituted; non-frontend skills have it removed)
 - [ ] No command file contains stale project or prefix references — all use substituted values
 - [ ] `.claude/hooks/governed-paths.conf` exists and has `GOVERNED_ROOTS` (directory prefixes only, no extension globs) + `DEPLOY_PATHS` (alternation of IaC/CI-CD/Build/Deployment paths, or `''` if none) + `REF_WATCH` (reference-worthy paths, or `''`) + `PATH_MAP` with the `custom-tests.yaml` EXEMPT entry, one self-ownership entry per installed skill (before the `.claude/skills/` catch-all), one entry per domain skill, and standard catch-alls

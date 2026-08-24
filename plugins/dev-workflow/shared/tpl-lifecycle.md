@@ -134,6 +134,9 @@ SITUATION?
 ├─ Reviewing for defect classes   → references/security-review.md
 │  (deps, secrets, injection,
 │  authz/IDOR, headers, dead code)
+├─ Reviewing a UI change (does it → <PREFIX>-design/references/ux-patterns.md
+│  match how this app already
+│  does this?)
 └─ About to claim success         → <PREFIX>-debug/references/verification.md
 ```
 
@@ -143,8 +146,11 @@ SITUATION?
 - `references/requesting-code-review.md` — code-reviewer subagent dispatch protocol
 - `references/issuing-findings.md` — evidence requirements for review findings (no blocking finding without file:line)
 - `references/security-review.md` — fast per-task security pass: deps/supply-chain, secrets, injection sinks, access-control (IDOR), insecure defaults + headers, dead surface; recon→verify triage; escalate to `/security-review` for deep changes
+- `<PREFIX>-design/references/ux-patterns.md` — how this app already does a thing: a UI change that stands up a second pattern beside an existing one, or a visual value absent from `design-tokens.md`, is a finding (single source of truth — owned by `<PREFIX>-design`)
 - `<PREFIX>-debug/references/verification.md` — completion verification gates (single source of truth — owned by `<PREFIX>-debug`)
 ```
+
+Include the `ux-patterns.md` read-map branch **and** its `## References` entry only when `<PREFIX>-design` is part of this install; omit both lines otherwise (a branch pointing at a file no backend-only project has is a dead route).
 
 **Also create these reference files when installing `<PREFIX>-review`:**
 
@@ -1261,21 +1267,23 @@ TEST_RUNNER="bundle exec rspec"
 
 ## § <PREFIX>-design/SKILL.md (conditional — create when frontend/website domain skill is present)
 
-This skill is created in addition to the frontend domain skill whenever the project has an HTML/CSS/JS website or UI framework. The frontend skill owns files; the design skill owns visual decisions.
+This skill is created in addition to the frontend domain skill whenever the project has an HTML/CSS/JS website or UI framework. The frontend skill owns files; the design skill owns visual and interaction decisions.
 
 ```markdown
 ---
 name: <PREFIX>-design
-description: Visual authority for <PROJECT>. MUST be invoked before any color, gradient, font, spacing, or CSS custom property decision — including declaring `--color-*`, `--font-*`, `--space-*` variables, picking hex values, or modifying typography. Owns the <PROJECT> design system: palette, tokens, typography, surface system.
+description: Visual authority for <PROJECT>. MUST be invoked before any color, gradient, font, spacing, or CSS custom property decision — including declaring `--color-*`, `--font-*`, `--space-*` variables, picking hex values, or modifying typography — before adding or changing any UI surface or interaction pattern, and before any icon is added or replaced. Owns the <PROJECT> design system: palette, tokens, typography, surface system, interaction patterns, iconography.
 ---
 
 # <PREFIX>-design
 
-Visual authority for all <PROJECT> UI decisions. No other skill is permitted to invent visual values. Use `ui-ux-pro-max` when executing design work.
+Visual and interaction authority for all <PROJECT> UI decisions. No other skill is permitted to invent visual values, to invent a second way to do something the app already does, or to author icon artwork.
 
-> **Design skill:** This skill delegates execution to `ui-ux-pro-max` by default. If you prefer a different design skill, replace `ui-ux-pro-max` with your chosen skill name in the two lines above and below this note.
+> **External skills.** Design intelligence: `ui-ux-pro-max`. Asset generation (icons, artwork): `visual-assets`. Replace either name with your preferred skill — everything else refers to them by role, so a swap changes only this note.
 
-When the user asks to explore design alternatives for a specific component, use `ui-ux-pro-max` to generate variants — but constrain it to the <PROJECT> design system (palette, fonts, surface). Do not propose styles or palettes outside the existing system.
+When the user asks to explore design alternatives for a specific component, use `ui-ux-pro-max` to generate variants — but constrain it to the <PROJECT> design system (palette, fonts, surface, and the patterns already in use). Do not propose styles or palettes outside the existing system.
+
+**Before deciding anything, run the consistency sweep in `references/ux-patterns.md`.** How this app already does the thing you are about to build is an input, not an afterthought.
 
 ## When this skill MUST be invoked
 
@@ -1286,8 +1294,10 @@ Other skills (especially `<PREFIX>-frontend`) **must** invoke this skill before:
 - Choosing font family, weight, or size
 - Adjusting spacing, radius, shadow, or other visual scales
 - Adding a new visual surface (card, panel, modal background)
+- Adding or changing a **user-facing surface or interaction pattern** — a dialog, an empty state, a loading state, inline validation, a toast, a nav entry, where the primary action sits
+- Adding, replacing, or restyling an **icon**
 
-If a value already exists in `references/design-tokens.md`, reference it. If not, this skill defines it (and adds it to the tokens file) — never the calling skill.
+If a value already exists in `references/design-tokens.md`, reference it. If not, this skill defines it (and adds it to the tokens file) — never the calling skill. The same holds for behavior: if `references/ux-patterns.md` records how this app does something, follow it; if it doesn't, sweep the code, decide, and record the decision there.
 
 ## What this skill owns
 - Color palette (exact hex values and gradient stops) — see `references/design-tokens.md`
@@ -1295,18 +1305,23 @@ If a value already exists in `references/design-tokens.md`, reference it. If not
 - Typography system (font families, weights, sizes)
 - Dark/light surface system
 - Component visual patterns
+- Interaction patterns across the whole app — see `references/ux-patterns.md`
+- Iconography — where icons come from and how a missing one is made — see `references/ux-patterns.md § Iconography`
 
 ## References
 - `references/design-tokens.md` — color palette, CSS vars, typography, spacing (immutable constraints — do not override without explicit instruction)
+- `references/ux-patterns.md` — app-wide pattern inventory, the consistency sweep, and the icon rule
 
 ## Reference Sync
 Verify before finishing any <PREFIX>-design invocation:
 - [ ] `references/design-tokens.md` lists all current design tokens and CSS custom properties
 - [ ] Every newly introduced visual value (color, gradient, font, spacing) has a corresponding entry in `design-tokens.md`
 - [ ] No removed tokens or renamed classes still referenced
+- [ ] Every pattern decision made this invocation has a row in `ux-patterns.md § Inventory`, carrying its verdict (match / migrate / diverge) and, for a divergence, its reason
+- [ ] Every icon added or replaced this invocation names its source in `ux-patterns.md § Iconography` — the set entry it came from, or the brief the asset skill was given
 ```
 
-**Also create this reference file when installing `<PREFIX>-design`:**
+**Also create these reference files when installing `<PREFIX>-design`:**
 
 `references/design-tokens.md`:
 ```markdown
@@ -1314,6 +1329,90 @@ Verify before finishing any <PREFIX>-design invocation:
 
 <!-- Fill in: color palette (hex values), CSS custom properties, typography (font families, weights), spacing scale, surface colors, glow/shadow values -->
 ```
+
+`references/ux-patterns.md`:
+~~~markdown
+# UX Patterns — <PROJECT>
+
+How this app already does things. Read before building a surface; write after deciding one.
+
+This file **indexes** the code — it never replaces it. An absent row means nobody has swept for that
+pattern yet, never that no precedent exists.
+
+## Inventory
+
+| Pattern | Canonical implementation | Rule |
+|---|---|---|
+
+<!-- Fill in: one row per pattern this app has settled — e.g. confirming a destructive action, an
+     empty list, a form field rejecting input, loading, toast, where the primary action sits, icon
+     usage. "Canonical implementation" is a `path:line` a reader can open; "Rule" is the one
+     sentence a new site has to satisfy. Add the row the moment a decision is made — including a
+     deliberate divergence, whose reason goes in the same row. -->
+
+## Consistency sweep
+
+Run before writing code for any user-facing surface. It fires when a surface or pattern is
+**introduced or changed** — not on copy edits or logic fixes inside existing markup, which would pay
+the cost for nothing.
+
+1. **Name the pattern** in this app's own terms — the thing a user would recognise ("confirming a
+   destructive action", "an empty list", "a field rejecting input"), not the component's name.
+2. **Look it up** in § Inventory. No row → sweep the code: the frontend skill's owned paths
+   (`.claude/hooks/governed-paths.conf`) and its `references/component-manifest.md` say where the
+   sibling surfaces are. Read two or three of them, not one — a single example is a coincidence.
+3. **State one verdict before writing code:**
+   - **match** — the existing precedent wins. The default, and the answer whenever the difference
+     would be taste rather than a fix.
+   - **migrate** — the new form is genuinely better, so the old sites move with it. Cover the
+     siblings in this task when it is a handful; otherwise build the new form here and append a
+     roadmap `[improvement]` / `[tech-debt]` item naming the sites left behind (`<PREFIX>-dev` step
+     1.5 owns that append). Never leave the app with two live answers and no record of which wins.
+   - **diverge** — this surface genuinely needs to differ. Allowed **only** with the reason recorded
+     in § Inventory. An unrecorded divergence is indistinguishable from an oversight, which is the
+     failure this file exists to catch.
+4. **Record it** — the new pattern, the new site, or the divergence — before finishing. The next
+   sweep is only as cheap as this write.
+
+## Iconography
+
+**Source** — fill in for this project:
+
+<!-- Fill in: the icon set this project depends on (name + import convention), the directory
+     generated assets live in, and the size / stroke conventions every icon must match. -->
+
+**An icon is never hand-authored.** In order:
+
+1. **The declared set covers it** → take it from the set, matching its neighbours' size, stroke and
+   optical weight. Sitting in the same family is most of what makes an icon look right.
+2. **Nothing covers it, or it is bespoke artwork** (a mark, a logo, an empty-state illustration) →
+   hand it to the **asset skill named in `SKILL.md`** with a complete brief, never a one-liner:
+   - the concept in plain words;
+   - the platform target or the exact pixels needed — and the icon ladder, if the platform wants one;
+   - the brand colour, taken from `design-tokens.md`, never re-picked here;
+   - the sibling icons as reference images, so the result joins the family instead of starting a new one;
+   - an output path inside this project's asset directory.
+
+   Preview the resolved prompt with the skill's dry-run, generate, then record what was made here.
+3. **Never** write icon geometry by hand (`<path d="…">` composed from a description), and never
+   substitute an emoji for a missing icon. Both are logically right and graphically wrong — the
+   exact failure this rule exists to prevent.
+
+Two guards, stated by role so a swapped asset skill inherits them:
+
+- **No interview, no gate.** An image skill's own workflow interviews the user and confirms before
+  spending. Neither question reaches the user from inside a pipeline subagent, so it hangs until the
+  watchdog kills the agent and the pipeline stalls. The brief above *is* the answer to those
+  questions — pass it complete and generate without asking.
+- **A missing credential is `blocked`, never a fallback.** These skills gate on an API key (for
+  `visual-assets`, `GEMINI_API_KEY` in the environment). If it is unset, report the icon blocked,
+  name the variable, and stop. Reaching for a hand-drawn stand-in because generation was unavailable
+  is the failure, not the recovery.
+
+*(With `visual-assets` the brief maps to `--target` / `fit.py --icon-set` for platform sizes and icon
+ladders, `-r` for reference images, `--brand-color` for the token colour, `-o` for the asset
+directory, and `--dry-run` for the preview.)*
+~~~
 
 ---
 

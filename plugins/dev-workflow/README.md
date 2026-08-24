@@ -19,7 +19,7 @@ A multi-agent delivery workflow for Claude Code. It runs your plan through a tea
 | Delivery graph | `myapp-graph` turns the records you already keep — the delivery log, captured verifications, path ownership, deploy config, git — into a typed edge index the agents query instead of re-reading files. Answers "what verifies this file", "what shipped here", "which deferrals are still open", "which roadmap items relate to these paths". The index is derived and disposable — rebuilt from scratch in under a second, gitignored, and every caller falls back to its old behaviour if it's missing; the script itself is committed, so a clean-up can't quietly remove the thing all those fallbacks are hiding the absence of. Rebuilding also warns about roadmap items it couldn't index, which is how a malformed entry stops being invisible. |
 | Domain skills | One per source directory, generated from your actual structure. Each owns its paths, carries reference docs, and defines the lint/type/test checks `myapp-dev` runs before deploy — and improves itself as the code evolves. |
 | 9 hooks | Make the workflow self-enforcing: skills must load before edits, bad installs are blocked, handoffs are gated, ref-sync drift is flagged, and nothing pushes without a delivery-log close-out. |
-| `/code`, `/fix` | Drive the full pipeline (dev → qa → pm) from one line — one gate that *states* what done means and what will prove it, auto-retest after fixes, then close out with a push + evidence-backed scorecard. Add `--prod` to ship after sign-off, `--no-push` to keep it local, `--regression full` to force the broad suite. |
+| `/code`, `/fix` | Drive the full pipeline (dev → qa → pm) from one line — one gate that *states* what done means and what will prove it, auto-retest after fixes, then close out with a push and a report you can read in one screen. Add `--prod` to ship after sign-off, `--no-push` to keep it local, `--regression full` to force the broad suite. |
 | `/pilot` | The autonomous multi-task lane — feed it a goal (a roadmap batch, or "improve X until Y"), confirm the mission plan once, and it works task after task unattended: each routed to the full pipeline, the tweak lane, or a lane you defined yourself, with one batched close-out and a full mission report at the end. |
 | `/tweak` | The sanctioned lightweight lane for iterative rounds — pixel nudges, copy, small hotfixes — verified inline (screenshots/curl), with one batched close-out enforced at push time. |
 | `/revert` | Sanctioned rollback: `git revert` (never reset), scoped re-verification, and a logged reversal. |
@@ -156,6 +156,21 @@ You describe the outcome; the workflow works out what would prove it. Each task 
 | **When it can't run** | Recorded *blocked*, with the reason and what would close it — never as a pass. A check whose condition never arose didn't pass; it didn't run. |
 | **Where it goes then** | Sorted, not waved through: one a local environment *could* have run sends the work back for another fix round; one only production can answer is walked right after the deploy; one waiting on an outside trigger — a nightly job, a webhook — is deferred with that trigger named. |
 | **What reopens** | Anything still unproven resurfaces at the start of the next `/code` or `/fix` in that repo, so a deferral has to be closed rather than forgotten. |
+
+---
+
+## What you get back
+
+Every command that closes work ends the same way, so you read the shape instead of the sentences. Four blocks, and then it stops:
+
+| Block | What it tells you |
+|---|---|
+| **Verdict** | One line: what state the work is in, and whether it needs you. |
+| **Status** | A row per thing that was meant to happen or was checked, each with one word from a fixed set — `needs you`, `failed`, `not done`, `not proven`, `done`, `proven`, `n/a`. Rows that aren't in a good state come first. |
+| **Open** | Only what a person has to handle: what it is, why it's open, and the exact thing to run or click. Anything decided for you while you were away shows up here, labelled as such. Nothing open says `None`. |
+| **Emerged** | Work that appeared during the run and nobody asked for — scope added to the roadmap, findings sent to another command. It's the part you can't reconstruct from the diff, so it's never dropped. |
+
+`done` and `proven` are deliberately different words. Code that was written is *done*; a journey somebody actually walked is *proven* — and a change that shipped with a check nothing could run says `not proven`, rather than reading as finished. Long runs get more rows, never more prose: passing checks fold into a single line, and the two blocks that need you never fold at all.
 
 ---
 

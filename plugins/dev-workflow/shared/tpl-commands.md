@@ -34,7 +34,7 @@ If a question times out unanswered, split by risk:
 
 **Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it in the close-out step — the pre-handoff gate blocks the qa spawn on any dirty tree, so deferring the stash just moves the failure mid-pipeline. If the WIP overlaps paths this task will touch, do not stash it blind — tell the user and run `/tidy` scoped to the overlapping paths first, then resume here.
 
-**Open deferrals:** run `python3 .claude/graph/graph.py open-deferrals` and, if it returns anything, list it for the user in one line — these are verifications that are still unproven and nothing has passed since: either an earlier task formally deferred them, or a run recorded them `blocked` (which is what the vacuous-pass rule mandates when the assertion never got exercised). A blocked row carries its `reason` — the trigger that would close it — so quote that, not just the name. Surfacing them here is the only point at which they resurface at all. Report, do not gate — **with one exception: if the same *fixable* blocker is named by 3+ open deferrals, or any single verification has been deferred 3+ times, say so and ask whether to fix the blocker first.** Repeated deferrals of that kind are not a backlog, they are one missing capability (usually a test environment) charging rent on every task that follows; five checks deferred across three deploys is how a feature ships unwalked. **Fixable means someone could build it** — seed data, an auth strategy, a `stack:` block, a missing non-prod env. A structural fact is not a blocker to escalate: a component that only ships to prod, or a journey that ends on a schedule, will produce deferrals forever and asking every third run is noise, not signal. Those are discharged by the post-deploy prod walk and by triggered follow-ups respectively — count them, never nag about them. Skip silently if the script is absent or exits non-zero. (Cheap by design — a few lines of output, not a file read; the Step 0.5 gate stays read-free.)
+**Open deferrals:** run `python3 .claude/graph/graph.py open-deferrals` and, if it returns anything, list it for the user in one line — these are verifications that are still unproven and nothing has passed since: either an earlier task formally deferred them, or a run recorded them `blocked` (which is what the vacuous-pass rule mandates when the assertion never got exercised). A blocked row carries its `reason` — the trigger that would close it — so quote that, not just the name. This read is the reason a deferral is an Emerged row at close-out rather than something the user has to hold: the three lanes that can discharge one — `/code`, `/fix`, `/pilot` — all open with it. Report, do not gate — **with one exception: if the same *fixable* blocker is named by 3+ open deferrals, or any single verification has been deferred 3+ times, say so and ask whether to fix the blocker first.** Repeated deferrals of that kind are not a backlog, they are one missing capability (usually a test environment) charging rent on every task that follows; five checks deferred across three deploys is how a feature ships unwalked. **Fixable means someone could build it** — seed data, an auth strategy, a `stack:` block, a missing non-prod env. A structural fact is not a blocker to escalate: a component that only ships to prod, or a journey that ends on a schedule, will produce deferrals forever and asking every third run is noise, not signal. Those are discharged by the post-deploy prod walk and by triggered follow-ups respectively — count them, never nag about them. Skip silently if the script is absent or exits non-zero. (Cheap by design — a few lines of output, not a file read; the Step 0.5 gate stays read-free.) Only the lanes that can turn a `blocked` into a `pass` run this read — `/code`, `/fix`, `/pilot`. `/tweak`, `/wrap`, `/revert` and `/tidy` persist no typed verifications and could not discharge one, so listing them there would be noise the user cannot act on.
 
 **Plan shortcut:** if the session contains a just-approved plan covering this task **and that plan carries its own Verification / Acceptance section**, plan approval was the confirmation — omit the Confirm question from the Step 0.5 gate. Both halves are required: Confirm is the only place the derived verifications are shown, so omitting it on a plan that never stated an end state would ship a set the user has never seen — and with `--prod` or `--no-push` also pre-answering Ship, the gate would fall to zero questions.
 
@@ -152,7 +152,7 @@ Leave any server you started running — note it under Done.
 
 ## Step 2 — Review & Test (<PREFIX>-qa)
 
-After <PREFIX>-dev completes, parse its `## Handoff` block:
+After <PREFIX>-dev completes, parse its `## Handoff` block — and keep its `Roadmap:` ids: they are the Emerged rows for scope the agent tracked, and nothing else carries them out of the subagent:
 - `Status: complete` → spawn <PREFIX>-qa with `mode=initial`.
 - `Status: blocked` → tell the user dev blocked with `Notes:` and stop.
 
@@ -228,7 +228,7 @@ Runs on every completion, regardless of `ship_mode`.
 
 **State where things stand. Do not narrate the run.** `docs/project-log.md` already records what happened; this report exists so the user can see the state of the work without reading the transcript. Every closing command reports in this shape and cites this section — `/fix`, `/wrap`, `/tweak`, `/revert`, `/tidy`, `/pilot`.
 
-Four blocks, in this order, and nothing else. No preamble, no recap, no step-by-step account.
+Four blocks, in this order, then one closing line, and nothing else. No preamble, no recap, no step-by-step account.
 
 **1. Verdict** — one line: what state the work is in, and whether it needs the user.
 
@@ -237,7 +237,7 @@ Four blocks, in this order, and nothing else. No preamble, no recap, no step-by-
 | What | Status | Evidence |
 |---|---|---|
 
-Rows: the acceptance statement itself, each verification that ran, the deploy, the push, the delivery log, docs, reference sync. Rows that are not in a good state come first. The deploy / push / log / docs / ref-sync rows are the Step 5 scorecard facts — each one checked against reality there, never echoed from a handoff.
+Rows: the acceptance statement itself, each verification that ran, the deploy, the push, the delivery log, docs, reference sync, plus the facts the run produced that need no action — a serve-env left running, a value the pipeline resolved for you. Rows that are not in a good state come first. The deploy / push / log / docs / ref-sync rows are the Step 5 scorecard facts — each one checked against reality there, never echoed from a handoff.
 
 Every row takes one word from this closed set. Nothing else may be dressed up as a status:
 
@@ -255,19 +255,33 @@ Every row takes one word from this closed set. Nothing else may be dressed up as
 
 Translate honestly from what the agents reported, and never upgrade a status on the way up: a sign-off whose end state was walked is `proven`; a deferred check is `not proven` however clean the rest of the run was; a verification recorded `blocked` is `not proven` and one recorded `fail` is `failed`; a parked gate is `needs you`.
 
-**3. Open** — only what a person has to handle:
+**Which block a row goes in — one test.** *Would Step 0 of the next run, `/roadmap`, or `/tidy` raise this on its own?* **Yes → Emerged**, and the row names the store holding it. **No → Open**, and the row names the exact command. This is the close-out half of the rule Step 0 executes at entry: what gets filed here is what gets read there, which is why **Open empty means the session is disposable**.
+
+**3. Open** — what dies with this session:
 
 | Item | Why it is open | Next |
 |---|---|---|
 
-One row each for: a check nobody could run (name what would let it run), a decision the pipeline made while the user was away (labelled as auto-decided, never as their choice), a value the pipeline worked out instead of asking about, a server left running (give the url), work left in the tree. `Next` is the exact thing to run or click. Nothing open → write `None`.
+One row each for: a parked gate, a gate decided on a **timeout** (labelled as auto-decided, never as their choice), a verification recorded `fail` (`open-deferrals` excludes a bare fail by design, so nothing will raise it), a task recorded `UAT-only` that nobody has verified, work left in the tree, an unreached task. `Next` is the exact thing to run or click. **Order: the parked gate first, then `failed`, then the rest** — the `Next:` line below is the top row. Nothing open → write `None`.
 
-**4. Emerged** — work that appeared during the run and nobody asked for:
+**4. Emerged** — what the run produced that now lives somewhere with a reader. Every row names its home; there are only three:
 
-| Item | Where it went |
-|---|---|
+| Item | Where it lives | What raises it |
+|---|---|---|
 
-Scope added to the roadmap (with its id), findings routed to another command, follow-ups a failure created. This is the block the user cannot reconstruct from the diff, so it is never dropped. Nothing emerged → write `None`.
+- a roadmap `**Id:**` → `/roadmap`
+- a `custom-tests.yaml` entry whose `last:` is `blocked` → Step 0 of `/code`, `/fix`, `/pilot` (name the route: walked after a prod deploy, or open on a named trigger)
+- the git tree or a named stash → Step 0 entry hygiene and `/tidy`
+
+**No home → the row is Open.** Filing is for **scope** only — work someone would pick up later. Append it to `docs/roadmap.md` in the format `<PREFIX>-dev` step 1.5 defines (`**Id:**`, `**Added:**`, matching the convention the file already uses); the path is `EXEMPT` in PATH_MAP, so no skill load is needed. A parked gate, a timeout decision and a `fail` are **not** scope: they are this run's unfinished business and stay Open. Otherwise this block becomes a way to make Open look empty. Nothing emerged → write `None`.
+
+The roadmap itself is not reported here — this covers the run; `/roadmap` reads the backlog.
+
+**The last line.** After the four blocks, print one line — **the top Open row's `Next` verbatim**, not a second place to decide what happens next:
+
+- Open empty → `Next: none — nothing open, safe to start a fresh session.`
+- Open non-empty → that row's `Next`. On the 2nd+ pipeline run of a session, append `— in a fresh session`; long sessions degrade quality and it does not need a paragraph.
+- A parked gate → `Next: resume here — <what it awaits>`. The only case where this session must survive.
 
 ### How to write it
 
@@ -275,9 +289,18 @@ Scope added to the roadmap (with its id), findings routed to another command, fo
 - No hedging. "mostly", "should be", "appears to", "successfully" all hide the status the table exists to show.
 - A `proven` or `failed` row carries its evidence in the row — the command, the url, the screenshot path. A screenshot is a path, not a description of what it shows.
 - Do not explain what each agent did. That is the delivery log's job.
-- Too long? Fold the passing rows into one (`N proven`) and keep every other row as it is. **Open and Emerged are never folded.** If the report does not fit a screen, rows are being written as paragraphs.
+- Too long? Fold the rows in a good state into one (`N done · M proven`) and keep every other row as it is. **Open and Emerged are never folded.** If the report does not fit a screen, rows are being written as paragraphs.
+- The Verdict states the **state**; the closing line states the **action**. Never let both say "needs you" — Verdict keeps the outcome word and the ship state, and the command lives only in the closing line.
 
-**This run's rows.** Ship state belongs in the Verdict line: "deployed to prod" only after `<PREFIX>-deploy` confirmed CI completion and the health check; "held at UAT per your Ship answer — `--prod` when ready"; or, when a gate is parked, exactly what it is waiting for. A serve-env started at Step 1.7 is an Open row with its url. The regression scope, when Step 0.5 carried `auto`, is an Open row labelled as worked out by the pipeline, carrying the reason from qa's `Tests:` line. On the 2nd+ pipeline run in this session, add "start a fresh session" to the Verdict line — long sessions degrade quality, and it does not need a paragraph.
+**This run's rows.** Ship state belongs in the Verdict line: "deployed to prod" only after `<PREFIX>-deploy` confirmed CI completion and the health check; "held at UAT per your Ship answer — `--prod` when ready"; or, when a gate is parked, exactly what it is waiting for.
+
+Rows this command produces that the test above places for you:
+
+- **A serve-env started at Step 1.7** — a **Status** row, `done`, evidence = the url. It is not forward work: Step 1.7 restarts a stale server and reuses a live one.
+- **A value the pipeline resolved** — the regression scope when Step 0.5 carried `auto` — is a **Status** row carrying the reason from qa's `Tests:` line. Use the `Decisions:` provenance to place these: `agent` and `pilot-auto` are Status, **`timeout` is Open**, because that is the only case where the user was asked and did not answer.
+- **A `prod-walk:` carried out of Step 2 that Step 5 never ran** (the run held at UAT) is an **Emerged** row: it stays filed as `last: blocked`, and the row names what discharges it — `/code --prod`. It must never vanish just because the deploy step was skipped.
+- **A task recorded `UAT-only`** at Step 0.5 captured nothing and persisted nothing, by the user's own instruction. Its acceptance row in Status is `not proven`, and it is an **Open** row: `Next: verify live — <the acceptance statement>`.
+- **Scope `<PREFIX>-dev` appended** — the ids on its handoff `Roadmap:` field — is an **Emerged** row, one per id. Scope this command uncovered at the top level and nobody filed is **Open** with its command, unless you file it here per block 4.
 ```
 
 ---
@@ -310,7 +333,7 @@ If a question times out unanswered, split by risk:
 
 **Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it in the close-out step — the pre-handoff gate blocks the qa spawn on any dirty tree, so deferring the stash just moves the failure mid-pipeline. If the WIP overlaps paths this task will touch, do not stash it blind — tell the user and run `/tidy` scoped to the overlapping paths first, then resume here.
 
-**Open deferrals:** run `python3 .claude/graph/graph.py open-deferrals` and, if it returns anything, list it for the user in one line — these are verifications that are still unproven and nothing has passed since: either an earlier task formally deferred them, or a run recorded them `blocked` (which is what the vacuous-pass rule mandates when the assertion never got exercised). A blocked row carries its `reason` — the trigger that would close it — so quote that, not just the name. Surfacing them here is the only point at which they resurface at all. Report, do not gate — **with one exception: if the same *fixable* blocker is named by 3+ open deferrals, or any single verification has been deferred 3+ times, say so and ask whether to fix the blocker first.** Repeated deferrals of that kind are not a backlog, they are one missing capability (usually a test environment) charging rent on every task that follows; five checks deferred across three deploys is how a feature ships unwalked. **Fixable means someone could build it** — seed data, an auth strategy, a `stack:` block, a missing non-prod env. A structural fact is not a blocker to escalate: a component that only ships to prod, or a journey that ends on a schedule, will produce deferrals forever and asking every third run is noise, not signal. Those are discharged by the post-deploy prod walk and by triggered follow-ups respectively — count them, never nag about them. Skip silently if the script is absent or exits non-zero. (Cheap by design — a few lines of output, not a file read; the Step 0.5 gate stays read-free.)
+**Open deferrals:** run `python3 .claude/graph/graph.py open-deferrals` and, if it returns anything, list it for the user in one line — these are verifications that are still unproven and nothing has passed since: either an earlier task formally deferred them, or a run recorded them `blocked` (which is what the vacuous-pass rule mandates when the assertion never got exercised). A blocked row carries its `reason` — the trigger that would close it — so quote that, not just the name. This read is the reason a deferral is an Emerged row at close-out rather than something the user has to hold: the three lanes that can discharge one — `/code`, `/fix`, `/pilot` — all open with it. Report, do not gate — **with one exception: if the same *fixable* blocker is named by 3+ open deferrals, or any single verification has been deferred 3+ times, say so and ask whether to fix the blocker first.** Repeated deferrals of that kind are not a backlog, they are one missing capability (usually a test environment) charging rent on every task that follows; five checks deferred across three deploys is how a feature ships unwalked. **Fixable means someone could build it** — seed data, an auth strategy, a `stack:` block, a missing non-prod env. A structural fact is not a blocker to escalate: a component that only ships to prod, or a journey that ends on a schedule, will produce deferrals forever and asking every third run is noise, not signal. Those are discharged by the post-deploy prod walk and by triggered follow-ups respectively — count them, never nag about them. Skip silently if the script is absent or exits non-zero. (Cheap by design — a few lines of output, not a file read; the Step 0.5 gate stays read-free.) Only the lanes that can turn a `blocked` into a `pass` run this read — `/code`, `/fix`, `/pilot`. `/tweak`, `/wrap`, `/revert` and `/tidy` persist no typed verifications and could not discharge one, so listing them there would be noise the user cannot act on.
 
 **Plan shortcut:** if the session contains a just-approved plan covering this fix **and that plan carries its own Verification / Acceptance section**, plan approval was the confirmation — omit the Confirm question from the Step 0.5 gate. Both halves are required: Confirm is the only place the derived verifications are shown, so omitting it on a plan that never stated an end state would ship a set the user has never seen — and with `--prod` or `--no-push` also pre-answering Ship, the gate would fall to zero questions.
 
@@ -447,7 +470,7 @@ Leave any server you started running — note it under Done.
 
 ## Step 3 — Review & Test (<PREFIX>-qa)
 
-After <PREFIX>-dev completes, parse its `## Handoff` block:
+After <PREFIX>-dev completes, parse its `## Handoff` block — and keep its `Roadmap:` ids: they are the Emerged rows for scope the agent tracked, and nothing else carries them out of the subagent:
 - `Status: complete` → spawn <PREFIX>-qa with `mode=initial`.
 - `Status: blocked` → tell the user dev blocked with `Notes:` and stop.
 
@@ -524,9 +547,9 @@ Runs on every completion, regardless of `ship_mode`.
 
 ## Done
 
-Report per `code.md § Done` — the same four blocks (Verdict · Status · Open · Emerged), the same closed status words, the same writing rules. Nothing about this lane changes the shape.
+Report per `code.md § Done` — the same four blocks (Verdict · Status · Open · Emerged) and closing line, the same closed status words, the same writing rules. Nothing about this lane changes the shape.
 
-**This run's rows.** The Status rows for deploy / push / log / docs / ref-sync are the Step 6 scorecard facts, each checked against reality there. The root cause `<PREFIX>-debug` found belongs in the Verdict line — one clause, so the user knows what broke, not how it was traced. Ship state, a serve-env started at Step 2.7, and a regression scope the pipeline worked out are handled exactly as in `code.md § Done`.
+**This run's rows.** The Status rows for deploy / push / log / docs / ref-sync are the Step 6 scorecard facts, each checked against reality there. The root cause `<PREFIX>-debug` found belongs in the Verdict line — one clause, so the user knows what broke, not how it was traced. Ship state, a serve-env started at Step 2.7, a regression scope the pipeline worked out, an undischarged `prod-walk:`, and a `UAT-only` task are handled exactly as in `code.md § Done` — including that the first two are Status rows, not Open ones.
 ```
 
 ---
@@ -559,6 +582,8 @@ After the single Step 1 gate, the run is unattended until close-out:
 **Flag parse (first):** `--max-tasks N` → cap the task list at N (default 10); `--items <id>[,<id>…]` → the task list is these roadmap `**Id:**` values, in this order (see Decompose); `--prod` → `ship_mode = prod`; `--no-push` → `ship_mode = hold` and `no_push = true`; `--grant <unit>=<N>` (repeatable) → seed the resource ledger below; `--regression full|auto` → the mission's test scope, otherwise `smart`. Strip all flags from the goal used below. If neither ship flag is present, `ship_mode` is decided by the Ship question in Step 1.
 
 **Entry hygiene:** run `git status --porcelain`. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it at close-out. If the WIP overlaps paths this mission will touch, do not stash it blind — tell the user and run `/tidy` scoped to the overlapping paths first, then resume here.
+
+**Open deferrals:** run the same read `.claude/commands/code.md § Step 0` defines — `python3 .claude/graph/graph.py open-deferrals` — and report it as a line, with the same silent skip when the script is absent or exits non-zero. A mission is the main way work starts, so leaving it out would mean nothing raises a deferral for the whole run. Report only: the routine list does **not** go into the Step 1 gate, which already carries a task per line. The one exception is that command's escalation — the same *fixable* blocker named by 3+ open deferrals, or a single verification deferred 3+ times: add it as a line in the Confirm question, so the user can redirect the mission to the blocker through the automatic "Other" rather than spending the run on top of it.
 
 ## Step 1 — Mission plan + single gate
 
@@ -642,7 +667,7 @@ Work the task list in order until: tasks exhausted, all success criteria pass, o
 
 **Parked verdicts.** A lane may produce measurements and artifacts autonomously, but any **keep / ship / adopt decision it marks human-gated is never decided in-run** — not by the lane, not by this command, not by a default. Park it: carry it into the mission report as an explicit parked decision with the evidence needed to answer it, and record it in the task's log entry as `**Decisions:** <name>=parked (human-gated)`. This is the autonomy contract's irreversible-gate rule applied to lane output — an unanswered gate is never recorded as decided, exactly as a timeout is never recorded as `user`. A parked verdict does not fail the task and does not stop the loop.
 
-**(c) Progress + re-plan.** After each task, emit one status line — `task k/N · <title> · <status> · <commit> · <evidence pointer>` — a report, not a question. Then re-plan: drop later tasks the outcome obsoleted, insert a revealed prerequisite (within `max_tasks`), and if success criteria exist, evaluate them with evidence — stop the loop when all pass. Record every plan amendment for the mission report. For roadmap-driven runs, verify pm flipped the item's status.
+**(c) Progress + re-plan.** Keep each task's `<PREFIX>-dev` handoff `Roadmap:` ids — they are the mission report's Emerged rows. Then emit one status line — `task k/N · <title> · <status> · <commit> · <evidence pointer>` — a report, not a question. Then re-plan: drop later tasks the outcome obsoleted, insert a revealed prerequisite (within `max_tasks`), and if success criteria exist, evaluate them with evidence — stop the loop when all pass. Record every plan amendment for the mission report. For roadmap-driven runs, verify pm flipped the item's status.
 
 **Context health:** keep the top level thin — never read source files or heavy references at the top level; work from handoff blocks. If context is clearly degrading (earlier tasks summarized away, repeated re-derivation), finish the current task, then go to Step 3 and list the remaining tasks as resumable — a degraded pilot ships worse code than a fresh session.
 
@@ -670,15 +695,16 @@ Work the task list in order until: tasks exhausted, all success criteria pass, o
 
 ## Done — mission report
 
-Report per `code.md § Done` — the same four blocks (Verdict · Status · Open · Emerged), the same closed status words, the same writing rules. A mission covers more work, so it needs **more rows, not more prose**.
+Report per `code.md § Done` — the same four blocks (Verdict · Status · Open · Emerged) and closing line, the same closed status words, the same writing rules. A mission covers more work, so it needs **more rows, not more prose**.
 
 **This mission's rows.**
 
 - **Verdict** — one line: goal met, partly met, or stopped, plus the ship state. On a mission with success criteria, the criteria decide that word and their evidence goes in Status.
 - **Status** — one row per task first (`task · status · evidence`, where evidence is the feature commit and the log-entry title), then the mission-level rows: prod deploy, push, roadmap statuses flipped, prod walk, reference sync, and one row per granted unit as `<spent>/<grant>`. A task whose end state was walked is `proven`; a task that shipped with a check nobody could run is `not proven`, never `done`.
-- **Open** — every parked verdict, one row each, carrying the evidence needed to answer it and where that evidence lives; these are the reason the user is reading this at all, so they are never folded into the task rows and never shown as decided. Then: each deferral **with its route** (walked at prod in (a2), or still open on a named out-of-band trigger — "deferred" must never cover both facts), each failed or unreached task with enough state to resume, each lane that stopped on an exhausted budget, and each serve-env left running with its url. For an `--items` mission the resume row's `Next` is `/pilot --items <id>,<id>` — the ids are permanent, so that line is exact and copy-pasteable; otherwise `/pilot <remaining goal>`.
-- **Emerged** — scope the mission added to the roadmap, findings routed elsewhere, follow-ups a failed task created.
-- Add "start a fresh session before the next mission" to the Verdict line — a completed pilot has consumed most of this one.
+- **Open** — every parked verdict, one row each, carrying the evidence needed to answer it and where that evidence lives; these are the reason the user is reading this at all, so they are never folded into the task rows and never shown as decided. Then: each failed or unreached task with enough state to resume, each lane that stopped on an exhausted budget, and each gate this run decided on a `timeout`. For an `--items` mission the resume row's `Next` is `/pilot --items <id>,<id>` — the ids are permanent, so that line is exact and copy-pasteable. A **goal-shaped or plain-batch** mission has no such handle, so file the remaining goal as a roadmap item per `code.md § Done` block 4 and make its id the resume row's `Next`; a goal restated only in this report dies with the session.
+- **Emerged** — each deferral **with its route** (walked at prod in (a2), or still open on a named out-of-band trigger — "deferred" must never cover both facts), the roadmap ids each task's `<PREFIX>-dev` reported on its `Roadmap:` field, scope the mission filed itself, and follow-ups a failed task created. Every row names its home, per `code.md § Done`.
+- Serve-envs the mission left running are **Status** rows with their urls, not Open ones.
+- The closing line carries "in a fresh session" — a completed pilot has consumed most of this one.
 ```
 
 ---
@@ -830,7 +856,7 @@ Run when the user says done, or asks to push or deploy. (The `close-out-gate` ho
 2. **Log** — one `<PREFIX>-log` entry covering the whole burst (name the commits it spans).
 3. **Docs + references** — use `<PREFIX>-docs` to check staleness; use `<PREFIX>-skill` for reference sync scoped to the affected skills.
 4. **Push + scorecard** — same close-out as `/code` Step 5: push policy via the `<PREFIX>-deploy` skill § Push policy (a push that fires prod CI is an irreversible gate — ask, park on timeout), then the verified scorecard (committed / pushed / logged / docs / ref-sync, each evidence-checked).
-5. **Report** — per `code.md § Done`: the same four blocks, the same closed status words. The burst is one Status row per tweak plus the close-out rows; the end-state walk from step 1.5 is the row that carries `proven` or `not proven` for the journey as a whole.
+5. **Report** — per `code.md § Done`: the same four blocks, the closing line, the same closed status words. The burst is one Status row per tweak plus the close-out rows; the end-state walk from step 1.5 is the row that carries `proven` or `not proven` for the journey as a whole. This lane runs no `<PREFIX>-dev`, so scope the burst uncovered has no writer but this one — file it per `code.md § Done` block 4 and cite the id, or leave it Open with the command that picks it up.
 ```
 
 ---
@@ -864,7 +890,7 @@ Use `<PREFIX>-log`: one entry naming what was reverted and why. Flip any roadmap
 
 ## Step 4 — Close out
 
-Push + verified scorecard, same as `/code` Step 5. If the original change was deployed, redeploy the reverted state to the same envs via `<PREFIX>-deploy` (prod requires its gate — park on timeout). Then report per `code.md § Done` — the same four blocks and status words, with a Status row for the re-verification: a reverted state nobody re-checked is `not proven`, and what the revert re-opened belongs in Emerged.
+Push + verified scorecard, same as `/code` Step 5. If the original change was deployed, redeploy the reverted state to the same envs via `<PREFIX>-deploy` (prod requires its gate — park on timeout). Then report per `code.md § Done` — the same four blocks, the closing line and the same status words, with a Status row for the re-verification: a reverted state nobody re-checked is `not proven`. What the revert re-opened belongs in Emerged, and Step 3's flip back to `open` is what earns it that block — the row cites the roadmap id.
 ```
 
 ---
@@ -937,9 +963,9 @@ In this order, so nothing is destroyed before it is recoverable:
 
 ## Done
 
-Report per `code.md § Done` — the same four blocks (Verdict · Status · Open · Emerged), the same closed status words, the same writing rules.
+Report per `code.md § Done` — the same four blocks (Verdict · Status · Open · Emerged) and closing line, the same closed status words, the same writing rules.
 
-**This run's rows.** Re-run the Step 1 sweep and make it the Status block — working tree, unpushed commits, stashes, worktrees, branches, CI — each row an observed fact, never a claim about what was applied. Every item you touched gets a row carrying its disposition. `deliver` and `keep` items are still dirty **by design**: they are Open rows naming the command they go to, so "clean" is never overstated, and so is any `tidy-discard-*` stash still holding removed content. Work you found that belongs to someone else's backlog is an Emerged row.
+**This run's rows.** Re-run the Step 1 sweep and make it the Status block — working tree, unpushed commits, stashes, worktrees, branches, CI — each row an observed fact, never a claim about what was applied. Every item you touched gets a row carrying its disposition. `deliver` and `keep` items are still dirty **by design**: they are Open rows naming the command they go to, so "clean" is never overstated. A `tidy-discard-*` stash is an **Emerged** row — it is named, and this command's own Step 1 sweep is what surfaces it again. Work you found that belongs to someone else's backlog is an Emerged row too, filed per `code.md § Done` block 4 and cited by id — this lane has no `<PREFIX>-dev` to file it for you.
 ```
 
 ---
@@ -989,7 +1015,7 @@ Skip if `--no-push` was passed or no remote is configured. Resolve pushability v
 
 ## Done
 
-Report per `code.md § Done` — the same four blocks (Verdict · Status · Open · Emerged), the same closed status words, the same writing rules. This is the shortest lane, so most runs are a one-line Verdict, a five-row Status, and two `None`s.
+Report per `code.md § Done` — the same four blocks (Verdict · Status · Open · Emerged) and closing line, the same closed status words, the same writing rules. This is the shortest lane, so most runs are a one-line Verdict, a five-row Status, two `None`s, and a closing line saying it is safe to start fresh.
 
-**This run's rows.** Status: the change being wrapped, the delivery-log entry, docs, reference sync, and the push — the last three from the Step 4 checks, each verified against reality. The change itself is `done`, not `proven`, unless something actually exercised it — ad-hoc work usually has nothing that did, and saying so is the point of wrapping it. Open: a source finding routed to `/fix`, anything left unpushed and why, docs left stale. Emerged: scope this work uncovered. Do not describe what `<PREFIX>-log`, `<PREFIX>-docs` or `<PREFIX>-skill` did — the log entry is that record.
+**This run's rows.** Status: the change being wrapped, the delivery-log entry, docs, reference sync, and the push — the last three from the Step 4 checks, each verified against reality. The change itself is `done`, not `proven`, unless something actually exercised it — ad-hoc work usually has nothing that did, and saying so is the point of wrapping it. Open: a source finding from Step 0 with `Next: /fix <it>`, anything left unpushed and why, docs left stale. This lane runs no `<PREFIX>-dev`, so **scope it uncovered has no writer but this one** — file it as a roadmap item per `code.md § Done` block 4 and make it an Emerged row citing the id, or leave it Open with the command that would pick it up. Naming it in prose alone is how ad-hoc scope disappears. Do not describe what `<PREFIX>-log`, `<PREFIX>-docs` or `<PREFIX>-skill` did — the log entry is that record.
 ```

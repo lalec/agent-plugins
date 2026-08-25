@@ -99,7 +99,7 @@ Runs: `myapp-debug` → `myapp-dev` → `myapp-qa` → `myapp-pm`
 ```
 /pilot <goal — e.g. implement all open roadmap items, or improve an area until measurable criteria pass>
 ```
-Decomposes the goal into tasks, asks one up-front gate (confirm plan + ship policy), then works unattended: each task routed to the lane that fits it, per-task delivery-log entries, no mid-run questions. Prod deploy and push happen only at the single close-out, gated as usual. `--max-tasks N` caps the run; ends with a mission report of every task, its status, and its evidence.
+Opens by telling you which checks are still unproven in this repo — a mission is one of the few places that can actually close them, so it starts by showing you what it's about to build on top of, and if the same missing piece is blocking three of them, that becomes an option at the gate. Then it decomposes the goal into tasks, asks one up-front gate (confirm plan + ship policy), and works unattended: each task routed to the lane that fits it, per-task delivery-log entries, no mid-run questions. Prod deploy and push happen only at the single close-out, gated as usual. `--max-tasks N` caps the run; ends with a mission report of every task, its status, and its evidence — and, when the run stopped short, a resume line you can paste back.
 
 Lanes are yours to extend: any command that declares how work should reach it becomes a destination, so a project-specific routine joins the rotation without touching `/pilot`. A lane that burns something finite — credits, API calls, generation runs — runs against a budget you grant at the same up-front gate, and stops dispatching when it's spent rather than quietly overrunning. Anything the run judges yours to decide comes back *parked*, with the evidence needed to answer it, never auto-answered on your behalf.
 
@@ -155,7 +155,7 @@ You describe the outcome; the workflow works out what would prove it. Each task 
 | **How wide it goes** | Decided after the code is written, from what actually changed: a change crossing two domains, or landing where a check is already failing, pulls in the full suite. `--regression full` forces it. |
 | **When it can't run** | Recorded *blocked*, with the reason and what would close it — never as a pass. A check whose condition never arose didn't pass; it didn't run. |
 | **Where it goes then** | Sorted, not waved through: one a local environment *could* have run sends the work back for another fix round; one only production can answer is walked right after the deploy; one waiting on an outside trigger — a nightly job, a webhook — is deferred with that trigger named. |
-| **What reopens** | Anything still unproven resurfaces at the start of the next `/code` or `/fix` in that repo, so a deferral has to be closed rather than forgotten. |
+| **What reopens** | Anything still unproven resurfaces at the start of the next `/code`, `/fix` or `/pilot` in that repo — the three that could actually close it — so a deferral has to be closed rather than forgotten. |
 
 ---
 
@@ -167,10 +167,12 @@ Every command that closes work ends the same way, so you read the shape instead 
 |---|---|
 | **Verdict** | One line: what state the work is in, and whether it needs you. |
 | **Status** | A row per thing that was meant to happen or was checked, each with one word from a fixed set — `needs you`, `failed`, `not done`, `not proven`, `done`, `proven`, `n/a`. Rows that aren't in a good state come first. |
-| **Open** | Only what a person has to handle: what it is, why it's open, and the exact thing to run or click. Anything decided for you while you were away shows up here, labelled as such. Nothing open says `None`. |
-| **Emerged** | Work that appeared during the run and nobody asked for — scope added to the roadmap, findings sent to another command. It's the part you can't reconstruct from the diff, so it's never dropped. |
+| **Open** | Only what dies when you close the session: a question waiting on you, a check that failed, something you said you'd verify live, work left in the tree. Each row carries the exact thing to run or click. A choice made for you because you didn't answer in time shows up here, labelled as such. Nothing open says `None`. |
+| **Emerged** | Everything else the run turned up, and where it now lives — a roadmap item with its id, a check filed as unproven, a named stash. Each row names what will raise it again, so you can forget it on purpose. If something has nowhere to live, it goes in Open instead of quietly evaporating. |
 
-`done` and `proven` are deliberately different words. Code that was written is *done*; a journey somebody actually walked is *proven* — and a change that shipped with a check nothing could run says `not proven`, rather than reading as finished. Long runs get more rows, never more prose: passing checks fold into a single line, and the two blocks that need you never fold at all.
+Then one last line, and it's the one you act on: either the single command that clears the top of Open, or `none — nothing open, safe to start a fresh session`. That's the answer to the question a report usually leaves you guessing at — whether this piece of work is finished, or whether closing the terminal loses something. It can only say you're clear when Open is empty, and Open can only be empty once everything else has somewhere to live.
+
+`done` and `proven` are deliberately different words. Code that was written is *done*; a journey somebody actually walked is *proven* — and a change that shipped with a check nothing could run says `not proven`, rather than reading as finished. Long runs get more rows, never more prose: rows in a good state fold into a single line, and the two blocks that need you never fold at all.
 
 ---
 

@@ -28,6 +28,7 @@ Development orchestrator for <PROJECT>. Owns the entire development process from
    - Cross-project scope → append `[integration]` entry to `docs/roadmap.md`
    - Adjacent improvement outside current scope → append `[improvement]` or `[tech-debt]` entry
    - Append autonomously; no user confirmation needed. New entries go at top of their section. Include `**Added:** YYYY-MM-DD HH:MM` using current date/time and a `**Id:**` kebab slug that is unique in the file — it is the item's permanent handle, cited later by the delivery log's `**Addresses:**` line, so never reuse or rewrite one.
+   - **Report every id you append on the handoff's `Roadmap:` field.** It is the only way the scope you tracked reaches the orchestrator's report — an id that stays inside this agent leaves the run looking like it added nothing.
    - **Match the metadata convention already used in `docs/roadmap.md`** — read a neighbouring item first. Projects write metadata as list items (`- **Status:** open`), bare (`**Status:** open`), or packed several to a line (`**Added:** … · **Status:** open`); all three are read correctly, so there is nothing to normalise. Emit the form the file already uses, and **never reformat existing items** — a reformat is pure churn that buries the real change in the diff.
    - **`docs/roadmap.md` is the only roadmap store.** Never mirror an entry to an external tracker, and never report the absence of one as a finding.
 3. **Implement** — write code, then run the quality checks defined by each loaded domain skill before proceeding to deploy.
@@ -51,6 +52,7 @@ Code review, E2E tests, delivery log → `<PREFIX>-qa` / `<PREFIX>-pm`. Lint and
 **Status:** complete | blocked
 **Files changed:** <comma-separated repo-relative paths, or "none">
 **Deployed:** <component> → <env> · <url>  (or "skipped — <reason>")
+**Roadmap:** <**Id:** value(s) appended at step 1.5, comma-separated | none>
 **Reference Sync:** done | n/a
 **Commit:** <short hash> | none (no git repo)
 **Notes:** <one short line, optional>

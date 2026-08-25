@@ -270,12 +270,12 @@ One row each for: a parked gate, a gate decided on a **timeout** (labelled as au
 |---|---|---|
 
 - a roadmap `**Id:**` → `/roadmap`
-- a `custom-tests.yaml` entry whose `last:` is `blocked` → Step 0 of `/code`, `/fix`, `/pilot` (name the route: walked after a prod deploy, or open on a named trigger)
+- a `custom-tests.yaml` entry **this run** recorded `blocked` → Step 0 of `/code`, `/fix`, `/pilot` (name the route: walked after a prod deploy, or open on a named trigger)
 - the git tree or a named stash → Step 0 entry hygiene and `/tidy`
 
 **No home → the row is Open.** Filing is for **scope** only — work someone would pick up later. Append it to `docs/roadmap.md` in the format `<PREFIX>-dev` step 1.5 defines (`**Id:**`, `**Added:**`, matching the convention the file already uses); the path is `EXEMPT` in PATH_MAP, so no skill load is needed. A parked gate, a timeout decision and a `fail` are **not** scope: they are this run's unfinished business and stay Open. Otherwise this block becomes a way to make Open look empty. Nothing emerged → write `None`.
 
-The roadmap itself is not reported here — this covers the run; `/roadmap` reads the backlog.
+**Only what this run produced.** The roadmap is not reported here, and neither is a deferral that was already open when the run started — Step 0 listed those, and repeating them at the end is the backlog dump this block exists to prevent. If a row would carry the words "pre-existing" or "not from this run", it does not belong in the report at all: something already raises it, which is exactly why Step 0 showed it to you.
 
 **The last line.** After the four blocks, print one line — **the top Open row's `Next` verbatim**, not a second place to decide what happens next:
 

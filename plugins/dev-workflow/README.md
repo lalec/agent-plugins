@@ -87,7 +87,9 @@ The upgrade is idempotent. It captures your existing prefix and skills, presents
 ```
 Runs: `myapp-dev` → `myapp-qa` → `myapp-pm`
 
-One gate up front, and it tells you rather than asks: here is what *done* means, here are the checks that will prove it, ship after sign-off or hold? Type into the free-text field to correct the goal, swap a check, or say you'll verify it live — otherwise silence is agreement.
+It opens by telling you what state the repo is already in: work sitting uncommitted, commits that passed review but were never pushed, and the checks still unproven that you could still close. None of that blocks anything — it's there because a run that builds on unshipped work should say so first.
+
+Then one gate, and it tells you rather than asks: here is what *done* means, here are the checks that will prove it, ship after sign-off or hold? Type into the free-text field to correct the goal, swap a check, or say you'll verify it live — otherwise silence is agreement.
 
 ### Fix a bug
 ```
@@ -154,8 +156,8 @@ You describe the outcome; the workflow works out what would prove it. Each task 
 | **What always runs** | Smoke, this task's checks, and any earlier check covering the same files. The end-state one is never traded away for time. |
 | **How wide it goes** | Decided after the code is written, from what actually changed: a change crossing two domains, or landing where a check is already failing, pulls in the full suite. `--regression full` forces it. |
 | **When it can't run** | Recorded *blocked*, with the reason and what would close it — never as a pass. A check whose condition never arose didn't pass; it didn't run. |
-| **Where it goes then** | Sorted, not waved through: one a local environment *could* have run sends the work back for another fix round; one only production can answer is walked right after the deploy; one waiting on an outside trigger — a nightly job, a webhook — is deferred with that trigger named. |
-| **What reopens** | Anything still unproven resurfaces at the start of the next `/code`, `/fix` or `/pilot` in that repo — the three that could actually close it — so a deferral has to be closed rather than forgotten. |
+| **Where it goes then** | Sorted, not waved through: one a local environment *could* have run sends the work back for another fix round; one only production can answer is walked right after the deploy; one waiting on an outside trigger — a nightly job, a webhook — is deferred with that trigger named. A prod deploy clears everything it makes answerable, not only the check from the run that triggered it, so holding at UAT for a while doesn't leave a pile nobody can reach. |
+| **What reopens** | Anything still unproven resurfaces at the start of the next `/code`, `/fix` or `/pilot` in that repo — the three that could actually close it — so a deferral has to be closed rather than forgotten. Checks nothing local can ever run — a component that only ships to prod, a quota-bound call — are counted rather than listed, so the ones you can still close stay readable. |
 
 ---
 

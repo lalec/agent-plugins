@@ -1630,7 +1630,9 @@ tests:
     last:                            # written by this skill after every run it executes
       status: pass | fail | blocked  #   the outcome recorded in the Evidence trace
       reason: '<why>'                #   REQUIRED on blocked (and on fail): what failed to occur,
-                                     #   or what would close it. Omit on pass
+                                     #   or what would close it. Also required on a pass reached
+                                     #   through a substituted path: name the substitution and
+                                     #   what blocked the real entry. Omit on a plain pass
       commit: <sha7>                 #   HEAD at the moment it ran
       ts: YYYY-MM-DDTHH:MM:SSZ       #   UTC
 ```
@@ -1692,7 +1694,8 @@ the observed result (HTTP status + relevant body fragment, or the screenshot pat
 are what the user reads instead of re-testing, so concrete observations, not claims.
 
 **Record the outcome:** after running a verification, write its `last:` block (`status`, `reason`
-whenever the status is `blocked` or `fail`, `commit` = `git rev-parse --short HEAD`, `ts` = UTC now)
+whenever the status is `blocked` or `fail` — **or when a `pass` was reached by a path other than the
+real entry point** — `commit` = `git rev-parse --short HEAD`, `ts` = UTC now)
 back to its `custom-tests.yaml` entry. Write it for every verification this run executed, including
 `blocked` ones — a blocked run is the outcome that most needs a history, and it is the one that most
 needs its `reason`. Commit the file with `test: record verification outcomes`.
@@ -1706,6 +1709,16 @@ identical to a clean pass in the logs: zero bad lines, no violation observed. Re
 is worse than recording nothing, because a pass **discharges the deferral permanently** and the
 invariant is never proven again. When in doubt about whether the assertion was genuinely exercised,
 it was not — write `blocked`.
+
+**A pass reached through a substituted path is still a pass — but say which path.** When the real
+entry point cannot be reached and the assertion is exercised through an equivalent one (a restored
+fixture instead of the live hand-off, a direct call instead of the UI that would make it), the
+assertion did hold, so `blocked` would be dishonest in the other direction. Record `pass` **with a
+`reason` naming the substitution and what blocked the real entry**. Without it the environment gap
+disappears: a `pass` leaves `open-deferrals`, so nothing counts the obstacle, nothing escalates it
+under the repeated-blocker rule, and the same substitution is re-invented on every future task
+touching that surface. The `reason` is what makes it greppable, which is the whole difference
+between a known limitation and an invisible one.
 
 ## Prior-selection
 

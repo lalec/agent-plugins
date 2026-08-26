@@ -299,7 +299,7 @@ One row each for: a parked gate, a gate decided on a **timeout** (labelled as au
 
 Rows this command produces that the test above places for you:
 
-- **A serve-env started at Step 1.7** — a **Status** row, `done`, evidence = the url. It is not forward work: Step 1.7 restarts a stale server and reuses a live one.
+- **A serve-env started at Step 1.7** — a **Status** row, `done`, stating the **observed end state**: left running with its url, or stopped with the ports confirmed free, depending on what this project's close-out actually does. Either is `done` and neither is forward work — Step 1.7 restarts a stale server and reuses a live one, so nothing is owed here. Report what you see; do not assert one of the two because the template mentions it.
 - **A value the pipeline resolved** — the regression scope when Step 0.5 carried `auto` — is a **Status** row carrying the reason from qa's `Tests:` line. Use the `Decisions:` provenance to place these: `agent` and `pilot-auto` are Status, **`timeout` is Open**, because that is the only case where the user was asked and did not answer.
 - **A `prod-walk:` carried out of Step 2 that Step 5 never ran** (the run held at UAT) is an **Emerged** row: it stays filed as `last: blocked`, and the row names what discharges it — `/code --prod`. It must never vanish just because the deploy step was skipped.
 - **A task recorded `UAT-only`** at Step 0.5 captured nothing and persisted nothing, by the user's own instruction. Its acceptance row in Status is `not proven`, and it is an **Open** row: `Next: verify live — <the acceptance statement>`.

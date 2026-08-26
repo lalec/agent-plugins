@@ -262,9 +262,9 @@ Translate honestly from what the agents reported, and never upgrade a status on 
 | Item | Why it is open | Next |
 |---|---|---|
 
-One row each for: a parked gate, a gate decided on a **timeout** (labelled as auto-decided, never as their choice), a verification recorded `fail` (`open-deferrals` excludes a bare fail by design, so nothing will raise it), a task recorded `UAT-only` that nobody has verified, work left in the tree, an unreached task. `Next` is the exact thing to run or click. **Order: the parked gate first, then `failed`, then the rest** — the `Next:` line below is the top row. Nothing open → write `None`.
+One row each for: a parked gate, a gate decided on a **timeout** (labelled as auto-decided, never as their choice), a verification recorded `fail` that **nothing already tracks** (`open-deferrals` excludes a bare fail by design — but if a roadmap item covers it, `/roadmap` raises it and the row belongs in Emerged instead), a task recorded `UAT-only` that nobody has verified, work left in the tree, an unreached task. `Next` is the exact thing to run or click. **Order: the parked gate first, then `failed`, then the rest** — the `Next:` line below is the top row. Nothing open → write `None`.
 
-**4. Emerged** — what the run produced that now lives somewhere with a reader. Every row names its home; there are only three:
+**4. Emerged** — work that appeared during the run that **nobody asked for**, and that now lives somewhere with a reader. **Both halves are required.** This task's own outputs are not emergent however durably they are stored: a verification it captured and passed, the roadmap item it was addressing flipped to `done`, the log entry it wrote — those are Status rows or nothing. If the run produced no unasked-for work, the honest answer is `None`; a block filled with the task's own artifacts reads as though scope appeared when none did. Every row names its home; there are only three:
 
 | Item | Where it lives | What raises it |
 |---|---|---|
@@ -288,6 +288,7 @@ One row each for: a parked gate, a gate decided on a **timeout** (labelled as au
 - Name the thing, then its state. Cut any sentence that would be true of any run.
 - No hedging. "mostly", "should be", "appears to", "successfully" all hide the status the table exists to show.
 - A `proven` or `failed` row carries its evidence in the row — the command, the url, the screenshot path. A screenshot is a path, not a description of what it shows.
+- **A caveat on a status goes in that row's evidence cell**, including what was walked and by which path when the real entry point could not be reached. Written after the blocks instead, it becomes the trailing summary this shape exists to remove — and it separates the qualification from the status it qualifies, which is how a row reads `proven` while the paragraph underneath explains that the actual entry point was never exercised.
 - Do not explain what each agent did. That is the delivery log's job.
 - Too long? Fold the rows in a good state into one (`N done · M proven`) and keep every other row as it is. **Open and Emerged are never folded.** If the report does not fit a screen, rows are being written as paragraphs.
 - The Verdict states the **state**; the closing line states the **action**. Never let both say "needs you" — Verdict keeps the outcome word and the ship state, and the command lives only in the closing line.

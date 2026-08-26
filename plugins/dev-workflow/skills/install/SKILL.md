@@ -1,6 +1,7 @@
 ---
 name: install
 description: Install a 3-agent delivery workflow (dev → qa → pm, domain skills, skill-guard hooks, slash commands, roadmap tracking) on a fresh project. Trigger when the user wants to bootstrap a multi-agent workflow, set up an AI agent pipeline on a new project, add skill-guard hooks, or install the dev-workflow on a fresh repo. Claude Code only.
+user-invocable: false
 ---
 
 # install

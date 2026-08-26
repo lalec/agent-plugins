@@ -18,7 +18,7 @@ Design contract for `plugins/dev-workflow/`. Read before editing anything in it.
 6. **No hardcoded project-variable content.** Allowed: fixed names (`<PREFIX>-dev/qa/pm`, the 6 lifecycle skill names, the command names). Forbidden: stacks, hosting, paths, ports, or discovery-dependent skill names — route those through `governed-paths.conf` / `deploy-config.yaml` / discovery.
 7. **Surgical changes only.** Edit existing structure to fit new concepts; never bolt parallel mechanisms on top.
 
-### Workflow contract (from `plugins/dev-workflow/skills/bootstrap/SKILL.md` § Phase 2 `docs/workflow.md` template)
+### Workflow contract (from `plugins/dev-workflow/skills/install/SKILL.md` § Phase 2 `docs/workflow.md` template)
 
 Every install produces this exact shape — preserve it when evolving the plugin.
 

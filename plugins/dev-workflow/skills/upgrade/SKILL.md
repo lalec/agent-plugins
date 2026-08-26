@@ -1,6 +1,7 @@
 ---
 name: upgrade
 description: Upgrade an existing dev-workflow install in the current project. Detects gaps against the latest templates (agents, hooks, lifecycle skills, commands, deploy contract) and applies idempotent fixes after user confirmation. Claude Code only. Trigger when the user wants to upgrade, update, sync, or refresh an existing dev-workflow install.
+user-invocable: false
 ---
 
 # upgrade

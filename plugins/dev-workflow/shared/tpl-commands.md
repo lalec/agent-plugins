@@ -300,6 +300,7 @@ One row each for: a parked gate, a gate decided on a **timeout** (labelled as au
 Rows this command produces that the test above places for you:
 
 - **A serve-env started at Step 1.7** — a **Status** row, `done`, stating the **observed end state**: left running with its url, or stopped with the ports confirmed free, depending on what this project's close-out actually does. Either is `done` and neither is forward work — Step 1.7 restarts a stale server and reuses a live one, so nothing is owed here. Report what you see; do not assert one of the two because the template mentions it.
+- **Parallel children qa dispatched** — its handoff `Fanned out:` count — is a **Status** row, `done`, with what they covered as the evidence. Nothing is owed; it is reported because it is a real cost the run has no other way of showing. Any priors carried rather than re-walked ride on the same row as qa's `Tests:` line reports them.
 - **A value the pipeline resolved** — the regression scope when Step 0.5 carried `auto` — is a **Status** row carrying the reason from qa's `Tests:` line. Use the `Decisions:` provenance to place these: `agent` and `pilot-auto` are Status, **`timeout` is Open**, because that is the only case where the user was asked and did not answer.
 - **A `prod-walk:` carried out of Step 2 that Step 5 never ran** (the run held at UAT) is an **Emerged** row: it stays filed as `last: blocked`, and the row names what discharges it — `/code --prod`. It must never vanish just because the deploy step was skipped.
 - **A task recorded `UAT-only`** at Step 0.5 captured nothing and persisted nothing, by the user's own instruction. Its acceptance row in Status is `not proven`, and it is an **Open** row: `Next: verify live — <the acceptance statement>`.
@@ -554,7 +555,7 @@ Runs on every completion, regardless of `ship_mode`.
 
 Report per `code.md § Done` — the same four blocks (Verdict · Status · Open · Emerged) and closing line, the same closed status words, the same writing rules. Nothing about this lane changes the shape.
 
-**This run's rows.** The Status rows for deploy / push / log / docs / ref-sync are the Step 6 scorecard facts, each checked against reality there. The root cause `<PREFIX>-debug` found belongs in the Verdict line — one clause, so the user knows what broke, not how it was traced. Ship state, a serve-env started at Step 2.7, a regression scope the pipeline worked out, an undischarged `prod-walk:`, and a `UAT-only` task are handled exactly as in `code.md § Done` — including that the first two are Status rows, not Open ones.
+**This run's rows.** The Status rows for deploy / push / log / docs / ref-sync are the Step 6 scorecard facts, each checked against reality there. The root cause `<PREFIX>-debug` found belongs in the Verdict line — one clause, so the user knows what broke, not how it was traced. Ship state, a serve-env started at Step 2.7, a regression scope the pipeline worked out, any children qa fanned out to, an undischarged `prod-walk:`, and a `UAT-only` task are handled exactly as in `code.md § Done` — including that the first three are Status rows, not Open ones.
 ```
 
 ---
@@ -624,7 +625,7 @@ Discovered lanes are project-owned: this command knows how to *find and dispatch
 **Gate.** Ask everything in **one AskUserQuestion call** — the only planned interaction of the run:
 
 1. **Confirm**:
-   - question: "Fly this mission? <goal> — <N> tasks: <numbered task list with lanes and verifications; split chunks shown as sub-items; any `[large]` tag with its target count; success criteria if any>"
+   - question: "Fly this mission? <goal> — <N> tasks: <numbered task list with lanes and verifications; split chunks shown as sub-items; any `[large]` tag with its target count; success criteria if any> · Regression: <the mission scope> — <N> tasks x <scope>"
    - header: "Confirm"
    - options:
      - label: "Launch (Recommended)" — description: "Run all tasks unattended; everything holds at UAT until close-out"
@@ -645,6 +646,8 @@ Discovered lanes are project-owned: this command knows how to *find and dispatch
 **Resource ledger.** Each granted unit starts at its grant and is decremented by the spend a metered lane reports at task exit. Before dispatching any metered task, check the ledger: **at 0 or below, the lane is closed** — remaining tasks in it are marked `skipped — budget exhausted` and the loop continues with the others. **No grant for a unit means every lane metered in that unit is off for the whole mission** — those tasks are dropped at the gate, not silently attempted.
 
 Be precise about what this enforces: the ledger governs **dispatch**, not consumption. `/pilot` decides whether to start another metered task; it cannot cap spend *inside* a task that is already running — the lane owns that, and a lane that under-reports its spend corrupts the ledger. State the granted units and the running balance in the progress line and the close-out, so an over-spend is visible even though it cannot be prevented here.
+
+**State the regression scope in that question, not just the tasks.** It is the one setting that moves mission cost by an order of magnitude: `full` re-covers every prior verification per task *and* on every fix cycle, so `--regression full` on a multi-task mission is a different order of spend from the pinned `smart` default. The user is present exactly once, here — pricing the run while they can still change it is the same reason **Budget** is asked up front. Report it; never gate on it.
 
 Timeout → same risk split as the `/code` Gate policy: launch on the recommended defaults labeled `auto-selected on timeout — not user-confirmed`, **except Ship, whose timeout default is always Hold, and Budget, whose timeout default is always None** (an unattended run must not spend a resource nobody granted). Regression scope is fixed at `smart` for every task unless `--regression` said otherwise — a full regression per task would multiply cost across the mission, and `auto` would escalate on evidence nobody is present to read; each task's QA already runs prior verifications for the files it touched. This is a deliberate asymmetry with `/code`/`/fix`, whose default is `auto`: there, a person sees the resolved scope and its reason.
 

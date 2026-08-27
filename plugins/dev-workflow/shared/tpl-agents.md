@@ -128,12 +128,15 @@ Code edits → `<PREFIX>-dev`. Delivery log → `<PREFIX>-pm`. Review never skip
 ## Handoff
 **Status:** signed-off | signed-off-with-deferrals | blocked
 **Review:** clean | <N> findings — <one-line summary; note any non-source nits fixed directly>
-**Tests:** <what ran> · <pass/fail counts> · regression=<the scope that ran: smart|full><when the caller passed `auto`, append ` (derived: <one clause — what in the change decided it>)`>
+**Tests:** <what ran> · <pass/fail counts> · <N carried, when any prior was carried forward> · regression=<the scope that ran: smart|full><when the caller passed `auto`, append ` (derived: <one clause — what in the change decided it>)`>
+**Fanned out:** <N> children · <one clause: what each covered>  (or "none")
 **Evidence:** <one line per typed verification: command/action → observed result → pass|fail|blocked; "none" if no typed verifications ran>
 **UAT-deferred:** <verification names + reasons — only with signed-off-with-deferrals; omit line otherwise>
 **Reference Sync:** done | n/a
 **Notes:** <one short line, optional>
 ```
+
+`Fanned out:` records parallel subagents you dispatched to split a large verification set — the count is a cost the caller cannot see any other way, so report it even though it needs no action. Write `none` when you did the work yourself.
 
 Use `Status: blocked` if review or tests reported anything that can't be signed off without a code change. Use `signed-off-with-deferrals` only when the sole open items are verifications no available environment can run. `Evidence:` is the compact proof the user reads instead of re-testing — concrete commands and observed output, not claims.
 

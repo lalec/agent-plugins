@@ -1526,17 +1526,19 @@ Always-run baseline: service/endpoint reachability + log check. Curl templates a
 
 ## Functional Feature Tests
 
-Per-task verifications captured up-front by `/code` and `/fix` and accumulated in `references/custom-tests.yaml`. This skill resolves *how* to verify each one at runtime — read `references/custom-tests.md` for the schema, the execution protocol (type → tool → pass criterion, including the UX/E2E screenshot rule), the prior-selection rule, and — when the caller passes `regression_mode: auto` — the regression-scope rule, before running this tier.
+Per-task verifications captured up-front by `/code` and `/fix` and accumulated in `references/custom-tests.yaml`. This skill resolves *how* to verify each one at runtime — read `references/custom-tests.md` for the schema, the execution protocol (type → tool → pass criterion, including the UX/E2E screenshot rule), the prior-selection and carry-forward rules, how to split a large set across parallel children, and — when the caller passes `regression_mode: auto` — the regression-scope rule, before running this tier.
 
 ## Regression
 
 Full broad suite — `references/test-commands.md § Regression` (hand-authored) plus every verification in `custom-tests.yaml`. Run only when the resolved scope is `full`. The hand-authored part holds broad invariants *not yet* captured per-task; retire a hand-authored flow only once a `custom-tests.yaml` entry covers that journey — don't duplicate a check that already runs as a typed verification.
 
+**`full` means every prior verification is *accounted for*, not that every one is re-executed.** A prior whose `last.status` is `pass` at commit `C`, where `git diff --name-only <C>..HEAD` touches none of its `paths:`, cannot have regressed — nothing that could break it has changed. Carry its verdict forward with the commit range as the evidence rather than walking it again. The full rule, including what is never carried, is in `references/custom-tests.md § Carrying a prior forward`.
+
 ## Rules
 
 - Run tests after every significant change before closing the task.
 - **Never re-run domain unit/lint suites** — those are `<PREFIX>-dev`'s Quality Checklist gates, already run before handoff. This skill's tiers are Smoke, Functional Feature, and Regression only; a full unit suite is not an acceptable "superset" substitute for the selected tier set — it re-proves what dev proved and overrides the caller's `regression_mode`.
-- **`regression_mode: smart` and `full` are pinned — `auto` is the only one you decide.** A pinned value binds in both directions: never widen it, never narrow it. On `auto`, resolve the scope once per task from the paths actually changed (`references/custom-tests.md § Regression scope`) and **report the value you resolved plus the one-clause reason** — that report is what the caller puts on its `Tests:` line and the delivery log records as an agent-derived decision. An unreported resolution reads as if the caller chose it.
+- **`regression_mode: smart` and `full` are pinned — `auto` is the only one you decide.** A pinned value binds in both directions: never widen it, never narrow it. **Carrying a prior forward is not narrowing** — the scope still covers it, and the carry is recorded with the commit range that proves nothing it covers changed (`references/custom-tests.md § Carrying a prior forward`). Dropping a verification for any other reason — time, cost, a guess that it is unrelated — is narrowing, and is forbidden. On `auto`, resolve the scope once per task from the paths actually changed (`references/custom-tests.md § Regression scope`) and **report the value you resolved plus the one-clause reason** — that report is what the caller puts on its `Tests:` line and the delivery log records as an agent-derived decision. An unreported resolution reads as if the caller chose it.
 - Never start automated actions against live targets without explicit user confirmation.
 - Use representative placeholder inputs for smoke tests; live/real targets require explicit opt-in.
 - In the `/code`/`/fix` pipeline this skill runs inside the `<PREFIX>-qa` subagent and **must not** ask the user interactively — resolve each verification deterministically; if a target cannot be resolved, report that verification as blocked rather than prompting. Interactive disambiguation is allowed only when this skill is invoked directly at top level (see `references/custom-tests.md`).
@@ -1553,7 +1555,7 @@ Verify before finishing any `<PREFIX>-test` invocation that touches API handlers
 ## References
 - `references/test-commands.md` — Smoke snippets, Regression suite, Functional Feature Subjects (data-store query helpers)
 - `references/custom-tests.yaml` — per-task verifications captured by `/code` and `/fix`
-- `references/custom-tests.md` — schema + runtime execution/inference protocol + prior-selection rule
+- `references/custom-tests.md` — schema + runtime execution/inference protocol + prior-selection, carry-forward and parallel-split rules
 - `references/sync-checklist.md` — when-to-update rules for the reference files
 ```
 
@@ -1720,6 +1722,32 @@ under the repeated-blocker rule, and the same substitution is re-invented on eve
 touching that surface. The `reason` is what makes it greppable, which is the whole difference
 between a known limitation and an invisible one.
 
+## Splitting a large set across parallel children
+
+A resolved set too large for one context is split across parallel subagents — the standard shape for
+a set of independent checks, and the cheap one: each child accumulates only its own share of tool
+output, and the growth every turn re-reads divides with it. Two rules keep that saving from being
+eaten by the split itself.
+
+**Brief each child; never send it to read this file.** A child told to read the protocol pays for it
+on *every* turn it then takes, and that cost multiplies by the number of children — it is the only
+part of a fan-out that does. State the operative rules inline in the dispatch prompt instead, in a
+few hundred words: the running-stack rule, the freshness rule, `pass` means exercised-and-held, the
+substituted-path rule, and the evidence-trace line format. Give it the resolved entries with their
+`type`, `assert` and target already looked up, so it starts working rather than orienting. Reading
+this file is for whoever does the splitting; the children get its conclusions.
+
+**Bound the turns in a child, not the number of children.** Cost grows with the square of a child's
+turn count, so one child taking 160 turns costs far more than two taking 80. Size each slice to
+finish in roughly 60 turns; a child still working past that returns what it has plus the entries it
+never started, and the caller re-dispatches the remainder. **When in doubt, split further** — more
+children is the cheaper direction, bounded only by what the harness will run at once.
+
+**Keep verbose output out of the context.** Redirect a full suite run to a file and read back the
+tail or a grep, rather than letting the whole dump land in the transcript and be re-read on every
+subsequent turn. This is the largest per-child lever, and it applies whether or not anything was
+split.
+
 ## Prior-selection
 
 Resolve the prior set with the delivery graph:
@@ -1734,6 +1762,39 @@ manual rule if the script is missing or exits non-zero.
 
 The rule it implements: include a prior verification when its stored `paths:` set intersects the
 changed-paths list passed by the caller. This task's own verifications always run.
+
+## Carrying a prior forward
+
+Selection decides *which* priors are in scope. This decides which of them still need **executing** —
+and it applies to every scope, mattering most under `full`, where the same prior set is otherwise
+re-walked once per task and again on every retest.
+
+A prior is **carried** when both hold:
+
+1. its `last.status` is `pass`, and
+2. `git diff --name-only <last.commit>..HEAD` intersects none of its stored `paths:`.
+
+Nothing that could break it has changed, so re-running it re-proves the same thing against the same
+code. Carry the verdict forward and record the commit range as its evidence.
+
+**Never carried — always execute:**
+
+- the **end-state** verification of the current task (non-negotiable in every scope and every
+  retest — see above);
+- any prior whose `last.status` is `blocked` or `fail` — an unproven invariant is exactly what a
+  re-run exists for;
+- any prior with no `last:` block at all (never run), or whose `last.commit` is missing or not an
+  ancestor of `HEAD` — an unresolvable range is not a proof;
+- every hand-authored flow in `test-commands.md § Regression` — those carry no `paths:`, so nothing
+  bounds what could have broken them;
+- anything at all when `git` is unavailable or the diff command fails. **The fallback is to
+  execute**, never to assume.
+
+**Report carried and walked separately** in the tier summary — `N walked · M carried (unchanged since
+<sha7>)`. A carry folded silently into the pass count is indistinguishable from a check that ran,
+which is the same blur the `pass`/`blocked` rule exists to prevent one level down. Do **not** rewrite
+`last:` for a carried verification: it was not executed, and its recorded commit is what a later carry
+measures the next diff from.
 
 ## Regression scope
 

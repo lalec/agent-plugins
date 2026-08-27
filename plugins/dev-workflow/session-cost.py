@@ -106,14 +106,27 @@ def summarize(rows):
     )
 
 
-def label_for(path):
+def meta_for(path):
+    """(agentType, spawnDepth, description, agentId, parentAgentId) — depth 1 when unknown.
+
+    Depth is what turns a wall of `general-purpose` rows into one fact: a subagent that
+    fans out spends at depth 2+, and that spend is invisible in a flat listing.
+    """
+    agent_id = os.path.basename(path)[len("agent-") : -len(".jsonl")]
     meta = path.replace(".jsonl", ".meta.json")
     if os.path.exists(meta):
         try:
-            return json.load(open(meta)).get("agentType") or os.path.basename(path)
+            j = json.load(open(meta))
+            return (
+                j.get("agentType") or os.path.basename(path),
+                j.get("spawnDepth") or 1,
+                j.get("description") or "",
+                agent_id,
+                j.get("parentAgentId"),
+            )
         except (ValueError, OSError):
             pass
-    return os.path.basename(path)
+    return (os.path.basename(path), 1, "", agent_id, None)
 
 
 RESUME_GAP = 3600  # a gap this long means someone resumed the session later
@@ -179,25 +192,63 @@ def main():
         return [r for r in rows if not until or (r["ts"] and r["ts"] <= until)]
 
     top = load_win(session)
-    components = [("top-level", summarize(top))]
     subagents = sorted(
         glob.glob(os.path.splitext(session)[0] + "/subagents/agent-*.jsonl")
     )
-    components += [(label_for(f), summarize(load_win(f))) for f in subagents]
 
-    hdr = f"{'component':<20}{'model':<18}{'reqs':>5}{'out':>9}{'read':>12}{'w1h':>10}{'w5':>10}{'cost':>9}"
+    agents = {}
+    for f in subagents:
+        kind, depth, desc, aid, parent = meta_for(f)
+        agents[aid] = dict(
+            kind=kind, depth=depth, desc=desc, parent=parent, s=summarize(load_win(f))
+        )
+
+    # Print each depth-1 agent followed by its descendants, so a fan-out reads as a
+    # tree rather than as unattributed rows scattered through the listing.
+    children = {}
+    for aid, a in agents.items():
+        children.setdefault(a["parent"], []).append(aid)
+
+    rows = [("top-level", 0, "", summarize(top))]
+
+    def walk(aid, indent):
+        a = agents[aid]
+        rows.append((a["kind"], a["depth"], a["desc"], a["s"]))
+        for kid in sorted(children.get(aid, []), key=lambda k: -agents[k]["s"]["cost"]):
+            walk(kid, indent + 1)
+
+    roots = [a for a in agents if agents[a]["parent"] not in agents]
+    for aid in sorted(roots, key=lambda k: -agents[k]["s"]["cost"]):
+        walk(aid, 0)
+
+    hdr = (
+        f"{'component':<20}{'d':>2} {'model':<16}{'reqs':>5}{'out':>9}"
+        f"{'read':>12}{'w1h':>10}{'w5':>10}{'cost':>9}"
+    )
     print(hdr)
     print("-" * len(hdr))
-    for name, s in components:
+    for kind, depth, desc, st in rows:
+        name = ("  " * max(0, depth - 1)) + kind
         print(
-            f"{name:<20}{s['model']:<18}{s['n']:>5}{s['out']:>9,}"
-            f"{s['read']:>12,}{s['w1h']:>10,}{s['w5']:>10,}{s['cost']:>8.2f}"
+            f"{name[:20]:<20}{depth or '':>2} {st['model']:<16}{st['n']:>5}{st['out']:>9,}"
+            f"{st['read']:>12,}{st['w1h']:>10,}{st['w5']:>10,}{st['cost']:>8.2f}"
+            + (f"  {desc[:44]}" if desc else "")
         )
     print("-" * len(hdr))
+
+    total = sum(st["cost"] for _, _, _, st in rows)
+    nested = [(k, d, x, st) for k, d, x, st in rows if d >= 2]
     print(
-        f"{'TOTAL':<20}{'':<18}{'':>5}{'':>9}{'':>12}{'':>10}{'':>10}"
-        f"{sum(s['cost'] for _, s in components):>8.2f}"
+        f"{'TOTAL':<20}{'':>2} {'':<16}{'':>5}{'':>9}{'':>12}{'':>10}{'':>10}"
+        f"{total:>8.2f}"
     )
+    if nested:
+        n_cost = sum(st["cost"] for _, _, _, st in nested)
+        share = n_cost / total * 100 if total else 0
+        print(
+            f"{'  of which depth>=2':<20}{'':>2} {'':<16}{len(nested):>5}{'':>9}"
+            f"{'':>12}{'':>10}{'':>10}{n_cost:>8.2f}   {share:.0f}% — subagents that fanned out"
+        )
     cadence(top)
     warn_if_resumed(top)
 

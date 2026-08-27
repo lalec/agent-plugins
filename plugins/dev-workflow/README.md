@@ -163,16 +163,17 @@ You describe the outcome; the workflow works out what would prove it. Each task 
 
 ## What you get back
 
-Every command that closes work ends the same way, so you read the shape instead of the sentences. Four blocks, and then it stops:
+Every command that closes work ends the same way, so you read the shape instead of the sentences. Five blocks, and then it stops:
 
 | Block | What it tells you |
 |---|---|
 | **Verdict** | One line: what state the work is in, and whether it needs you. |
+| **Learned** | At most three bullets, often none — only what changes your picture: a number you rely on that turns out to measure something else, a bug that passed every test you already had, a page that was being checked and didn't exist. It's second because it's the part you can't get from the diff. |
 | **Status** | A row per thing that was meant to happen or was checked, each with one word from a fixed set — `needs you`, `failed`, `not done`, `not proven`, `done`, `proven`, `n/a`. Rows that aren't in a good state come first. |
-| **Open** | Only what dies when you close the session: a question waiting on you, a check that failed, something you said you'd verify live, work left in the tree. Each row carries the exact thing to run or click. A choice made for you because you didn't answer in time shows up here, labelled as such. Nothing open says `None`. |
-| **Emerged** | Everything else the run turned up, and where it now lives — a roadmap item with its id, a check filed as unproven, a named stash. Each row names what will raise it again, so you can forget it on purpose. If something has nowhere to live, it goes in Open instead of quietly evaporating. |
+| **Open** | Your inbox: anything that needs a decision or an action from you now — a question waiting on you, a check that failed, something you said you'd verify live, work left in the tree. Each row carries the exact thing to run or click, and something already written to the roadmap still shows up here if it's what you should do next. A choice made for you because you didn't answer in time appears here, labelled as such. Nothing open says `None`. |
+| **Emerged** | The receipt: everything else the run turned up and where it now lives — a roadmap item with its id, a check filed as unproven, a named stash. Each row names what will raise it again, so you can forget it on purpose. Nothing appears in both blocks, and anything with nowhere to live goes in Open rather than quietly evaporating. |
 
-Then one last line, and it's the one you act on: either the single command that clears the top of Open, or `none — nothing open, safe to start a fresh session`. That's the answer to the question a report usually leaves you guessing at — whether this piece of work is finished, or whether closing the terminal loses something. It can only say you're clear when Open is empty, and Open can only be empty once everything else has somewhere to live.
+Then one last line, and it's the one you act on: `none — nothing open, safe to start a fresh session`, or the single command that clears the top of Open — or, when two or more tracked items are waiting, one `/pilot` line that runs them as a batch in ranked order. That's the answer to the question a report usually leaves you guessing at — whether this piece of work is finished, or whether closing the terminal loses something. It can only say you're clear when Open is empty, and Open can only be empty once everything else has somewhere to live.
 
 `done` and `proven` are deliberately different words. Code that was written is *done*; a journey somebody actually walked is *proven* — and a change that shipped with a check nothing could run says `not proven`, rather than reading as finished. Long runs get more rows, never more prose: rows in a good state fold into a single line, and the two blocks that need you never fold at all.
 

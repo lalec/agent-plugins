@@ -71,7 +71,7 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
 **Skills:** <PREFIX>-x · <PREFIX>-y
 **Deployed:** <component> → <env> · <url> (omit line entirely if no deploy happened)
 **Addresses:** <roadmap **Id:** value(s), comma-separated> (omit line entirely if no tracked item is addressed)
-**UAT-deferred:** <verification names + how confirmed> (omit line entirely if nothing was deferred)
+**UAT-deferred:** <verification names — why each could not run, + how confirmed> (omit line entirely if nothing was deferred)
 **Decisions:** <gate>=<value> (<user|timeout|pilot-auto>) · … (omit line entirely if no gate was answered)
 **Checklist:** <skill> — <what changed> (omit line entirely if nothing to note)
 ~~~
@@ -84,7 +84,7 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
 - **Skills** — only skills confirmed present in the marker union from Process step 3, separated by ` · `. Use `—` if none found; never reconstruct from memory. This field is the source of the delivery graph's `USED` edges, and it is the **only** record that a no-file-trace skill like `<PREFIX>-review` or `<PREFIX>-debug` ran — git cannot recover it, so an inaccurate list here is unrecoverable later.
 - **Deployed** — one line per component deployed this session, taken verbatim from the deploy-owning skill's report (e.g. `backend → test · https://test-api.example.com`). Omit the line entirely when no deploy happened.
 - **Addresses** — the `**Id:**` of each `docs/roadmap.md` item this task advances or closes, comma-separated (e.g. `verification-email-on-signup, stripe-receipt-sender`). This is the durable roadmap↔delivery link: without it the connection survives only as a status flip that nothing can trace back. Use the ids the pm step confirmed; omit the line when the task addresses no tracked item, and say so in the pm handoff rather than guessing an id.
-- **UAT-deferred** — verifications QA could not run in any environment, carried from the pipeline (e.g. `` `login-flow-e2e` (user-confirmed) ``). Backtick each verification name so it stays machine-readable. These are open follow-ups; omit the line when none.
+- **UAT-deferred** — verifications QA could not run in any environment, carried from the pipeline. **Each name is followed by a spaced dash and the reason it could not run** (e.g. `` `login-flow-e2e` — no non-prod env for this component (user-confirmed) ``). The reason is not optional prose: it is the only thing that tells a later `open-deferrals` read whether the entry is structurally unprovable or something a person could still close, and the routing that decides that already happened when the deferral was accepted. Without it the entry is permanently unclassifiable — the text is never recoverable later. Backtick each verification name so it stays machine-readable. These are open follow-ups; omit the line when none.
 - **Decisions** — one term per gate that came up this task, as `<gate>=<value> (<how>)`, joined by ` · ` — e.g. `regression=full (agent) · ship=hold (timeout) · defer=accept (user)`. `<how>` is `user` (a real answer), `timeout` (a default taken on silence), `agent` (derived by the pipeline from evidence rather than asked — the regression scope resolved from the changed paths is the standing case), or `pilot-auto` (decided autonomously mid-mission). A gate that was deliberately **not** decided is recorded as `<gate>=parked (human-gated)` — an autonomous lane may produce the evidence for a keep/ship verdict but never the verdict itself. **An unanswered gate is never recorded as decided, and a timeout or auto-decision is never recorded as `user`** — this line is the only durable record of whether a shipped change was actually consented to. Omit the line when no gate came up.
 - **Checklist** — one `skill — note` per skill whose reference files were updated. Omit the line entirely if nothing was updated.
 
@@ -1635,7 +1635,9 @@ tests:
                                      #   or what would close it. Also required on a pass reached
                                      #   through a substituted path: name the substitution and
                                      #   what blocked the real entry. Omit on a plain pass
-      commit: <sha7>                 #   HEAD at the moment it ran
+      commit: <sha7>                 #   the code commit under test — resolved ONCE at the start
+                                     #   of the run, never re-read per verification (records are
+                                     #   committed as they go, so HEAD moves during the run)
       ts: YYYY-MM-DDTHH:MM:SSZ       #   UTC
 ```
 
@@ -1697,10 +1699,25 @@ are what the user reads instead of re-testing, so concrete observations, not cla
 
 **Record the outcome:** after running a verification, write its `last:` block (`status`, `reason`
 whenever the status is `blocked` or `fail` — **or when a `pass` was reached by a path other than the
-real entry point** — `commit` = `git rev-parse --short HEAD`, `ts` = UTC now)
+real entry point** — `commit` = the code commit under test, `ts` = UTC now)
 back to its `custom-tests.yaml` entry. Write it for every verification this run executed, including
 `blocked` ones — a blocked run is the outcome that most needs a history, and it is the one that most
-needs its `reason`. Commit the file with `test: record verification outcomes`.
+needs its `reason`.
+
+**Resolve `commit` once, at the start of the run** — `git rev-parse --short HEAD` before the first
+verification — and write that same value into every `last:` block. Do **not** re-read `HEAD` per
+verification: outcomes are committed as they go (below), so HEAD moves during the run and a later
+re-read would record a `test:` bookkeeping commit as the code state the check was proven against.
+That would put bookkeeping commits on `VERIFIED` edges, and the carry-forward diff would measure from
+the wrong end.
+
+**Commit as you go, not once at the end.** After each verification — or each small group of them —
+commit `custom-tests.yaml` with `test: record verification outcomes`. An agent that is killed
+mid-sweep (a usage limit, a watchdog) loses only what it had not yet committed; batching every write
+to the end loses the whole run's record while the tallies in the transcript survive to contradict it.
+A partial sweep with intact records beats a complete one whose record died with the agent. This has
+happened: one kill took ~196 verification records with it, leaving `last:` blocks reading older than
+the run that had just re-proven them.
 
 **`pass` means the assertion was exercised and held — not that nothing went wrong.** If the
 condition the assertion is about never arose, the check did not run: it observed an absence, which
@@ -1748,6 +1765,11 @@ tail or a grep, rather than letting the whole dump land in the transcript and be
 subsequent turn. This is the largest per-child lever, and it applies whether or not anything was
 split.
 
+**Each child records outcomes as it goes.** A child writes and commits each `last:` block when it
+finishes that verification, using the run's pinned commit — it does not accumulate them to return in
+one batch. A child is the most likely thing in the run to be killed, and a killed child that batched
+its writes costs the whole slice's record rather than one verification's.
+
 ## Prior-selection
 
 Resolve the prior set with the delivery graph:
@@ -1789,6 +1811,12 @@ code. Carry the verdict forward and record the commit range as its evidence.
   bounds what could have broken them;
 - anything at all when `git` is unavailable or the diff command fails. **The fallback is to
   execute**, never to assume.
+
+**A stale record fails safe, by design.** If a run was killed before it could record an outcome, the
+entry still holds the *older* commit it last passed at — so the diff from there reaches everything
+that has changed since, and the prior is walked. That is why `last.commit` is the code commit under
+test and never a bookkeeping one: it is the left end of this diff, and moving it forward without
+re-proving the assertion would silently carry a verdict nobody earned.
 
 **Report carried and walked separately** in the tier summary — `N walked · M carried (unchanged since
 <sha7>)`. A carry folded silently into the pass count is indistinguishable from a check that ran,
@@ -2127,7 +2155,7 @@ model call anywhere in the projector — projection is pure parsing.
 
 **What `USED` is for.** For skills that own files it is largely redundant — `commit -TOUCHES-> path -OWNED_BY-> skill` derives the same answer from git, which cannot be wrong. Its unique value is the **no-file-trace** skills: `<PREFIX>-review` and `<PREFIX>-debug` leave nothing in a diff, so "did this feature need debugging?" exists here and nowhere else. That signal only holds if `**Skills:**` is derived from the session-scoped markers (see `<PREFIX>-log` Process step 3) — a transcript-derived list misses exactly those two, because they load inside subagents.
 | `DEPLOYED_TO` | commit → env | `url` | log `**Deployed:**` |
-| `DEFERRED` | commit → verif | `accepted_by` | log `**UAT-deferred:**` |
+| `DEFERRED` | commit → verif | `accepted_by`, `reason` | log `**UAT-deferred:**` |
 | `DECIDED` | commit → decision | `value`, `by` | log `**Decisions:**` |
 | `ADDRESSES` | task → road | — | log `**Addresses:**` |
 | `SUPERSEDES` | commit → commit | — | `git log --grep=^Revert` |

@@ -499,8 +499,15 @@ def project(src: Sources) -> list[dict]:
             # NOT a usable guard here: a deferral may legitimately name work that was never
             # captured as a typed verification, and those are exactly the ones that must
             # not be lost.
+            # The tail after that boundary is the reason the check could not run — the
+            # only place a log-route deferral records *why*. Dropping it (as this did)
+            # left `open-deferrals` unable to classify the log-sourced half of a backlog:
+            # 42 of 62 rows on one install carried no reason at all, so the
+            # structural-vs-closable split could not see them.
             for chunk in deferred.split("·"):
-                head = DEFERRAL_REASON_RE.split(chunk, maxsplit=1)[0]
+                parts = DEFERRAL_REASON_RE.split(chunk, maxsplit=1)
+                head = parts[0]
+                why = parts[1].strip() if len(parts) > 1 else ""
                 for name in BACKTICK_RE.findall(head):
                     if TOKEN_RE.match(name.strip()):
                         edges.append(
@@ -510,6 +517,7 @@ def project(src: Sources) -> list[dict]:
                                 f"verif:{name.strip()}",
                                 f"{where}.UAT-deferred",
                                 accepted_by=accepted,
+                                reason=why,
                             )
                         )
 
@@ -719,6 +727,10 @@ def open_verifications(edges: list[dict], changed: list[str] | None) -> list[dic
         if r is not None and "deferred_at" not in r:
             r["deferred_at"] = node_id(e["from"])
             r["accepted_by"] = e.get("props", {}).get("accepted_by", "unstated")
+            # Entries written before reasons were required have none. Leave the key
+            # absent rather than inventing one — a caller counts these as unclassified.
+            if e.get("props", {}).get("reason"):
+                r.setdefault("reason", e["props"]["reason"])
             r["src"] = e["src"]
     for name, v in stat.items():
         if v["status"] != "blocked":
@@ -726,7 +738,11 @@ def open_verifications(edges: list[dict], changed: list[str] | None) -> list[dic
         r = row(name)
         if r is not None:
             r["blocked_at"] = v["commit"]
-            r["reason"] = v.get("reason", "")
+            # Don't clobber a reason the log route already supplied: a `blocked` row
+            # recorded before reasons were required has none, and the deferral's is then
+            # the only explanation there is.
+            if v.get("reason") or not r.get("reason"):
+                r["reason"] = v.get("reason", "")
             r.setdefault("src", f"custom-tests.yaml#{name}.last")
     return list(rows.values())
 
@@ -743,7 +759,10 @@ def clip(text: str, n: int = 160) -> str:
 def open_line(r: dict) -> str:
     bits = []
     if r.get("deferred_at"):
-        bits.append(f"deferred {r['deferred_at']} ({r['accepted_by']})")
+        # Render the reason here only when the blocked route below won't — otherwise the
+        # same sentence prints twice on a row that came in by both routes.
+        why = f" — {clip(r['reason'])}" if r.get("reason") and not r.get("blocked_at") else ""
+        bits.append(f"deferred {r['deferred_at']} ({r['accepted_by']}){why}")
     if r.get("blocked_at"):
         why = f" — {clip(r['reason'])}" if r.get("reason") else ""
         bits.append(f"blocked {r['blocked_at']}{why}")

@@ -858,12 +858,11 @@ State the evidence whenever a reconcile changes a store's answer. **A reconcile 
 
 ## Step 3 — Diagnose
 
-Two questions, in order, answered from Step 1's numbers as reconciled by Step 2. The answer is the `Verdict` line.
+Ask these in order, from Step 1's numbers as reconciled by Step 2, and stop at the first yes. The answer is the `Verdict` line.
 
-1. **Is anything blocked on you?** A gate that survived Step 2, an approval, a decision only a person makes.
-2. **Is more work in flight than is finishing?** In-progress roadmap items plus held commits, against the delivery-log entries of the last two weeks.
-
-**0. Is a declared store bad?** Ask this before the two below when the project declares any. A `when-bad: degraded` store that is not healthy makes the project **degraded** — nothing else matters while whatever it feeds goes stale. A `when-bad: live` store that is currently live makes it **busy**: report its state, let it finish, and do not propose work touching its paths.
+1. **Is a declared store bad?** Only when the project declares any — skip this question entirely otherwise. A `when-bad: degraded` store that is not healthy makes the project **degraded**; a `when-bad: live` store that is currently live makes it **busy**.
+2. **Is anything blocked on you?** A gate that survived Step 2, an approval, a decision only a person makes.
+3. **Is more work in flight than is finishing?** In-progress roadmap items plus held commits, against the delivery-log entries of the last two weeks.
 
 | Answers | Diagnosis | What the report recommends |
 |---|---|---|
@@ -873,7 +872,7 @@ Two questions, in order, answered from Step 1's numbers as reconciled by Step 2.
 | Nothing waits on you, but in-flight is growing | **fragmented** | Finish before starting. Name the in-progress item closest to done |
 | Neither | **clear** | Start the top-ranked open item |
 
-**Earlier rows win.** `degraded` and `busy` outrank `gate-blocked`, which outranks `fragmented` — a broken pipeline makes every other answer moot, a live writer makes acting on the tree unsafe, and a gate is cleared in minutes where a roadmap item takes days. State the diagnosis in one line with the two numbers that produced it, and nothing else.
+**Earlier rows win.** `degraded` and `busy` outrank `gate-blocked`, which outranks `fragmented` — a broken pipeline makes every other answer moot, a live writer makes acting on the tree unsafe, and a gate is cleared in minutes where a roadmap item takes days. State the diagnosis in one line with the numbers that produced it, and nothing else.
 
 **Held commits are never an action on their own.** They are a symptom: either a gate holds them or nobody decided. Never recommend "push" — recommend clearing whatever holds them, and note that the push follows.
 

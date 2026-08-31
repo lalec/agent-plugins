@@ -13,7 +13,7 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 **What gets installed:**
 - 3 orchestrator agents: `<PREFIX>-dev`, `<PREFIX>-qa`, `<PREFIX>-pm`
 - 8 lifecycle skills: `<PREFIX>-log`, `<PREFIX>-review`, `<PREFIX>-debug`, `<PREFIX>-deploy`, `<PREFIX>-test`, `<PREFIX>-skill`, `<PREFIX>-docs`, `<PREFIX>-graph`
-- 9 slash commands: `/code` + `/fix` + `/pilot` + `/tweak` + `/revert` + `/tidy` + `/design` (conditional on design skill) + `/roadmap` + `/wrap`
+- 10 slash commands: `/code` + `/fix` + `/pilot` + `/tweak` + `/revert` + `/tidy` + `/design` (conditional on design skill) + `/whats-up` + `/roadmap` + `/wrap`
 - `docs/roadmap.md` stub — source of truth for open items; tracked by `<PREFIX>-dev` (new entries) and `<PREFIX>-pm` (status updates)
 - Domain skills: one per substantive source dir, derived from discovery (not hardcoded)
 - `.claude/hooks/governed-paths.conf` — single source of truth for path→skill ownership (incl. per-skill self-ownership entries), `DEPLOY_PATHS`, and `REF_WATCH`; sourced by skill-guard, path-coverage-check, ref-sync-check, and close-out-gate
@@ -149,7 +149,7 @@ What will be created:
 - 8 lifecycle skills: <PREFIX>-log, <PREFIX>-review, <PREFIX>-debug, <PREFIX>-deploy, <PREFIX>-test, <PREFIX>-skill, <PREFIX>-docs, <PREFIX>-graph
 - 1 design skill: <PREFIX>-design  ← omit if no frontend category
 - <N> domain skills: <comma-separated list>
-- <N> slash commands: /code, /fix, /pilot, /tweak, /revert, /tidy, /roadmap, /wrap[, /design if frontend]
+- <N> slash commands: /code, /fix, /pilot, /tweak, /revert, /tidy, /whats-up, /roadmap, /wrap[, /design if frontend]
 - 9 hook scripts + governed-paths.conf + settings.json
 - CLAUDE.md with workflow sections
 
@@ -201,6 +201,7 @@ Create these files (skip if already present, offer to overwrite if stale):
 .claude/commands/tweak.md         ← from tpl-commands.md § /tweak, substitute <PROJECT> and <PREFIX>
 .claude/commands/revert.md        ← from tpl-commands.md § /revert, substitute <PROJECT> and <PREFIX>
 .claude/commands/tidy.md          ← from tpl-commands.md § /tidy, substitute <PROJECT> and <PREFIX>
+.claude/commands/whats-up.md      ← from tpl-commands.md § /whats-up, substitute <PROJECT> and <PREFIX>
 .claude/commands/roadmap.md       ← from tpl-commands.md § /roadmap, substitute <PROJECT> and <PREFIX>
 .claude/commands/wrap.md          ← from tpl-commands.md § /wrap, substitute <PROJECT> and <PREFIX>
 .claude/commands/design.md        ← from tpl-commands.md § /design (only if a design domain skill was discovered in Phase 1)
@@ -532,7 +533,8 @@ Walk the checklist before declaring done:
 - [ ] `.claude/skills/` has all 8 lifecycle skills (`<PREFIX>-log`, `-review`, `-debug`, `-deploy`, `-test`, `-skill`, `-docs`, `-graph`) + all confirmed domain skills, all named `<PREFIX>-*`
 - [ ] `.claude/skills/<PREFIX>-skill/references/skill-manifest.md` exists and lists all installed lifecycle and domain skills
 - [ ] `.claude/skills/<PREFIX>-test/references/` has `test-commands.md` (with `## Smoke`, `## Regression`, `## Functional Feature Subjects` headings), `sync-checklist.md`, `custom-tests.md`, and `custom-tests.yaml` (initialized to `tests: []`). `<PREFIX>-test/SKILL.md` has a `## Test Plan` with the three tiers and no `## E2E Browser Tests` section. `custom-tests.md`'s schema uses `type: UX | Integration | E2E` (not `surface`)
-- [ ] `.claude/commands/code.md`, `fix.md`, `pilot.md`, `tweak.md`, `revert.md`, `tidy.md`, `roadmap.md`, and `wrap.md` exist (markdown format, `$ARGUMENTS`)
+- [ ] `.claude/commands/code.md`, `fix.md`, `pilot.md`, `tweak.md`, `revert.md`, `tidy.md`, `whats-up.md`, `roadmap.md`, and `wrap.md` exist (markdown format, `$ARGUMENTS`)
+- [ ] `whats-up.md` reads six stores (each with a stated fallback), calls `open-deferrals --with-fail`, reconciles a `parked` gate against later evidence before reporting it, states that it never writes, and reports per `code.md § Done` with the ranked `Open` table as its plan — **no** separate numbered action list
 - [ ] `roadmap.md` ranks via `graph.py roadmap-open` (with the read-the-file fallback), applies `$ARGUMENTS` as a filter, and routes to `/pilot --items` or a single `/code`/`/fix`; the rank rule appears **only** in `roadmap.md § Rank` — `pilot.md` cites it rather than restating it
 - [ ] `.claude/skills/<PREFIX>-debug/` has SKILL.md + `references/systematic-debugging.md`, `references/root-cause-tracing.md`, `references/defense-in-depth.md`, `references/verification.md` + `scripts/find-polluter.sh` (executable) + `scripts/find-polluter.test.md`. SKILL.md contains a `## Read Map` and **no** `## Reference Sync` section (static-content skill).
 - [ ] `.claude/skills/<PREFIX>-review/` has SKILL.md + `references/code-review-reception.md`, `references/requesting-code-review.md`, `references/issuing-findings.md` (no `verification-before-completion.md` — `<PREFIX>-debug` owns that). SKILL.md contains a `## Read Map` and **no** `## Reference Sync` section (static-content skill).
@@ -593,7 +595,7 @@ Walk the checklist before declaring done:
 - [ ] That section defines **five** blocks in order (Verdict · Learned · Status · Open · Emerged), `Learned` capped at 3 bullets and admitting only what changes the reader's picture; Open's table is three columns with `Next` a runnable command, never a bare roadmap id
 - [ ] `<PREFIX>-test/references/custom-tests.md § Execution` pins `last.commit` **once** at the start of the run (not `rev-parse HEAD` per verification) and commits outcomes **as they go**, so a killed agent loses one record rather than the run's
 - [ ] `<PREFIX>-log`'s `**UAT-deferred:**` format requires a spaced dash and the reason each verification could not run; `graph.py` emits `reason` on the `DEFERRED` edge and `open-deferrals` renders it
-- [ ] That same section carries the **row-placement test** (would Step 0 of the next run, `/roadmap` or `/tidy` raise it → Emerged naming its store, else Open naming the command), the three legal Emerged homes with **no home → the row is Open**, and the **closing line** — the top Open row's `Next` verbatim, or `none — nothing open, safe to start a fresh session`
+- [ ] That same section carries the **row-placement test** (*does this need a decision or an action from you now?* → Open naming the command, else Emerged naming its store), the rule that filing is orthogonal to urgency and **an item never appears in both blocks**, the three legal Emerged homes with **no home → the row is Open**, and the **closing line derived from the Open rows** (none → `none — nothing open, safe to start a fresh session`; one → its `Next`; 2+ all carrying ids → `/pilot --items`; 2+ mixed → the top row's `Next`)
 - [ ] `.claude/commands/pilot.md` Step 0 runs the same `open-deferrals` read as `code.md`, reports it as a line, and folds only the 3+-on-one-blocker escalation into its Confirm question
 - [ ] `.claude/commands/code.md` and `fix.md` contain a "Gate policy" section (reversible → proceed + `auto-selected on timeout — not user-confirmed` label; irreversible → park; never present a timeout as consent) and a final "Close out: push + verified scorecard" step (push via `<PREFIX>-deploy` § Push policy; scorecard facts each checked against reality)
 - [ ] `<PREFIX>-qa.md` has a `## Invocation modes` section with `mode: initial` (default, full pipeline) and `mode: retest` (skip review, run tests only — for re-runs after a dev fix)

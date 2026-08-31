@@ -25,6 +25,7 @@ A multi-agent delivery workflow for Claude Code. It runs your plan through a tea
 | `/revert` | Sanctioned rollback: `git revert` (never reset), scoped re-verification, and a logged reversal. |
 | `/tidy` | Resolve leftover WIP — sweeps the dirty tree, stashes, worktrees and stale branches, probes git history to establish what each item actually *is* (superseded ≠ accidental), then routes every one to commit / deliver / discard / ignore. |
 | `/design` | Generate 2–3 HTML variants, open them in the browser, route the winner to `/code`. Each one is held to how your app already does things — the existing pattern is looked up before a new one is proposed, and icons come from your icon set or a generation skill rather than being drawn by hand *(if a design skill is present)*. |
+| `/whats-up` | Where the project stands, in a fresh session with no handover. Reads every store that outlives a session — the roadmap, unproven checks, unpushed commits, gates still waiting on you, the working tree — then tells you whether the project is blocked on a decision, carrying more work than it's finishing, or clear to start something new, and ranks what to do about it. It corrects the stores as it goes: a gate that reads *waiting on you* but was answered weeks ago is caught by looking for the answer, since nothing rewrites a past log entry. It only reads — anything at risk of being lost becomes the top row with the command that saves it. |
 | `/roadmap` | The way in from tracked work. Ranks the open items, then either runs the top ones as a `/pilot` mission or starts a single one through the full pipeline — so a morning's worth of roadmap is one decision instead of one gate per item. |
 | `/wrap` | Close out ad-hoc work done outside `/code`/`/fix` — reviews the diff when source changed, runs `myapp-log` + `myapp-docs` + `myapp-skill` reference sync, then pushes per the deploy skill's push policy with a verified scorecard (`--no-push` to skip). |
 | Living docs | `docs/roadmap.md` (open scope), `docs/project-log.md` (delivery history), `docs/workflow.md` (pipeline map) — all kept current by the agents. |
@@ -130,6 +131,13 @@ Sweeps uncommitted changes, stashes, worktrees and stale branches, then investig
 Generates 2–3 HTML variants, opens in browser, routes chosen direction to `/code`.
 
 Before anything is proposed, `myapp-design` looks at how your app already handles what you're asking for — the confirm dialog it already has, the empty state it already shows — and either matches it, migrates the older ones to the better form, or records why this one deliberately differs. That record grows with the app, so the next person to touch a surface starts where the last one left off instead of inventing a second answer. Icons work from the same principle: your icon set wins when it has one, and when it doesn't, the asset skill generates one from your palette with the neighbouring icons as reference. Nothing is drawn by hand — an icon composed from a description comes out logically right and graphically wrong.
+
+### Pick up where you left off
+```
+/whats-up
+/whats-up consent
+```
+Start here after a few days away. Every close-out's *Open* block lives only as long as its session, so what needs you is scattered across six places that each get read only when you happen to start the matching lane. This reads all six at once and answers one question — what should I do right now? You get the diagnosis in a line (*blocked on you*, *carrying more than it's finishing*, or *clear*), then the same five blocks every other command ends with, where the Open table is already ranked so the thing that unblocks the others sits at the top. A filter narrows it to one feature or path. It changes nothing in the repo — so a failing check, a stale branch or an unanswered gate is reported with the command that fixes it, never fixed behind your back.
 
 ### Work the roadmap
 ```

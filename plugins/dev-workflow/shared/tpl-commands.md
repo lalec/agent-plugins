@@ -228,7 +228,7 @@ Runs on every completion, regardless of `ship_mode`.
 
 ## Done — the close-out report
 
-**State where things stand. Do not narrate the run.** `docs/project-log.md` already records what happened; this report exists so the user can see the state of the work without reading the transcript. Every closing command reports in this shape and cites this section — `/fix`, `/wrap`, `/tweak`, `/revert`, `/tidy`, `/pilot`.
+**State where things stand. Do not narrate the run.** `docs/project-log.md` already records what happened; this report exists so the user can see the state of the work without reading the transcript. Every closing command reports in this shape and cites this section — `/fix`, `/wrap`, `/tweak`, `/revert`, `/tidy`, `/pilot`, `/whats-up`.
 
 Five blocks, in this order, then one closing line, and nothing else. No preamble, no recap, no step-by-step account.
 
@@ -285,7 +285,7 @@ One row each for: a parked gate, a gate decided on a **timeout** (labelled as au
 
 **No home → the row is Open.** And **needs you now → the row is Open even when it has a home** — filing it does not discharge it, and the id rides in that Open row's `Next` instead. Filing is for **scope** only — work someone would pick up later. Append it to `docs/roadmap.md` in the format `<PREFIX>-dev` step 1.5 defines (`**Id:**`, `**Added:**`, matching the convention the file already uses); the path is `EXEMPT` in PATH_MAP, so no skill load is needed. A parked gate, a timeout decision and a `fail` are **not** scope: they are this run's unfinished business and stay Open. Otherwise this block becomes a way to make Open look empty. Nothing emerged → write `None`.
 
-**Only what this run produced.** The roadmap is not reported here, and neither is a deferral that was already open when the run started — Step 0 listed those, and repeating them at the end is the backlog dump this block exists to prevent. If a row would carry the words "pre-existing" or "not from this run", it does not belong in the report at all: something already raises it, which is exactly why Step 0 showed it to you.
+**Only what this run produced.** The roadmap is not reported here, and neither is a deferral that was already open when the run started — Step 0 listed those, and repeating them at the end is the backlog dump this block exists to prevent. If a row would carry the words "pre-existing" or "not from this run", it does not belong in the report at all: something already raises it, which is exactly why Step 0 showed it to you. **`/whats-up` is the single exception**, and it says so where it inverts this: it has no run of its own, so the standing backlog *is* its subject — reported as counts naming their readers, which is the form this rule was protecting.
 
 **The last line.** After the five blocks, print one line. It is **derived from the Open rows**, never authored separately — so it can never disagree with the table above it. First sort the Open rows into *needs work* (a command would do it), *needs a decision* (only you can answer), and *nothing can be done* (a count, a fact). Then:
 
@@ -789,6 +789,91 @@ Route based on selection:
 - **Variant N** — tell the user the chosen direction is ready to implement via `/code`
 - **None — iterate** — incorporate feedback, regenerate variants, return to Step 2
 - **Cancel** — stop
+```
+
+---
+
+## § /whats-up — whats-up.md (Claude Code)
+
+```markdown
+---
+description: Where the project stands and what to do next — reads every store that outlives a session, diagnoses whether the project can take on new work, and ranks what to do about it. Read-only.
+---
+
+# What's up
+
+**Usage:** `/whats-up` — the whole picture. `/whats-up <filter>` narrows to matching ids, titles, verification names or paths.
+
+**Examples:**
+- `/whats-up`
+- `/whats-up <a roadmap id, a word from an item title, or a path prefix>`
+
+**For someone who has been away and wants to be productive in five minutes.** A close-out's `Open` block dies with its session. Six stores outlive it, and each has exactly one reader that runs only if you happen to start its lane — so work that needs you can sit unseen for weeks while every individual store is behaving correctly. This is the composed reader, and it answers one question: **what should I do right now?**
+
+**This command reads; it never writes.** No commit, no stash, no edit, no reprojection — not even to repair something obviously broken. Work at risk of being lost becomes the top `Open` row naming the command that saves it, and nothing more. A status command that mutates is a status command you stop trusting.
+
+Two rules govern the output:
+
+- **Recommend, don't inventory.** A count nobody acts on is noise. Every number must change what the reader does, or it folds into a total.
+- **Housekeeping is never the headline.** Branches, worktrees and commit mechanics are one `Status` row.
+
+## Step 1 — Read the stores
+
+Read-only, in parallel. **A store that is absent or errors gets a `not done` Status row, never a silent skip** — an unread store is the one failure this report cannot recover from, because the reader has no way to know what it did not see.
+
+| Store | Read | If it fails |
+|---|---|---|
+| What moved | `git log --oneline --since=<date of the newest `docs/project-log.md` entry>` | no entries yet → last 20 commits |
+| Held commits | `git rev-list --count @{upstream}..HEAD` | no upstream → say so, do not fail |
+| Roadmap | `python3 .claude/graph/graph.py roadmap-open` | read `docs/roadmap.md`. Either way, count `**Status:** in-progress` separately from open |
+| Unproven work | `python3 .claude/graph/graph.py open-deferrals --with-fail` | read `custom-tests.yaml` for every `last.status` of `blocked` or `fail` |
+| Gates | `grep -n '=parked' docs/project-log.md`, then each hit's full `**Decisions:**` line and its entry date | none — the log is the only record one exists |
+| Repo | the `/tidy` **Step 1** sweep — run it, do not restate it here | none |
+
+`--with-fail` is what makes this store complete: a recorded `fail` is deliberately excluded from every other caller, because the close-out puts it in `Open` and no lane's Step 0 re-raises it. That is exactly the row a fresh session loses, so this is the one caller that asks for it.
+
+**Filter.** When `$ARGUMENTS` is non-empty, keep only rows whose id, title, verification name or path matches it case-insensitively. If nothing matches, say so and report the unfiltered set — a typo'd filter must never read as "nothing open".
+
+## Step 2 — Reconcile before reporting
+
+Every store records what was true when it was written. Three of them go stale in ways that **invert** the answer, so check each before it reaches the report:
+
+- **A `parked` gate is a claim, not a state.** Nothing edits a past delivery-log entry — that file is append-only and is the delivery graph's input — so a gate answered weeks ago still reads `parked` forever. Before reporting one, look for its answer: a later entry deciding the same gate, a deploy or push that could only have happened if it was answered, or the change itself sitting in the tree. Found → it is not open, and that correction is a `Learned` bullet. Not found → it is open, and its age is its entry's date.
+- **A roadmap item may already be delivered.** Cross-check each open item's `**Id:**` against `**Addresses:**` lines in the log. An item a delivered entry cites is closable, not open.
+- **A `blocked` may already be answerable.** Its `reason` names the trigger that would close it; if that trigger has since happened — the env now exists, the deploy landed — say so. A check that cannot run and a check nobody re-ran are different problems with different next steps.
+
+State the evidence whenever a reconcile changes a store's answer. **A reconcile never edits the store**; it changes only what this report says about it.
+
+## Step 3 — Diagnose
+
+Two questions, in order, answered from Step 1's numbers as reconciled by Step 2. The answer is the `Verdict` line.
+
+1. **Is anything blocked on you?** A gate that survived Step 2, an approval, a decision only a person makes.
+2. **Is more work in flight than is finishing?** In-progress roadmap items plus held commits, against the delivery-log entries of the last two weeks.
+
+| Answers | Diagnosis | What the report recommends |
+|---|---|---|
+| Something waits on you | **gate-blocked** | Clear the gate first. Say what it unblocks |
+| Nothing waits on you, but in-flight is growing | **fragmented** | Finish before starting. Name the in-progress item closest to done |
+| Neither | **clear** | Start the top-ranked open item |
+
+**Gate-blocked wins when both are true** — a gate is cleared in minutes and a roadmap item in days. State the diagnosis in one line with the two numbers that produced it, and nothing else.
+
+**Held commits are never an action on their own.** They are a symptom: either a gate holds them or nobody decided. Never recommend "push" — recommend clearing whatever holds them, and note that the push follows.
+
+## Done
+
+Report per `code.md § Done` — the same five blocks (Verdict · Learned · Status · Open · Emerged) and closing line, the same closed status words, the same writing rules. **This command runs no work, so the report is the whole of its output**: no separate plan, no numbered action list, no summary after the blocks. The ranked `Open` table *is* the plan, and a second list of the same rows in prose is the bloat this shape exists to remove.
+
+**This run's rows.**
+
+- **Verdict** — Step 3's diagnosis and the two numbers behind it.
+- **Learned** — what Step 2's reconcile changed, at most 3 bullets: a gate that reads `parked` and is not, a roadmap item already delivered, a `blocked` whose trigger has since happened. Nothing to correct → `None`. This is the block that makes the command worth running rather than reading the stores yourself.
+- **Status** — one row per store, `done` with the number it returned or `not done` with why it could not be read. Held commits are a Status row carrying the count **and what holds them**. The repo sweep is one row: `clean`, or the counts with `/tidy` as its evidence. Fold every store in a good state into a single row.
+- **Open** — the ranked plan, and the only block that proposes work. **Order it so a row that unblocks a later one comes first**, then per `code.md § Done`: the parked gate, then `failed`, then the rest. `Why it is open` carries the one line of why; `Next` is the command that does it. A row needing a decision only you can make states the options **and which one this run would pick** — a gate reported without a recommendation is how gates sit for weeks.
+- **Emerged** — the backlog that already has a reader, **counted per store, never listed**: open roadmap items → `/roadmap`, structurally unprovable deferrals → the prod walk, a named stash → `/tidy`. These are the rows that do not need you now. Listing them is the inventory this command exists to replace. This lane produces no scope of its own, so it never files anything here. **This is the one sanctioned inversion of `code.md § Done`'s *only what this run produced* rule**: there is no run, the standing backlog is the subject, and the counted form is what keeps it from becoming the dump that rule prevents.
+
+**The Open/Emerged split is the whole command.** Coming from a store is not what makes a row `Emerged` — every row here comes from a store. What places it is `code.md § Done`'s test: needs a decision or an action from you now → `Open` with its command; does not → `Emerged` as a count naming its reader.
 ```
 
 ---

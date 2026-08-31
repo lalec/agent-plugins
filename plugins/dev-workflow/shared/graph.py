@@ -14,7 +14,7 @@ must fall back to its pre-graph behaviour if this script is absent or exits non-
     graph.py blast <path>...         owning skills - covering verifs - deliveries - deferrals
     graph.py history <path>          what has been delivered, verified and reverted here
     graph.py roadmap-open [--for <path>...]   open items, path-affine ones marked ~match
-    graph.py open-deferrals [<path>...]       deferred or blocked, and not passing since
+    graph.py open-deferrals [--with-fail] [<path>...]   deferred or blocked, not passing since
 
 Add --json to any query for machine-readable output.
 """
@@ -701,7 +701,9 @@ def last_status(edges: list[dict]) -> dict[str, dict]:
     return out
 
 
-def open_verifications(edges: list[dict], changed: list[str] | None) -> list[dict]:
+def open_verifications(
+    edges: list[dict], changed: list[str] | None, with_fail: bool = False
+) -> list[dict]:
     """Unproven, with nothing watching: formally deferred in the delivery log, or recorded
     `blocked` by the last run that touched it. Two ways in, one row out.
 
@@ -711,7 +713,14 @@ def open_verifications(edges: list[dict], changed: list[str] | None) -> list[dic
     way: a later `pass` and nothing else, which is why chronology is `last_status` (newest
     VERIFIED edge wins) for both. A **never-run** verification is deliberately not open
     work — it has no recorded outcome to act on, and surfacing every one would bury the
-    entries that do."""
+    entries that do.
+
+    A recorded `fail` is excluded by default and admitted by `with_fail`. It is not a
+    deferral — something ran and did not hold — and the close-out puts it in Open, where
+    the next run's Step 0 has no reason to re-raise it. But an Open row dies with its
+    session, so the one caller that runs in a *fresh* session and asks what is outstanding
+    would otherwise never see it. That caller passes the flag; the lanes that open a task
+    do not."""
     stat = last_status(edges)
     rows: dict[str, dict] = {}
 
@@ -733,11 +742,13 @@ def open_verifications(edges: list[dict], changed: list[str] | None) -> list[dic
                 r.setdefault("reason", e["props"]["reason"])
             r["src"] = e["src"]
     for name, v in stat.items():
-        if v["status"] != "blocked":
+        if v["status"] not in ("blocked", "fail"):
+            continue
+        if v["status"] == "fail" and not with_fail:
             continue
         r = row(name)
         if r is not None:
-            r["blocked_at"] = v["commit"]
+            r["failed_at" if v["status"] == "fail" else "blocked_at"] = v["commit"]
             # Don't clobber a reason the log route already supplied: a `blocked` row
             # recorded before reasons were required has none, and the deferral's is then
             # the only explanation there is.
@@ -759,13 +770,17 @@ def clip(text: str, n: int = 160) -> str:
 def open_line(r: dict) -> str:
     bits = []
     if r.get("deferred_at"):
-        # Render the reason here only when the blocked route below won't — otherwise the
-        # same sentence prints twice on a row that came in by both routes.
-        why = f" — {clip(r['reason'])}" if r.get("reason") and not r.get("blocked_at") else ""
+        # Render the reason here only when a route below won't — otherwise the same
+        # sentence prints twice on a row that came in by more than one route.
+        dup = r.get("blocked_at") or r.get("failed_at")
+        why = f" — {clip(r['reason'])}" if r.get("reason") and not dup else ""
         bits.append(f"deferred {r['deferred_at']} ({r['accepted_by']}){why}")
     if r.get("blocked_at"):
         why = f" — {clip(r['reason'])}" if r.get("reason") else ""
         bits.append(f"blocked {r['blocked_at']}{why}")
+    if r.get("failed_at"):
+        why = f" — {clip(r['reason'])}" if r.get("reason") else ""
+        bits.append(f"FAILED {r['failed_at']}{why}")
     return f"{r['verification']} — {' · '.join(bits)}"
 
 
@@ -927,7 +942,9 @@ def main(argv: list[str]) -> int:
         )
 
     elif cmd == "open-deferrals":
-        rows = open_verifications(edges, rest or None)
+        with_fail = "--with-fail" in rest
+        rest = [a for a in rest if a != "--with-fail"]
+        rows = open_verifications(edges, rest or None, with_fail)
         emit({"deferrals": rows}, as_json, [open_line(r) for r in rows])
 
     else:

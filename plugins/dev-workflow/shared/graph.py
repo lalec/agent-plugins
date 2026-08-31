@@ -15,6 +15,7 @@ must fall back to its pre-graph behaviour if this script is absent or exits non-
     graph.py history <path>          what has been delivered, verified and reverted here
     graph.py roadmap-open [--for <path>...]   open items, path-affine ones marked ~match
     graph.py open-deferrals [--with-fail] [<path>...]   deferred or blocked, not passing since
+    graph.py open-gates              gates whose latest decision is still `parked`
 
 Add --json to any query for machine-readable output.
 """
@@ -109,7 +110,7 @@ BACKTICK_RE = re.compile(r"`([^`]+)`")
 # inside verification names themselves, so the spaces are load-bearing.
 DEFERRAL_REASON_RE = re.compile(r"\s[—–-]\s")
 DEPLOYED_RE = re.compile(r"([A-Za-z0-9_-]+)\s*→\s*([A-Za-z0-9_-]+)\s*·\s*(\S+)")
-DECISION_RE = re.compile(r"([a-z_-]+)\s*=\s*([A-Za-z0-9_-]+)\s*\(([^)]*)\)")
+DECISION_RE = re.compile(r"([A-Za-z0-9_-]+)\s*=\s*([A-Za-z0-9_-]+)\s*\(([^)]*)\)")
 
 
 def slug(text: str, limit: int = 60) -> str:
@@ -457,6 +458,25 @@ def project(src: Sources) -> list[dict]:
         # (`uncommit`, `<uncommitted>`). Commit-keyed edges only exist when a sha does.
         for s in e["shas"]:
             edges.append(edge("LANDED_AS", task, f"commit:{s}", where))
+
+        # Gates are keyed by the gate, never by the commit — `dec:{sha}/{gate}` gave every
+        # entry its own unrelated node, so two entries deciding one gate could not be
+        # ordered and "the latest decision wins" was not expressible. That also puts this
+        # above the no-sha guard: the edge only *sources* from a commit now, and a gate is
+        # most often parked by a read-only dry run, which is exactly an entry with no sha.
+        for gate, value, by in DECISION_RE.findall(f.get("Decisions", "")):
+            edges.append(
+                edge(
+                    "DECIDED",
+                    f"commit:{sha}" if sha else task,
+                    f"gate:{gate}",
+                    f"{where}.Decisions",
+                    value=value,
+                    by=by.strip(),
+                    ts=e["ts"],
+                )
+            )
+
         if not sha:
             continue
 
@@ -521,17 +541,6 @@ def project(src: Sources) -> list[dict]:
                             )
                         )
 
-        for gate, value, by in DECISION_RE.findall(f.get("Decisions", "")):
-            edges.append(
-                edge(
-                    "DECIDED",
-                    f"commit:{sha}",
-                    f"dec:{sha}/{gate}",
-                    f"{where}.Decisions",
-                    value=value,
-                    by=by.strip(),
-                )
-            )
 
     shas = {s for e in entries for s in e["shas"]}
     for sha, paths in git_touches(src.root, shas).items():
@@ -699,6 +708,39 @@ def last_status(edges: list[dict]) -> dict[str, dict]:
             if p.get("reason"):
                 out[name]["reason"] = p["reason"]
     return out
+
+
+def open_gates(edges: list[dict]) -> list[dict]:
+    """Gates whose latest recorded decision is still `parked`. Same shape and same rule as
+    `open_verifications`: one node per gate, newest edge wins, and a later entry deciding
+    the same gate closes it with no separate closing action.
+
+    The rule has one hard dependency the projector cannot enforce: **the entry that answers
+    a gate must repeat its name verbatim.** A renamed gate is a new node, so the old one
+    stays parked forever and this query over-reports — the direction that matters, because a
+    stale `parked` reads as outstanding work. `<PREFIX>-log`'s field guidance carries that
+    rule; without it a closed gate and a drifted name are indistinguishable from here."""
+    latest: dict[str, dict] = {}
+    for d in by_kind(edges, "DECIDED"):
+        gate = node_id(d["to"])
+        p = d.get("props", {})
+        if p.get("ts", "") >= latest.get(gate, {}).get("ts", ""):
+            latest[gate] = {
+                "gate": gate,
+                "value": p.get("value", "?"),
+                "by": p.get("by", "unstated"),
+                "ts": p.get("ts", ""),
+                "at": node_id(d["from"]),
+                "src": d["src"],
+            }
+    return sorted(
+        (g for g in latest.values() if g["value"] == "parked"),
+        key=lambda g: g["ts"],
+    )
+
+
+def gate_line(g: dict) -> str:
+    return f"{g['gate']} — parked {g['ts'][:10]} · {g['at']} ({g['by']})"
 
 
 def open_verifications(
@@ -940,6 +982,10 @@ def main(argv: list[str]) -> int:
                 for i in items
             ],
         )
+
+    elif cmd == "open-gates":
+        gates = open_gates(edges)
+        emit({"gates": gates}, as_json, [gate_line(g) for g in gates])
 
     elif cmd == "open-deferrals":
         with_fail = "--with-fail" in rest

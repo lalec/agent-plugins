@@ -827,7 +827,7 @@ Read-only, in parallel. **A store that is absent or errors gets a `not done` Sta
 | Held commits | `git rev-list --count @{upstream}..HEAD` | no upstream → say so, do not fail |
 | Roadmap | `python3 .claude/graph/graph.py roadmap-open` | read `docs/roadmap.md`. Either way, count `**Status:** in-progress` separately from open |
 | Unproven work | `python3 .claude/graph/graph.py open-deferrals --with-fail` | read `custom-tests.yaml` for every `last.status` of `blocked` or `fail` |
-| Gates | `grep -n '=parked' docs/project-log.md`, then each hit's full `**Decisions:**` line and its entry date | none — the log is the only record one exists |
+| Gates | `python3 .claude/graph/graph.py open-gates` | `grep -n '=parked' docs/project-log.md`, then reconcile each hit by hand per Step 2 |
 | Repo | the `/tidy` **Step 1** sweep — run it, do not restate it here | none |
 | Project health | every store the project declares (below). None declared → the row is `n/a` | the declaring command's own fallback |
 
@@ -850,7 +850,7 @@ The store's **name is the command's filename**, so there is no separate name fie
 
 Every store records what was true when it was written. Three of them go stale in ways that **invert** the answer, so check each before it reaches the report:
 
-- **A `parked` gate is a claim, not a state.** Nothing edits a past delivery-log entry — that file is append-only and is the delivery graph's input — so a gate answered weeks ago still reads `parked` forever. Before reporting one, look for its answer: a later entry deciding the same gate, a deploy or push that could only have happened if it was answered, or the change itself sitting in the tree. Found → it is not open, and that correction is a `Learned` bullet. Not found → it is open, and its age is its entry's date.
+- **A `parked` gate is a claim, not a state** — the log is append-only, so a gate answered weeks ago still reads `parked` in the entry that raised it. `open-gates` resolves this for you: every decision on one gate lands on one node and the newest wins, so a later entry answering it closes it. **Trust the projection and do not re-derive it.** Two cases still need you. A gate answered under a *different* name never closes — the log's own rule is that the answering entry repeats the name verbatim, so a plausible rename is a `Learned` bullet, not a silent merge. And on the grep fallback there is no projection at all: check each hit for a later entry deciding the same gate, a deploy that could only have happened if it was answered, or the change sitting in the tree.
 - **A roadmap item may already be delivered.** Cross-check each open item's `**Id:**` against `**Addresses:**` lines in the log. An item a delivered entry cites is closable, not open.
 - **A `blocked` may already be answerable.** Its `reason` names the trigger that would close it; if that trigger has since happened — the env now exists, the deploy landed — say so. A check that cannot run and a check nobody re-ran are different problems with different next steps.
 

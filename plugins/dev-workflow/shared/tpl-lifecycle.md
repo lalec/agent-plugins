@@ -86,6 +86,7 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
 - **Addresses** — the `**Id:**` of each `docs/roadmap.md` item this task advances or closes, comma-separated (e.g. `verification-email-on-signup, stripe-receipt-sender`). This is the durable roadmap↔delivery link: without it the connection survives only as a status flip that nothing can trace back. Use the ids the pm step confirmed; omit the line when the task addresses no tracked item, and say so in the pm handoff rather than guessing an id.
 - **UAT-deferred** — verifications QA could not run in any environment, carried from the pipeline. **Each name is followed by a spaced dash and the reason it could not run** (e.g. `` `login-flow-e2e` — no non-prod env for this component (user-confirmed) ``). The reason is not optional prose: it is the only thing that tells a later `open-deferrals` read whether the entry is structurally unprovable or something a person could still close, and the routing that decides that already happened when the deferral was accepted. Without it the entry is permanently unclassifiable — the text is never recoverable later. Backtick each verification name so it stays machine-readable. These are open follow-ups; omit the line when none.
 - **Decisions** — one term per gate that came up this task, as `<gate>=<value> (<how>)`, joined by ` · ` — e.g. `regression=full (agent) · ship=hold (timeout) · defer=accept (user)`. `<how>` is `user` (a real answer), `timeout` (a default taken on silence), `agent` (derived by the pipeline from evidence rather than asked — the regression scope resolved from the changed paths is the standing case), or `pilot-auto` (decided autonomously mid-mission). A gate that was deliberately **not** decided is recorded as `<gate>=parked (human-gated)` — an autonomous lane may produce the evidence for a keep/ship verdict but never the verdict itself. **An unanswered gate is never recorded as decided, and a timeout or auto-decision is never recorded as `user`** — this line is the only durable record of whether a shipped change was actually consented to. Omit the line when no gate came up.
+  **A gate name is stable for the life of the decision.** `graph.py open-gates` keys every decision by the gate name and takes the newest, so the entry that *answers* a parked gate closes it only by repeating that name **verbatim**. A new name is a new gate and the old one stays parked forever — and the error is directional: a stale `parked` reads as work outstanding, so the close-out over-reports unfinished business, which is the one failure the query exists to prevent. Answering a gate needs no special step: record `<gate>=<value> (<how>)` in the entry that resolves it, under the name it was parked as. Editing an old entry in place is **migration only** — for gates parked before this rule existed, whose answer was never recorded under any name.
 - **Checklist** — one `skill — note` per skill whose reference files were updated. Omit the line entirely if nothing was updated.
 
 **The field set above is closed — do not invent new fields.** The delivery graph projects known fields and silently ignores unknown ones, so an invented field looks fine and contributes nothing. Work that is *left over* rather than *done* already has two homes: scope someone will pick up later belongs in `docs/roadmap.md` as its own item (the body sentence may name it), and a verification that could not be run belongs in `**UAT-deferred:**`. A field like `Follow-ups:` restating a roadmap item it already created is duplication, not a record. If a genuinely new field is needed, it must be added to this template, the `docs/workflow.md` template, and the upgrade checklist in the same change.
@@ -2081,7 +2082,8 @@ python3 .claude/graph/graph.py covers <path>...           verifications whose pa
 python3 .claude/graph/graph.py blast <path>...            owners · verifications+status · deliveries · deferrals
 python3 .claude/graph/graph.py history <path>             what shipped, was verified, or was reverted here
 python3 .claude/graph/graph.py roadmap-open [--for <path>...]   open items; path-affine ones marked ~match
-python3 .claude/graph/graph.py open-deferrals [<path>...] deferred or blocked, not passing since
+python3 .claude/graph/graph.py open-deferrals [--with-fail] [<path>...] deferred or blocked, not passing since
+python3 .claude/graph/graph.py open-gates             gates whose latest decision is still `parked`
 ```
 
 Add `--json` to any query for machine-readable output. Queries rebuild automatically when the
@@ -2140,7 +2142,7 @@ to a record a human can open. An edge without `src` is a bug in the projector.
 | Verification | `verif:<name>` | `custom-tests.yaml` `name` |
 | Component | `comp:<name>` | `deploy-config.yaml` |
 | Env | `env:<comp>/<env>` | `deploy-config.yaml` |
-| Decision | `dec:<sha7>/<gate>` | delivery-log `**Decisions:**` |
+| Gate | `gate:<gate-name>` | delivery-log `**Decisions:**` |
 
 Ids are exact natural keys that already exist, so there is **no entity-resolution step** and no
 model call anywhere in the projector — projection is pure parsing.
@@ -2156,7 +2158,7 @@ model call anywhere in the projector — projection is pure parsing.
 **What `USED` is for.** For skills that own files it is largely redundant — `commit -TOUCHES-> path -OWNED_BY-> skill` derives the same answer from git, which cannot be wrong. Its unique value is the **no-file-trace** skills: `<PREFIX>-review` and `<PREFIX>-debug` leave nothing in a diff, so "did this feature need debugging?" exists here and nowhere else. That signal only holds if `**Skills:**` is derived from the session-scoped markers (see `<PREFIX>-log` Process step 3) — a transcript-derived list misses exactly those two, because they load inside subagents.
 | `DEPLOYED_TO` | commit → env | `url` | log `**Deployed:**` |
 | `DEFERRED` | commit → verif | `accepted_by`, `reason` | log `**UAT-deferred:**` |
-| `DECIDED` | commit → decision | `value`, `by` | log `**Decisions:**` |
+| `DECIDED` | commit *(or task, when the entry names no sha)* → gate | `value`, `by`, `ts` | log `**Decisions:**` |
 | `ADDRESSES` | task → road | — | log `**Addresses:**` |
 | `SUPERSEDES` | commit → commit | — | `git log --grep=^Revert` |
 | `COVERS` | verif → path | — | `custom-tests.yaml` `paths:` |

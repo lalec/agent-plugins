@@ -829,8 +829,20 @@ Read-only, in parallel. **A store that is absent or errors gets a `not done` Sta
 | Unproven work | `python3 .claude/graph/graph.py open-deferrals --with-fail` | read `custom-tests.yaml` for every `last.status` of `blocked` or `fail` |
 | Gates | `grep -n '=parked' docs/project-log.md`, then each hit's full `**Decisions:**` line and its entry date | none — the log is the only record one exists |
 | Repo | the `/tidy` **Step 1** sweep — run it, do not restate it here | none |
+| Project health | every store the project declares (below). None declared → the row is `n/a` | the declaring command's own fallback |
 
-`--with-fail` is what makes this store complete: a recorded `fail` is deliberately excluded from every other caller, because the close-out puts it in `Open` and no lane's Step 0 re-raises it. That is exactly the row a fresh session loses, so this is the one caller that asks for it.
+**A seventh store, discovered, not hardcoded.** Six stores are universal because every install has them. A project that runs something unattended — a scheduled job, a background loop, an external pipeline — has a seventh question nobody else can ask for it: *is it broken, or is it running right now?* Scan `.claude/commands/*.md` frontmatter for a `whats-up-store:` key, exactly as `/pilot` discovers its lanes:
+
+```yaml
+whats-up-store:
+  reads: <one line — the command or file that answers it>
+  healthy: <what a good answer looks like>
+  when-bad: degraded | live      # degraded = it should have run and did not; live = it is running now
+```
+
+The store's **name is the command's filename**, so there is no separate name field to drift. A malformed or unparseable block is **skipped with a warning in Status**, never guessed at. **Declared stores are project-owned: this command knows how to find and read them, never what they mean** — so the template stays uniform across projects and the variation lives where the project already keeps it.
+
+`--with-fail` is what makes the unproven-work store complete: a recorded `fail` is deliberately excluded from every other caller, because the close-out puts it in `Open` and no lane's Step 0 re-raises it. That is exactly the row a fresh session loses, so this is the one caller that asks for it.
 
 **Filter.** When `$ARGUMENTS` is non-empty, keep only rows whose id, title, verification name or path matches it case-insensitively. If nothing matches, say so and report the unfiltered set — a typo'd filter must never read as "nothing open".
 
@@ -851,13 +863,17 @@ Two questions, in order, answered from Step 1's numbers as reconciled by Step 2.
 1. **Is anything blocked on you?** A gate that survived Step 2, an approval, a decision only a person makes.
 2. **Is more work in flight than is finishing?** In-progress roadmap items plus held commits, against the delivery-log entries of the last two weeks.
 
+**0. Is a declared store bad?** Ask this before the two below when the project declares any. A `when-bad: degraded` store that is not healthy makes the project **degraded** — nothing else matters while whatever it feeds goes stale. A `when-bad: live` store that is currently live makes it **busy**: report its state, let it finish, and do not propose work touching its paths.
+
 | Answers | Diagnosis | What the report recommends |
 |---|---|---|
+| A declared store reports bad | **degraded** | Fix that first. Name the store and what it feeds |
+| A declared store reports live | **busy** | Report its phase, let it finish, propose nothing that touches its paths |
 | Something waits on you | **gate-blocked** | Clear the gate first. Say what it unblocks |
 | Nothing waits on you, but in-flight is growing | **fragmented** | Finish before starting. Name the in-progress item closest to done |
 | Neither | **clear** | Start the top-ranked open item |
 
-**Gate-blocked wins when both are true** — a gate is cleared in minutes and a roadmap item in days. State the diagnosis in one line with the two numbers that produced it, and nothing else.
+**Earlier rows win.** `degraded` and `busy` outrank `gate-blocked`, which outranks `fragmented` — a broken pipeline makes every other answer moot, a live writer makes acting on the tree unsafe, and a gate is cleared in minutes where a roadmap item takes days. State the diagnosis in one line with the two numbers that produced it, and nothing else.
 
 **Held commits are never an action on their own.** They are a symptom: either a gate holds them or nobody decided. Never recommend "push" — recommend clearing whatever holds them, and note that the push follows.
 
@@ -869,7 +885,7 @@ Report per `code.md § Done` — the same five blocks (Verdict · Learned · Sta
 
 - **Verdict** — Step 3's diagnosis and the two numbers behind it.
 - **Learned** — what Step 2's reconcile changed, at most 3 bullets: a gate that reads `parked` and is not, a roadmap item already delivered, a `blocked` whose trigger has since happened. Nothing to correct → `None`. This is the block that makes the command worth running rather than reading the stores yourself.
-- **Status** — one row per store, `done` with the number it returned or `not done` with why it could not be read. Held commits are a Status row carrying the count **and what holds them**. The repo sweep is one row: `clean`, or the counts with `/tidy` as its evidence. Fold every store in a good state into a single row.
+- **Status** — one row per store, `done` with the number it returned or `not done` with why it could not be read. Held commits are a Status row carrying the count **and what holds them**. The repo sweep is one row: `clean`, or the counts with `/tidy` as its evidence. Each declared store is its own row carrying what it observed against its `healthy:` line; a store whose block would not parse is a `not done` row naming the file. Fold every store in a good state into a single row.
 - **Open** — the ranked plan, and the only block that proposes work. **Order it so a row that unblocks a later one comes first**, then per `code.md § Done`: the parked gate, then `failed`, then the rest. `Why it is open` carries the one line of why; `Next` is the command that does it. A row needing a decision only you can make states the options **and which one this run would pick** — a gate reported without a recommendation is how gates sit for weeks.
 - **Emerged** — the backlog that already has a reader, **counted per store, never listed**: open roadmap items → `/roadmap`, structurally unprovable deferrals → the prod walk, a named stash → `/tidy`. These are the rows that do not need you now. Listing them is the inventory this command exists to replace. This lane produces no scope of its own, so it never files anything here. **This is the one sanctioned inversion of `code.md § Done`'s *only what this run produced* rule**: there is no run, the standing backlog is the subject, and the counted form is what keeps it from becoming the dump that rule prevents.
 

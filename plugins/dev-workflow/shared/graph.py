@@ -451,6 +451,7 @@ def project(src: Sources) -> list[dict]:
                         task,
                         f"road:{rid.strip('`')}",
                         f"{where}.Addresses",
+                        ts=e["ts"],
                     )
                 )
 
@@ -464,13 +465,18 @@ def project(src: Sources) -> list[dict]:
         # ordered and "the latest decision wins" was not expressible. That also puts this
         # above the no-sha guard: the edge only *sources* from a commit now, and a gate is
         # most often parked by a read-only dry run, which is exactly an entry with no sha.
+        #
+        # `from` is the **task**, never the commit, so a gate joins to the roadmap items its
+        # entry addresses — `ADDRESSES` is task-keyed, and a mixed key silently returned
+        # nothing for every gate whose entry had a sha. The sha rides along as `commit`.
         for gate, value, by in DECISION_RE.findall(f.get("Decisions", "")):
             edges.append(
                 edge(
                     "DECIDED",
-                    f"commit:{sha}" if sha else task,
+                    task,
                     f"gate:{gate}",
                     f"{where}.Decisions",
+                    commit=sha,
                     value=value,
                     by=by.strip(),
                     ts=e["ts"],
@@ -719,7 +725,14 @@ def open_gates(edges: list[dict]) -> list[dict]:
     a gate must repeat its name verbatim.** A renamed gate is a new node, so the old one
     stays parked forever and this query over-reports — the direction that matters, because a
     stale `parked` reads as outstanding work. `<PREFIX>-log`'s field guidance carries that
-    rule; without it a closed gate and a drifted name are indistinguishable from here."""
+    rule; without it a closed gate and a drifted name are indistinguishable from here.
+
+    `releases` is the join that makes a gate rankable: the roadmap items its own entry
+    addressed. A gate holding the blocked half of started work is the cheapest way back
+    into that work, and without this the report can only call it a chore."""
+    addressed: dict[str, list[str]] = {}
+    for a in by_kind(edges, "ADDRESSES"):
+        addressed.setdefault(a["from"], []).append(node_id(a["to"]))
     latest: dict[str, dict] = {}
     for d in by_kind(edges, "DECIDED"):
         gate = node_id(d["to"])
@@ -730,7 +743,8 @@ def open_gates(edges: list[dict]) -> list[dict]:
                 "value": p.get("value", "?"),
                 "by": p.get("by", "unstated"),
                 "ts": p.get("ts", ""),
-                "at": node_id(d["from"]),
+                "at": d.get("commit") or node_id(d["from"]),
+                "releases": addressed.get(d["from"], []),
                 "src": d["src"],
             }
     return sorted(
@@ -740,7 +754,8 @@ def open_gates(edges: list[dict]) -> list[dict]:
 
 
 def gate_line(g: dict) -> str:
-    return f"{g['gate']} — parked {g['ts'][:10]} · {g['at']} ({g['by']})"
+    rel = f" · releases {', '.join(g['releases'])}" if g.get("releases") else ""
+    return f"{g['gate']} — parked {g['ts'][:10]} · {g['at']} ({g['by']}){rel}"
 
 
 def open_verifications(
@@ -957,12 +972,23 @@ def main(argv: list[str]) -> int:
     elif cmd == "roadmap-open":
         changed = rest[rest.index("--for") + 1 :] if "--for" in rest else []
         addressed: dict[str, list[str]] = {}
+        latest_addr: dict[str, str] = {}
         for e in by_kind(edges, "ADDRESSES"):
-            addressed.setdefault(node_id(e["to"]), []).append(node_id(e["from"]))
-        items = []
+            rid = node_id(e["to"])
+            addressed.setdefault(rid, []).append(node_id(e["from"]))
+            ts = e.get("props", {}).get("ts", "")
+            if ts > latest_addr.get(rid, ""):
+                latest_addr[rid] = ts
+        items, counts = [], {}
         for it in parse_roadmap(read(src.roadmap)):
             if not it["open"]:
                 continue
+            # A bare total is not trustworthy: an item with no `**Status:**` line defaults to
+            # open, and on one real roadmap that is a third of the file. Dropping those would
+            # be breaking — an item must surface rather than disappear — so the count is
+            # reported broken down instead, and the caller prints what it is made of.
+            counts_key = it["status"] if "Status" in it["fields"] else "no status line"
+            counts[counts_key] = counts.get(counts_key, 0) + 1
             prior = addressed.get(it["id"], [])
             items.append(
                 {
@@ -971,13 +997,20 @@ def main(argv: list[str]) -> int:
                     "status": it["status"],
                     "priority": it["priority"],
                     "prior_tasks": prior,
+                    "last_addressed": latest_addr.get(it["id"], ""),
                     "affine": bool(changed and prior),
                 }
             )
+        lead = ["open", "in-progress", "no status line"]
+        ranked = [(k, counts[k]) for k in lead if k in counts] + sorted(
+            ((k, v) for k, v in counts.items() if k not in lead),
+            key=lambda kv: (-kv[1], kv[0]),
+        )
         emit(
-            {"items": items},
+            {"open": len(items), "status_counts": dict(ranked), "items": items},
             as_json,
-            [
+            [f"{len(items)} open — " + " · ".join(f"{v} {k}" for k, v in ranked)]
+            + [
                 f"{'~match ' if i['affine'] else ''}{i['id']} [{i['priority'] or '?'}] {i['title']}"
                 for i in items
             ],

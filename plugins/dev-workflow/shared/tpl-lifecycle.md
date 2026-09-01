@@ -2081,9 +2081,9 @@ python3 .claude/graph/graph.py build                      reproject the index (<
 python3 .claude/graph/graph.py covers <path>...           verifications whose paths intersect these
 python3 .claude/graph/graph.py blast <path>...            owners · verifications+status · deliveries · deferrals
 python3 .claude/graph/graph.py history <path>             what shipped, was verified, or was reverted here
-python3 .claude/graph/graph.py roadmap-open [--for <path>...]   open items; path-affine ones marked ~match
+python3 .claude/graph/graph.py roadmap-open [--for <path>...]   open items + status breakdown; ~match = path-affine
 python3 .claude/graph/graph.py open-deferrals [--with-fail] [<path>...] deferred or blocked, not passing since
-python3 .claude/graph/graph.py open-gates             gates whose latest decision is still `parked`
+python3 .claude/graph/graph.py open-gates             gates still `parked`, each with what it releases
 ```
 
 Add `--json` to any query for machine-readable output. Queries rebuild automatically when the
@@ -2158,13 +2158,20 @@ model call anywhere in the projector — projection is pure parsing.
 **What `USED` is for.** For skills that own files it is largely redundant — `commit -TOUCHES-> path -OWNED_BY-> skill` derives the same answer from git, which cannot be wrong. Its unique value is the **no-file-trace** skills: `<PREFIX>-review` and `<PREFIX>-debug` leave nothing in a diff, so "did this feature need debugging?" exists here and nowhere else. That signal only holds if `**Skills:**` is derived from the session-scoped markers (see `<PREFIX>-log` Process step 3) — a transcript-derived list misses exactly those two, because they load inside subagents.
 | `DEPLOYED_TO` | commit → env | `url` | log `**Deployed:**` |
 | `DEFERRED` | commit → verif | `accepted_by`, `reason` | log `**UAT-deferred:**` |
-| `DECIDED` | commit *(or task, when the entry names no sha)* → gate | `value`, `by`, `ts` | log `**Decisions:**` |
-| `ADDRESSES` | task → road | — | log `**Addresses:**` |
+| `DECIDED` | task → gate *(sha on `commit`)* | `value`, `by`, `ts` | log `**Decisions:**` |
+| `ADDRESSES` | task → road | `ts` | log `**Addresses:**` |
 | `SUPERSEDES` | commit → commit | — | `git log --grep=^Revert` |
 | `COVERS` | verif → path | — | `custom-tests.yaml` `paths:` |
 | `VERIFIED` | commit → verif | `status`, `ts`, `reason` | `custom-tests.yaml` `last:` |
 | `OWNED_BY` | path-pattern → skill | — | `governed-paths.conf` `PATH_MAP` |
 | `HAS_ENV` | comp → env | `url`, `kind` | `deploy-config.yaml` |
+
+**`DECIDED` and `ADDRESSES` share the task key on purpose.** A gate and the roadmap items its entry
+addresses are only joinable if both edges leave the same node, which is what lets `open-gates` say
+what clearing a gate *releases*. Keying `DECIDED` by the commit instead made that join return nothing
+for every gate whose entry carried a sha — silently, since an empty join and a gate that releases
+nothing look identical. The sha is preserved on the edge's `commit` field, where it is provenance
+rather than identity.
 
 `OWNED_BY` stores the **PATH_MAP pattern, not resolved files** — ownership is evaluated
 first-match at query time, the same rule the hooks apply, so new files are covered without a rebuild.

@@ -15,7 +15,8 @@ must fall back to its pre-graph behaviour if this script is absent or exits non-
     graph.py history <path>          what has been delivered, verified and reverted here
     graph.py roadmap-open [--for <path>...]   open items, path-affine ones marked ~match
     graph.py open-deferrals [--with-fail] [<path>...]   deferred or blocked, not passing since
-    graph.py open-gates              gates whose latest decision is still `parked`
+    graph.py open-gates              every parking no later decision answered, with its
+                                     condition and age in days
 
 Add --json to any query for machine-readable output.
 """
@@ -110,7 +111,36 @@ BACKTICK_RE = re.compile(r"`([^`]+)`")
 # inside verification names themselves, so the spaces are load-bearing.
 DEFERRAL_REASON_RE = re.compile(r"\s[—–-]\s")
 DEPLOYED_RE = re.compile(r"([A-Za-z0-9_-]+)\s*→\s*([A-Za-z0-9_-]+)\s*·\s*(\S+)")
-DECISION_RE = re.compile(r"([A-Za-z0-9_-]+)\s*=\s*([A-Za-z0-9_-]+)\s*\(([^)]*)\)")
+# `**Decisions:**` is ` · `-separated, so each term is parsed on its own rather than by one
+# global scan. A global `findall` demanding a kebab value silently dropped 12% of jobzeeker's
+# terms and 19% of portrais's — including `hold-continue-until-check-settles=**KEEP** (user)`,
+# an answer that left its gate reading `parked` for a fortnight. The name admits `/` because
+# `keep/adopt` is a real gate name; the value is whatever precedes the trailing provenance,
+# and the provenance is optional (`defer=none`).
+DECISION_TERM_RE = re.compile(r"^([A-Za-z0-9_/-]+)\s*=\s*(.+?)(?:\s*\(([^()]*)\)\s*)?$")
+
+
+def decisions(value: str) -> list[tuple[str, str, str]]:
+    """`(gate, value, by)` per term. `value` is normalised — markdown stripped, collapsed —
+    because the only test anyone runs on it is `== "parked"`, and `**KEEP**` must not read as
+    a different word than `KEEP`."""
+    out = []
+    for term in value.split("·"):
+        m = DECISION_TERM_RE.match(term.strip())
+        if not m:
+            continue
+        gate, val, by = m.group(1), m.group(2), m.group(3) or "unstated"
+        val = " ".join(val.replace("*", "").replace("`", "").split())
+        if val:
+            out.append((gate, val, by.strip() or "unstated"))
+    return out
+
+
+# A parked gate records what would answer it after the provenance word: `parked
+# (human-gated — wait for a set that trips 0.05 on its own)`. That text is the only input a
+# reader has for deciding whether a gate waits on a person or on evidence, and it is the same
+# question `last.reason` answers for a deferral.
+CONDITION_RE = re.compile(r"^.*?\s[—–-]\s(.+)$")
 
 
 def slug(text: str, limit: int = 60) -> str:
@@ -469,7 +499,7 @@ def project(src: Sources) -> list[dict]:
         # `from` is the **task**, never the commit, so a gate joins to the roadmap items its
         # entry addresses — `ADDRESSES` is task-keyed, and a mixed key silently returned
         # nothing for every gate whose entry had a sha. The sha rides along as `commit`.
-        for gate, value, by in DECISION_RE.findall(f.get("Decisions", "")):
+        for gate, value, by in decisions(f.get("Decisions", "")):
             edges.append(
                 edge(
                     "DECIDED",
@@ -500,16 +530,15 @@ def project(src: Sources) -> list[dict]:
                 )
             )
 
-        decisions = dict(
-            (gate, by.strip())
-            for gate, _v, by in DECISION_RE.findall(f.get("Decisions", ""))
+        decided_by = dict(
+            (gate, by.strip()) for gate, _v, by in decisions(f.get("Decisions", ""))
         )
 
         deferred = f.get("UAT-deferred", "")
         if deferred and not deferred.lower().startswith("none"):
             # `**Decisions:** defer=…` is the structured record and wins. The prose scan is
             # only a fallback for entries written before that field existed.
-            accepted = decisions.get("defer") or (
+            accepted = decided_by.get("defer") or (
                 "timeout"
                 if "timeout" in deferred.lower()
                 else "user"
@@ -717,9 +746,14 @@ def last_status(edges: list[dict]) -> dict[str, dict]:
 
 
 def open_gates(edges: list[dict]) -> list[dict]:
-    """Gates whose latest recorded decision is still `parked`. Same shape and same rule as
-    `open_verifications`: one node per gate, newest edge wins, and a later entry deciding
-    the same gate closes it with no separate closing action.
+    """Every parking of a gate that no later decision has answered.
+
+    The closing rule is unchanged — a later entry deciding the same gate closes it, with no
+    separate closing action — but it is applied *per parking* rather than by keeping one
+    newest edge per name. Keeping only the newest hid real work: portrais parks `keep/adopt`
+    on every `/tune` run, and four unanswered parkings collapsed into one node while three
+    disappeared. A name is closed by a **newer non-parked** decision on that name, so an
+    unanswered parking survives however many times the name repeats.
 
     The rule has one hard dependency the projector cannot enforce: **the entry that answers
     a gate must repeat its name verbatim.** A renamed gate is a new node, so the old one
@@ -727,35 +761,83 @@ def open_gates(edges: list[dict]) -> list[dict]:
     stale `parked` reads as outstanding work. `<PREFIX>-log`'s field guidance carries that
     rule; without it a closed gate and a drifted name are indistinguishable from here.
 
+    `condition` is what would answer the parking, taken from the text after the provenance
+    word (`parked (human-gated — <condition>)`). It is what separates a gate waiting on a
+    person from one waiting on evidence that has not arrived, and it is the same question
+    `last.reason` answers for a deferral — so one reader can consume both stores. Empty when
+    the entry did not record one; the reader falls back to the entry prose.
+
     `releases` is the join that makes a gate rankable: the roadmap items its own entry
     addressed. A gate holding the blocked half of started work is the cheapest way back
     into that work, and without this the report can only call it a chore."""
     addressed: dict[str, list[str]] = {}
     for a in by_kind(edges, "ADDRESSES"):
         addressed.setdefault(a["from"], []).append(node_id(a["to"]))
-    latest: dict[str, dict] = {}
-    for d in by_kind(edges, "DECIDED"):
-        gate = node_id(d["to"])
+
+    decided = by_kind(edges, "DECIDED")
+    answered: dict[str, str] = {}  # gate -> newest ts carrying a non-parked value
+    settled: set[tuple[str, str]] = set()  # (task, gate) answered by that entry itself
+    for d in decided:
         p = d.get("props", {})
-        if p.get("ts", "") >= latest.get(gate, {}).get("ts", ""):
-            latest[gate] = {
+        if p.get("value") != "parked":
+            gate = node_id(d["to"])
+            settled.add((d["from"], gate))
+            if p.get("ts", "") > answered.get(gate, ""):
+                answered[gate] = p.get("ts", "")
+
+    today = datetime.now(timezone.utc).date()
+    out = []
+    for d in decided:
+        p = d.get("props", {})
+        gate = node_id(d["to"])
+        ts = p.get("ts", "")
+        if p.get("value") != "parked":
+            continue
+        # Strictly older than the answer, or answered by this very entry. A *tie* keeps the
+        # parking open: entries written before the format carried `HH:MM` all collapse to
+        # 00:00, so same-day ordering is not knowable, and a gate re-parked the day it was
+        # answered is real work that must not vanish into a timestamp collision.
+        if ts < answered.get(gate, "") or (d["from"], gate) in settled:
+            continue
+        out.append(
+            {
                 "gate": gate,
-                "value": p.get("value", "?"),
+                "value": "parked",
                 "by": p.get("by", "unstated"),
-                "ts": p.get("ts", ""),
+                "condition": condition_of(p.get("by", "")),
+                "ts": ts,
+                "age_days": days_since(ts, today),
                 "at": d.get("commit") or node_id(d["from"]),
                 "releases": addressed.get(d["from"], []),
                 "src": d["src"],
             }
-    return sorted(
-        (g for g in latest.values() if g["value"] == "parked"),
-        key=lambda g: g["ts"],
-    )
+        )
+    return sorted(out, key=lambda g: (g["ts"], g["gate"]))
+
+
+def condition_of(by: str) -> str:
+    """What would answer this parking, from `human-gated — <condition>`. Empty when the
+    entry recorded only the provenance word."""
+    m = CONDITION_RE.match(by.strip())
+    return m.group(1).strip() if m else ""
+
+
+def days_since(ts: str, today) -> int | str:
+    """Whole days between an entry timestamp and today. `?` rather than a wrong number when
+    the entry's date cannot be read — a fabricated age is worse than a visible gap."""
+    try:
+        return (today - datetime.strptime(ts[:10], "%Y-%m-%d").date()).days
+    except (ValueError, TypeError):
+        return "?"
 
 
 def gate_line(g: dict) -> str:
     rel = f" · releases {', '.join(g['releases'])}" if g.get("releases") else ""
-    return f"{g['gate']} — parked {g['ts'][:10]} · {g['at']} ({g['by']}){rel}"
+    cond = f" · awaits {g['condition']}" if g.get("condition") else ""
+    return (
+        f"{g['gate']} — parked {g['ts'][:10]} ({g['age_days']}d) · "
+        f"{g['at']} ({g['by']}){cond}{rel}"
+    )
 
 
 def open_verifications(

@@ -1557,6 +1557,7 @@ Verify before finishing any `<PREFIX>-test` invocation that touches API handlers
 - `references/test-commands.md` — Smoke snippets, Regression suite, Functional Feature Subjects (data-store query helpers)
 - `references/custom-tests.yaml` — per-task verifications captured by `/code` and `/fix`
 - `references/custom-tests.md` — schema + runtime execution/inference protocol + prior-selection, carry-forward and parallel-split rules
+- `scripts/run-checks.py` — batched execution of resolved Integration commands (`run`) and `last:` recording for every type (`record`); returns observations, never verdicts
 - `references/sync-checklist.md` — when-to-update rules for the reference files
 ```
 
@@ -1671,8 +1672,34 @@ during the run"), never a restatement of the assert. Single-quoted, same reason 
 | type | how to run | pass criterion |
 |---|---|---|
 | UX | `agent-browser` to the resolved url; check the UI | predicate holds **and** a screenshot of the live UI was saved |
-| Integration | curl/wget the resolved endpoint **or** run the data-store query — whichever the assert names | HTTP 2xx and body satisfies, or result row(s) satisfy, the verification |
+| Integration | curl/wget the resolved endpoint **or** run the data-store query — whichever the assert names — **batched, see below** | HTTP 2xx and body satisfies, or result row(s) satisfy, the verification |
 | E2E | `agent-browser`: perform the UI action, then confirm the backend effect | UI predicate holds **and** a screenshot was saved **and** the backend effect is confirmed |
+
+**Batching the Integration set.** Resolve each entry's target as above, then hand them to the runner
+in chunks of **≤10** rather than taking a turn per verification — every intermediate response body
+otherwise lands in the transcript and is re-read on every turn after it:
+
+```bash
+python3 .claude/skills/<PREFIX>-test/scripts/run-checks.py run <<'JSON'
+{"entries": [{"name": "<verification name>", "cmd": "<the resolved command>"}]}
+JSON
+```
+
+It returns one evidence-trace line per entry — command → observed result — and **no verdict**. Judge
+each one yourself against its `assert`, applying the running-stack, freshness, vacuous-pass and
+substituted-path rules exactly as if you had typed the command. The script has no status field to
+fill in, and that is deliberate: a table of green 200s is precisely the shape that gets waved
+through, and a scripted `pass` would discharge a deferral permanently.
+
+Then **record that chunk before running the next one** — chunks, not one sweep, because the
+commit-as-you-go rule below only survives a killed agent if outcomes land as they go.
+
+Check **freshness once per target, before the chunk**, not per entry: one stale target invalidates
+every row in the chunk, each reported `stale target — non-evidence`, not just the row that noticed.
+
+UX and E2E are not batched. Their observation is a screenshot that has to be looked at, and their
+steps are discovered as the page responds — neither fits a manifest of commands fixed in advance.
+Their **outcomes** are recorded exactly like everything else.
 
 **Screenshot rule (UX and E2E):** every UX and E2E entry must take a screenshot of the actual UI at
 the moment of verification — the screenshot is the evidence; DOM injection or console inspection is
@@ -1705,17 +1732,37 @@ back to its `custom-tests.yaml` entry. Write it for every verification this run 
 `blocked` ones — a blocked run is the outcome that most needs a history, and it is the one that most
 needs its `reason`.
 
+**Every type records the same way** — UX and E2E included, whether or not their execution was
+batched:
+
+```bash
+python3 .claude/skills/<PREFIX>-test/scripts/run-checks.py record <<'JSON'
+{"commit": "<the run's pinned sha>",
+ "results": [{"name": "<verification>", "status": "pass|fail|blocked", "reason": "<one line>"}]}
+JSON
+```
+
+It edits only the `last:` block of each named entry — the file is hand-shaped, so nothing else is
+reformatted — then commits each one, scoped to `custom-tests.yaml` alone so in-flight work in the
+tree is never swept into a bookkeeping commit, retrying if a parallel child is holding the index
+lock. It **refuses and writes nothing** on a name that is not in the file, a `blocked` or `fail`
+with no reason, a multi-line reason, or any write that would change the entry set. A refusal is a
+real finding: it usually means the name drifted, not that the outcome was wrong.
+
 **Resolve `commit` once, at the start of the run** — `git rev-parse --short HEAD` before the first
-verification — and write that same value into every `last:` block. Do **not** re-read `HEAD` per
+verification — and pass that same value on every `record` call. The recorder never reads `HEAD`
+itself, for this reason. Do **not** re-read `HEAD` per
 verification: outcomes are committed as they go (below), so HEAD moves during the run and a later
 re-read would record a `test:` bookkeeping commit as the code state the check was proven against.
 That would put bookkeeping commits on `VERIFIED` edges, and the carry-forward diff would measure from
 the wrong end.
 
-**Commit as you go, not once at the end.** After each verification — or each small group of them —
-commit `custom-tests.yaml` with `test: record verification outcomes`. An agent that is killed
-mid-sweep (a usage limit, a watchdog) loses only what it had not yet committed; batching every write
-to the end loses the whole run's record while the tallies in the transcript survive to contradict it.
+**Commit as you go, not once at the end.** After each verification — or each chunk of them —
+`record` commits `custom-tests.yaml` with `test: record verification outcomes`, one commit per
+entry. This is the rule that sets the batch size: a chunk is what you are willing to lose. An agent
+killed mid-sweep (a usage limit, a watchdog) loses only what it had not yet committed; batching every
+write to the end loses the whole run's record while the tallies in the transcript survive to
+contradict it.
 A partial sweep with intact records beats a complete one whose record died with the agent. This has
 happened: one kill took ~196 verification records with it, leaving `last:` blocks reading older than
 the run that had just re-proven them.
@@ -1751,7 +1798,9 @@ eaten by the split itself.
 on *every* turn it then takes, and that cost multiplies by the number of children — it is the only
 part of a fan-out that does. State the operative rules inline in the dispatch prompt instead, in a
 few hundred words: the running-stack rule, the freshness rule, `pass` means exercised-and-held, the
-substituted-path rule, and the evidence-trace line format. Give it the resolved entries with their
+substituted-path rule, the evidence-trace line format, and the two `run-checks.py` invocations with
+their JSON shapes — a child that has to discover the runner will take a turn per verification, which
+is the cost the split was meant to divide. Give it the resolved entries with their
 `type`, `assert` and target already looked up, so it starts working rather than orienting. Reading
 this file is for whoever does the splitting; the children get its conclusions.
 

@@ -27,6 +27,7 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 - `.claude/hooks/skill-mark.sh` — PostToolUse Skill: records invoked skills to a session-scoped marker
 - `.claude/hooks/post-commit.sh` — PostToolUse Bash: reminds to run `<PREFIX>-log` after every commit
 - `.claude/graph/graph.py` — delivery-graph projector + query engine (copied verbatim from `../../shared/graph.py`); `edges.jsonl` is generated and gitignored
+- `.claude/skills/<PREFIX>-test/scripts/run-checks.py` — batched execution of resolved Integration commands and `last:` recording for every type (copied verbatim from `../../shared/run-checks.py`); returns observations, never verdicts
 - `.claude/settings.json` — wires all hooks
 - `CLAUDE.md` workflow sections
 
@@ -34,6 +35,7 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 - `../../shared/tpl-agents.md` — tosk-dev, tosk-qa, tosk-pm templates
 - `../../shared/tpl-lifecycle.md` — 8 lifecycle skill templates
 - `../../shared/graph.py` — the delivery-graph projector, copied verbatim to `.claude/graph/graph.py`
+- `../../shared/run-checks.py` — the verification runner/recorder, copied verbatim to `.claude/skills/<PREFIX>-test/scripts/run-checks.py`
 - `../../shared/tpl-skill-guard.md` — all hook templates + governed-paths.conf + settings.json
 - `../../shared/tpl-domain-skill.md` — domain skill stub + project file sections
 - `../../shared/tpl-commands.md` — slash command templates
@@ -189,6 +191,7 @@ Create these files (skip if already present, offer to overwrite if stale):
 .claude/skills/<PREFIX>-deploy/SKILL.md       ← from tpl-lifecycle.md § tosk-deploy/SKILL.md
 .claude/skills/<PREFIX>-deploy/references/deploy-config.yaml  ← populated, not a stub — see "Populate deploy-config.yaml" below
 .claude/skills/<PREFIX>-test/SKILL.md       ← also creates references/test-commands.md, sync-checklist.md, custom-tests.md, and custom-tests.yaml (tests: []) — see tpl-lifecycle.md § tosk-test
+.claude/skills/<PREFIX>-test/scripts/run-checks.py  ← copy ../../shared/run-checks.py VERBATIM — no substitution (it glob-discovers the test skill), so it stays byte-identical across projects; `git add` it, and no chmod (it runs as `python3 …`)
 .claude/skills/<PREFIX>-skill/SKILL.md
 .claude/skills/<PREFIX>-skill/references/skill-manifest.md  ← stub; populate with all lifecycle + domain skills installed in this run
 .claude/skills/<PREFIX>-docs/SKILL.md
@@ -594,6 +597,7 @@ Walk the checklist before declaring done:
 - [ ] `code.md`/`fix.md` Prod walk and `pilot.md` Step 3(a2) drain still-open prod-only deferrals covering the shipped paths (`blast`-bounded), not just the task's own carry
 - [ ] That section defines **five** blocks in order (Verdict · Learned · Status · Open · Emerged), `Learned` capped at 3 bullets and admitting only what changes the reader's picture; Open's table is three columns with `Next` a runnable command, never a bare roadmap id
 - [ ] `<PREFIX>-test/references/custom-tests.md § Execution` pins `last.commit` **once** at the start of the run (not `rev-parse HEAD` per verification) and commits outcomes **as they go**, so a killed agent loses one record rather than the run's
+- [ ] `.claude/skills/<PREFIX>-test/scripts/run-checks.py` exists, is **byte-identical** to the plugin's `shared/run-checks.py`, and is tracked by git; `custom-tests.md § Execution` routes the Integration set through `run-checks.py run` in chunks of ≤10 and records **every** type through `run-checks.py record`. The runner must return observations only — if any instruction anywhere lets it emit a `pass`, that is the finding, because a scripted verdict discharges a vacuous check permanently
 - [ ] `<PREFIX>-log`'s `**UAT-deferred:**` format requires a spaced dash and the reason each verification could not run; `graph.py` emits `reason` on the `DEFERRED` edge and `open-deferrals` renders it
 - [ ] That same section carries the **row-placement test** (*does this need a decision or an action from you now?* → Open naming the command, else Emerged naming its store), the rule that filing is orthogonal to urgency and **an item never appears in both blocks**, the three legal Emerged homes with **no home → the row is Open**, and the **closing line derived from the Open rows** (none → `none — nothing open, safe to start a fresh session`; one → its `Next`; 2+ all carrying ids → `/pilot --items`; 2+ with any unfiled → a goal-shaped `/pilot` naming the set — two or more always batches, never one row at a time)
 - [ ] `.claude/commands/pilot.md` Step 0 runs the same `open-deferrals` read as `code.md`, reports it as a line, and folds only the 3+-on-one-blocker escalation into its Confirm question

@@ -129,14 +129,14 @@ Code edits → `<PREFIX>-dev`. Delivery log → `<PREFIX>-pm`. Review never skip
 **Status:** signed-off | signed-off-with-deferrals | blocked
 **Review:** clean | <N> findings — <one-line summary; note any non-source nits fixed directly>
 **Tests:** <what ran> · <pass/fail counts> · <N carried, when any prior was carried forward> · regression=<the scope that ran: smart|full><when the caller passed `auto`, append ` (derived: <one clause — what in the change decided it>)`>
-**Fanned out:** <N> children · <one clause: what each covered>  (or "none")
+**Fanned out:** <N> children (<model>) · <one clause: what each covered>  (or "none")
 **Evidence:** <one line per typed verification: command/action → observed result → pass|fail|blocked; "none" if no typed verifications ran>
 **UAT-deferred:** <verification names + reasons — only with signed-off-with-deferrals; omit line otherwise>
 **Reference Sync:** done | n/a
 **Notes:** <one short line, optional>
 ```
 
-`Fanned out:` records parallel subagents you dispatched to split a large verification set — the count is a cost the caller cannot see any other way, so report it even though it needs no action. Write `none` when you did the work yourself.
+`Fanned out:` records parallel subagents you dispatched to split a large verification set — the count and the model they ran on are a cost the caller cannot see any other way, so report both even though they need no action. Write `none` when you did the work yourself.
 
 Use `Status: blocked` if review or tests reported anything that can't be signed off without a code change. Use `signed-off-with-deferrals` only when the sole open items are verifications no available environment can run. `Evidence:` is the compact proof the user reads instead of re-testing — concrete commands and observed output, not claims.
 
@@ -167,7 +167,7 @@ Process enforcement and documentation orchestrator for <PROJECT>. Does not write
    - `Tests:` line present with pass counts
 
    If `Status: blocked` or `**QA-evidence:**` is missing entirely, return `Status: blocked` with `Notes: missing QA evidence — orchestrator must pass <PREFIX>-qa's handoff block.` Do not grep session state — subagent skill invocations don't appear in the parent session jsonl.
-1.5. **Resolve roadmap linkage** — before writing the log, because the entry carries the link. Run `python3 .claude/graph/graph.py roadmap-open --for <changed paths>`: it lists every open/in-progress item and marks `~match` on those whose prior delivered tasks touched the same paths. Decide which item(s) this task addresses and keep their `**Id:**` values for step 2 and step 2.5. If none matches, record that — never invent an id. Fall back to reading `docs/roadmap.md` if the script is absent or exits non-zero.
+1.5. **Resolve roadmap linkage** — before writing the log, because the entry carries the link. Run `python3 .claude/graph/graph.py roadmap-open --for <changed paths>`: it lists every open/in-progress item and marks `~match` on those whose prior delivered tasks touched the same paths. Decide which item(s) this task addresses and keep their `**Id:**` values for step 2 and step 2.5. If none matches, record that — never invent an id. Fall back to reading `docs/roadmap.md` if the script is absent or exits non-zero. **If the orchestrator's prompt carries a `Graph blast:` block for these paths, its `roadmap` lines are this query's answer** — use them instead of re-running it; the rule is unchanged, only where the answer comes from.
 2. **Write delivery log** — use `<PREFIX>-log` skill to append the entry to `docs/project-log.md`. Pass the roadmap ids from step 1.5 for the entry's `**Addresses:**` line (omit the line if none), and the gate outcomes from the orchestrator's prompt for `**Decisions:**`. This is your core, non-negotiable job — never skip or defer it. The entry's hash must be the **primary feature/fix commit** (the one that changed source paths), never a bookkeeping commit (`test:`, `log:`, `docs:`, `chore(deploy-config):`). Include any `UAT-deferred:` items from QA-evidence so open follow-ups are on record.
 2.5. **Roadmap status update** — required, not best-effort: flip `**Status:**` to `done · YYYY-MM-DD` or `in-progress` on each item identified in step 1.5. If step 1.5 found no match, say so in `Notes:`. Do NOT add new entries — only advance existing ones. `docs/roadmap.md` is the only roadmap store: never mirror the status to an external tracker, and never report the absence of one as a finding.
 3. **Docs check** — use `<PREFIX>-docs` skill if any of these changed:

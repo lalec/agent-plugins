@@ -72,7 +72,7 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
 **Deployed:** <component> → <env> · <url> (omit line entirely if no deploy happened)
 **Addresses:** <roadmap **Id:** value(s), comma-separated> (omit line entirely if no tracked item is addressed)
 **UAT-deferred:** <verification names — why each could not run, + how confirmed> (omit line entirely if nothing was deferred)
-**Decisions:** <gate>=<value> (<user|timeout|pilot-auto>) · … (omit line entirely if no gate was answered)
+**Decisions:** <gate>=<value> (<user|timeout|agent|pilot-auto>) · … (omit line entirely if no gate was answered)
 **Checklist:** <skill> — <what changed> (omit line entirely if nothing to note)
 ~~~
 
@@ -85,7 +85,7 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
 - **Deployed** — one line per component deployed this session, taken verbatim from the deploy-owning skill's report (e.g. `backend → test · https://test-api.example.com`). Omit the line entirely when no deploy happened.
 - **Addresses** — the `**Id:**` of each `docs/roadmap.md` item this task advances or closes, comma-separated (e.g. `verification-email-on-signup, stripe-receipt-sender`). This is the durable roadmap↔delivery link: without it the connection survives only as a status flip that nothing can trace back. Use the ids the pm step confirmed; omit the line when the task addresses no tracked item, and say so in the pm handoff rather than guessing an id.
 - **UAT-deferred** — verifications QA could not run in any environment, carried from the pipeline. **Each name is followed by a spaced dash and the reason it could not run** (e.g. `` `login-flow-e2e` — no non-prod env for this component (user-confirmed) ``). The reason is not optional prose: it is the only thing that tells a later `open-deferrals` read whether the entry is structurally unprovable or something a person could still close, and the routing that decides that already happened when the deferral was accepted. Without it the entry is permanently unclassifiable — the text is never recoverable later. Backtick each verification name so it stays machine-readable. These are open follow-ups; omit the line when none.
-- **Decisions** — one term per gate that came up this task, as `<gate>=<value> (<how>)`, joined by ` · ` — e.g. `regression=full (agent) · ship=hold (timeout) · defer=accept (user)`. `<how>` is `user` (a real answer), `timeout` (a default taken on silence), `agent` (derived by the pipeline from evidence rather than asked — the regression scope resolved from the changed paths is the standing case), or `pilot-auto` (decided autonomously mid-mission). A gate that was deliberately **not** decided is recorded as `<gate>=parked (human-gated — <what would answer it>)` — an autonomous lane may produce the evidence for a keep/ship verdict but never the verdict itself. **Say what would answer it, after a spaced dash.** That clause is the only record of whether the gate waits on a person or on evidence that has not arrived yet, it is what `open-gates` returns as the gate's `condition`, and it is the same thing a verification's `last.reason` carries — a gate parked with the bare word is a question nobody can classify, so it comes back as an open decision every time anyone looks. When a later run re-measures the claim and the answer needs no irreversible action, record the conclusion the same way under the same name: `<gate>=superseded|expired|moot (pilot-auto)`, with the measurement that decided it in the entry's prose. **An unanswered gate is never recorded as decided, and a timeout or auto-decision is never recorded as `user`** — this line is the only durable record of whether a shipped change was actually consented to. Omit the line when no gate came up.
+- **Decisions** — one term per gate that came up this task, as `<gate>=<value> (<how>)`, joined by ` · ` — e.g. `regression=full (agent) · ship=hold (timeout) · defer=accept (user)`. `<how>` is `user` (a real answer), `timeout` (a default taken on silence), `agent` (derived by the pipeline from evidence rather than asked — the regression scope resolved from the changed paths is the standing case), or `pilot-auto` (decided autonomously mid-mission). **`<how>` is exactly one of those four words** — the measurement or reasoning behind an autonomous conclusion goes in the entry's prose, never inside the parentheses: `open-gates` reads the text after a spaced dash there as the gate's `condition`, and the checklist compares the word, so `(measured — …)` is a gate nobody can classify. A gate that was deliberately **not** decided is recorded as `<gate>=parked (human-gated — <what would answer it>)` — an autonomous lane may produce the evidence for a keep/ship verdict but never the verdict itself. **Say what would answer it, after a spaced dash.** That clause is the only record of whether the gate waits on a person or on evidence that has not arrived yet, it is what `open-gates` returns as the gate's `condition`, and it is the same thing a verification's `last.reason` carries — a gate parked with the bare word is a question nobody can classify, so it comes back as an open decision every time anyone looks. When a later run re-measures the claim and the answer needs no irreversible action, record the conclusion the same way under the same name: `<gate>=superseded|expired|moot (pilot-auto)`, with the measurement that decided it in the entry's prose. **An unanswered gate is never recorded as decided, and a timeout or auto-decision is never recorded as `user`** — this line is the only durable record of whether a shipped change was actually consented to. Omit the line when no gate came up.
   **A gate name is stable for the life of the decision, and specific enough to be answered by name.** `graph.py open-gates` keys every decision by the gate name, so the entry that *answers* a parked gate closes it only by repeating that name **verbatim** — and any newer decision on that name closes *every* earlier parking of it. A name a lane reuses on every run therefore describes several different verdicts at once: one real lane parked `keep/adopt` four times over four separate experiments, and answering any one of them would have closed all four. Name the decision, not the step that raised it. **Keep the value a plain word too** — `=**KEEP**` reads as a different answer than `KEEP` to anything comparing it, and one such entry left its gate reading `parked` for a fortnight after it had been answered twice. A new name is a new gate and the old one stays parked forever — and the error is directional: a stale `parked` reads as work outstanding, so the close-out over-reports unfinished business, which is the one failure the query exists to prevent. Answering a gate needs no special step: record `<gate>=<value> (<how>)` in the entry that resolves it, under the name it was parked as. Editing an old entry in place is **migration only** — for gates parked before this rule existed, whose answer was never recorded under any name.
 - **Checklist** — one `skill — note` per skill whose reference files were updated. Omit the line entirely if nothing was updated.
 
@@ -99,11 +99,11 @@ Required steps before writing the log entry:
 4. [ ] Body is 1–3 sentences, no `What:` label
 5. [ ] `Deployed:` line included when a deploy occurred this session (env + url sourced from the deploy-owning skill's report); omitted otherwise
 6. [ ] `Addresses:` carries the roadmap `**Id:**` the pm step confirmed, or the line is omitted — never a guessed id
-7. [ ] `Decisions:` records every gate that came up with its true `user` / `timeout` / `agent` / `pilot-auto` origin; every `parked` says what would answer it; every value is a plain word; every `approved` sits in an entry that also cites the commit or an `**Addresses:**` id for the work it authorised
+7. [ ] `Decisions:` records every gate that came up with its true `user` / `timeout` / `agent` / `pilot-auto` origin — exactly one of those four words in the parentheses, nothing else; every `parked` says what would answer it; every value is a plain word; every `approved` sits in an entry that also cites the commit or an `**Addresses:**` id for the work it authorised
 8. [ ] `Checklist:` line omitted when nothing was updated
 9. [ ] No field outside the closed set above — leftover scope went to `docs/roadmap.md`, unrunnable verifications to `UAT-deferred:`
 10. [ ] `docs/project-log.md` committed with `log: <short title>`
-10. [ ] `graph.py build` run after the commit (or its failure noted in the handoff)
+11. [ ] `graph.py build` run after the commit (or its failure noted in the handoff)
 ```
 
 ---
@@ -1685,6 +1685,12 @@ python3 .claude/skills/<PREFIX>-test/scripts/run-checks.py run <<'JSON'
 JSON
 ```
 
+The runner executes the chunk concurrently (`--jobs 4`) with a 30 s per-command timeout, so ten
+entries finish inside one Bash tool call — that call's own default timeout is 120 s, and a chunk
+that outlives it loses every observation, not one. Pass the Bash `timeout` parameter when a chunk
+could plausibly need more; never raise the runner's `--timeout` past 30 s instead, because a target
+that slow is the observation (`timed out`), not something to wait longer for.
+
 It returns one evidence-trace line per entry — command → observed result — and **no verdict**. Judge
 each one yourself against its `assert`, applying the running-stack, freshness, vacuous-pass and
 substituted-path rules exactly as if you had typed the command. The script has no status field to
@@ -1804,6 +1810,12 @@ is the cost the split was meant to divide. Give it the resolved entries with the
 `type`, `assert` and target already looked up, so it starts working rather than orienting. Reading
 this file is for whoever does the splitting; the children get its conclusions.
 
+**Spawn every child with `model: sonnet`**, attended run or not. A child executes and records
+against a brief — it neither designs nor reviews, and its one judgment (does the observation satisfy
+the `assert`, or is it vacuous) is the same rule on every row. That is the fan-out priced cheap; the
+judgment that decided what to fan out stays on the caller's model. Name the model on the handoff's
+`Fanned out:` field so the saving is measurable rather than assumed.
+
 **Bound the turns in a child, not the number of children.** Cost grows with the square of a child's
 turn count, so one child taking 160 turns costs far more than two taking 80. Size each slice to
 finish in roughly 60 turns; a child still working past that returns what it has plus the entries it
@@ -1831,6 +1843,11 @@ python3 .claude/graph/graph.py covers <changed paths…>
 It returns the verification names whose stored `paths:` intersect the changed paths — the same rule
 stated below, evaluated against the index instead of by reading the whole file. **Fall back** to the
 manual rule if the script is missing or exits non-zero.
+
+**If the dispatch prompt already carries a `Graph blast:` block for these paths, its `verif` lines
+are this query's answer** — use them instead of re-running it. The orchestrator ran `blast` once at
+the top level and pasted the pack so it sits in the cached part of this context; the rule is
+unchanged, only where the answer comes from. No block, or a block for different paths → query.
 
 The rule it implements: include a prior verification when its stored `paths:` set intersects the
 changed-paths list passed by the caller. This task's own verifications always run.
@@ -1886,6 +1903,9 @@ answer would be a guess about a change nobody had made.
 ```bash
 python3 .claude/graph/graph.py blast <changed paths…>
 ```
+
+A `Graph blast:` block in the dispatch prompt for these same paths **is** this call's output — read
+the owners and verification statuses from it and do not re-run the query.
 
 Escalate to `full` when either holds, else `smart`:
 - the changed paths are owned by **more than one skill** — a change that crosses ownership
@@ -2128,7 +2148,10 @@ exits non-zero, the caller uses its pre-graph behaviour. The graph is an acceler
 ```
 python3 .claude/graph/graph.py build                      reproject the index (<1s)
 python3 .claude/graph/graph.py covers <path>...           verifications whose paths intersect these
-python3 .claude/graph/graph.py blast <path>...            owners · verifications+status · deliveries · deferrals
+python3 .claude/graph/graph.py blast <path>... [--ids <roadmap-id>...]
+                                                      owners · verifications+status · deliveries · deferrals ·
+                                                      affine or named roadmap items · gates holding them — the
+                                                      one pack a task's qa and pm prompts carry inline
 python3 .claude/graph/graph.py history <path>             what shipped, was verified, or was reverted here
 python3 .claude/graph/graph.py roadmap-open [--for <path>...]   open items + status breakdown; ~match = path-affine
 python3 .claude/graph/graph.py open-deferrals [--with-fail] [<path>...] deferred or blocked, not passing since

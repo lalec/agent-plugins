@@ -54,6 +54,7 @@ PATH_MAP=(
   '^docs/project-log\.md$:EXEMPT'
   '^\.claude/skills/<PREFIX>-test/references/custom-tests\.yaml$:EXEMPT'
   '^\.claude/graph/edges\.jsonl$:EXEMPT'
+  '^\.claude/pilot/:EXEMPT'
   '^\.claude/graph/:<PREFIX>-graph'
 <SKILL_SELF_OWNERSHIP_ENTRIES>
   '^\.claude/skills/:<PREFIX>-skill'
@@ -90,6 +91,7 @@ PATH_MAP=(
   '^docs/project-log\.md$:EXEMPT'
   '^\.claude/skills/myapp-test/references/custom-tests\.yaml$:EXEMPT'
   '^\.claude/graph/edges\.jsonl$:EXEMPT'
+  '^\.claude/pilot/:EXEMPT'
   '^\.claude/graph/:myapp-graph'
   '^\.claude/skills/myapp-backend/:myapp-backend'
   '^\.claude/skills/myapp-frontend/:myapp-frontend'
@@ -110,6 +112,7 @@ For projects with no deploy mechanism (e.g. a static prototype), set `DEPLOY_PAT
 
 Rules:
 - `docs/project-log.md` is always `EXEMPT` (written by `<PREFIX>-log` without skill loading)
+- `.claude/pilot/` is always `EXEMPT` — `/pilot` writes its run markers there at the top level and a headless shift writes its state from a shell; the only tracked file in it, `shift.sh`, is a verbatim plugin copy that no skill authors
 - `<PREFIX>-test/references/custom-tests.yaml` is always `EXEMPT` — the `/code`/`/fix` Step 1.5 persist step writes it at the top level and carries the schema itself; gating it forces a full skill load per pipeline run for a 10-line append
 - **Every installed `<PREFIX>-*` skill gets a self-ownership entry** (`'^\.claude/skills/<PREFIX>-<name>/:<PREFIX>-<name>'`) before the `.claude/skills/` catch-all — a skill maintains its own SKILL.md and `references/` with itself loaded. The `<PREFIX>-skill` catch-all after them still owns cross-skill structure (new skill dirs, renames)
 - `.claude/skills/` (catch-all), `.claude/hooks/`, `.claude/agents/`, and `CLAUDE.md` are owned by `<PREFIX>-skill`

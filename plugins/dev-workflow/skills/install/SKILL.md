@@ -28,6 +28,7 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 - `.claude/hooks/post-commit.sh` — PostToolUse Bash: reminds to run `<PREFIX>-log` after every commit
 - `.claude/graph/graph.py` — delivery-graph projector + query engine (copied verbatim from `../../shared/graph.py`); `edges.jsonl` is generated and gitignored
 - `.claude/skills/<PREFIX>-test/scripts/run-checks.py` — batched execution of resolved Integration commands and `last:` recording for every type (copied verbatim from `../../shared/run-checks.py`); returns observations, never verdicts
+- `.claude/pilot/shift.sh` — headless-shift runner for the standing mission (copied verbatim from `../../shared/shift.sh`); the rest of `.claude/pilot/` is run markers and is gitignored. Scheduling it is opt-in (Phase 3 Step 4)
 - `.claude/settings.json` — wires all hooks
 - `CLAUDE.md` workflow sections
 
@@ -36,6 +37,7 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 - `../../shared/tpl-lifecycle.md` — 8 lifecycle skill templates
 - `../../shared/graph.py` — the delivery-graph projector, copied verbatim to `.claude/graph/graph.py`
 - `../../shared/run-checks.py` — the verification runner/recorder, copied verbatim to `.claude/skills/<PREFIX>-test/scripts/run-checks.py`
+- `../../shared/shift.sh` — the headless-shift runner, copied verbatim to `.claude/pilot/shift.sh`
 - `../../shared/tpl-skill-guard.md` — all hook templates + governed-paths.conf + settings.json
 - `../../shared/tpl-domain-skill.md` — domain skill stub + project file sections
 - `../../shared/tpl-commands.md` — slash command templates
@@ -197,6 +199,7 @@ Create these files (skip if already present, offer to overwrite if stale):
 .claude/skills/<PREFIX>-docs/SKILL.md
 .claude/skills/<PREFIX>-graph/SKILL.md        ← from tpl-lifecycle.md § tosk-graph; also create references/graph-schema.md
 .claude/graph/graph.py                        ← copy ../../shared/graph.py VERBATIM — no substitution (it glob-discovers skill dirs), so it stays byte-identical across projects and diffs cleanly on upgrade
+.claude/pilot/shift.sh                        ← copy ../../shared/shift.sh VERBATIM — no substitution (it resolves the repo from git), so it stays byte-identical across projects; `git add` it; the rest of `.claude/pilot/` is gitignored
 .claude/skills/<PREFIX>-design/SKILL.md       ← only if a frontend/website domain skill was confirmed in Phase 1c; also create references/design-tokens.md and references/ux-patterns.md stubs
 .claude/commands/code.md          ← from tpl-commands.md § /code, substitute <PROJECT> and <PREFIX>
 .claude/commands/fix.md           ← from tpl-commands.md § /fix, substitute <PROJECT> and <PREFIX>
@@ -289,14 +292,19 @@ Also append to `.gitignore` (create it if absent) any of these lines not already
 ```
 .claude/graph/edges.jsonl
 .claude/graph/__pycache__/
+.claude/pilot/*
+!.claude/pilot/shift.sh
 ```
 The index is generated, churns on every delivery, and is rebuilt in under a second — committing it
 would add noise to every diff for no recoverable value. `__pycache__/` appears whenever anything
-imports `graph.py` rather than running it as a script.
+imports `graph.py` rather than running it as a script. `.claude/pilot/` holds `/pilot`'s run
+markers (`running`, `last-run.json`) and a headless shift's `state.json` and raw results — per-machine
+facts about *when* a run happened, never *what* it decided (that lives in the log and the roadmap),
+so nothing in it belongs in the repo except the runner script itself.
 
-**`graph.py` itself must be committed** — stage it explicitly:
+**`graph.py` and `shift.sh` themselves must be committed** — stage them explicitly:
 ```bash
-git add .claude/graph/graph.py .gitignore
+git add .claude/graph/graph.py .claude/pilot/shift.sh .gitignore
 ```
 An untracked `graph.py` has no protection: any `git clean`, a `/tidy` discard, or a stray `rm -rf`
 deletes it, and because every call site is required to fall back silently, the workflow keeps
@@ -340,7 +348,7 @@ Also create `docs/workflow.md` if not present — generate with real content usi
   (top level) close out — push per <PREFIX>-deploy § Push policy + verified scorecard
 ```
 
-Iterative work (pixel nudges, copy rounds, small hotfixes) uses `/tweak` — top-level, inline-verified, close-out batched at exit and enforced by the `close-out-gate` hook at push time. Rollbacks use `/revert` (git revert + scoped re-verify + logged reversal). Leftover WIP — a dirty tree, orphaned stashes, stale branches — uses `/tidy`: it sweeps, probes history to establish what each item actually is, and routes every item to commit / deliver / discard / ignore. Multi-task autonomous runs (a roadmap batch, a goal to iterate toward) use `/pilot` — it decomposes the goal, gates once up-front, routes each task through the pipeline or the tweak lane, and closes out once at the end. `/pilot --gates` is the same lane aimed at a store instead of a goal: it re-measures every parked verdict, closes on its own the ones whose proposal the measurement killed or whose trigger has not fired, and brings the rest back as one batched decision with a recommendation per row — nothing that writes is ever concluded without an answer. `/roadmap` is the way in from tracked work: it ranks the open items (one rank rule, defined in `roadmap.md § Rank` and cited by `/pilot`) and either hands the top set to `/pilot --items <id>,…` as a mission or starts a single item through `/code`/`/fix`. It selects and never implements, so run constraints — task cap, retry limit, budget — live only in `/pilot`.
+Iterative work (pixel nudges, copy rounds, small hotfixes) uses `/tweak` — top-level, inline-verified, close-out batched at exit and enforced by the `close-out-gate` hook at push time. Rollbacks use `/revert` (git revert + scoped re-verify + logged reversal). Leftover WIP — a dirty tree, orphaned stashes, stale branches — uses `/tidy`: it sweeps, probes history to establish what each item actually is, and routes every item to commit / deliver / discard / ignore. Multi-task autonomous runs (a roadmap batch, a goal to iterate toward) use `/pilot` — it decomposes the goal, gates once up-front, routes each task through the pipeline or the tweak lane, and closes out once at the end. `/pilot --gates` is the same lane aimed at a store instead of a goal: it re-measures every parked verdict, closes on its own the ones whose proposal the measurement killed or whose trigger has not fired, and brings the rest back as one batched decision with a recommendation per row — nothing that writes is ever concluded without an answer. `/roadmap` is the way in from tracked work: it ranks the open items (one rank rule, defined in `roadmap.md § Rank` and cited by `/pilot`) and either hands the top set to `/pilot --items <id>,…` as a mission or starts a single item through `/code`/`/fix`. It selects and never implements, so run constraints — task cap, retry limit, budget — live only in `/pilot`. `/whats-up` is the read-only composed reader for a fresh session: it reads every store that outlives a session, reconciles them, and reports what needs a person — and `/pilot` with no arguments is the **standing mission** that takes exactly that report's rows as its task list, asks nothing up front, and at close-out asks only the high or critical rows. That is what runs unattended: `/loop /pilot --max-tasks 3` in a session left open with Remote Control (gates reach the phone and default on the `askUserQuestionTimeout` you set in `/config`; `autoContinueAtUsageLimit` waits out the usage window), or `.claude/pilot/shift.sh install` for headless launchd shifts that resume a limit-interrupted run before starting the next. An unattended run dispatches every subagent on Sonnet and keeps the orchestrator on the session model; an attended run uses the agents' own models. A check-in is `/whats-up` → `/pilot --gates`, which asks everything the unattended runs parked, in one sitting.
 
 ## Agents
 
@@ -367,7 +375,7 @@ Gate timeouts split by risk: reversible gates proceed with defaults labeled `aut
 | `<PREFIX>-test` | Smoke (always) · per-task verifications via `custom-tests.yaml`, end-state check never narrowed away · regression scope pinned by the caller or resolved from the changed paths |
 | `<PREFIX>-skill` | Meta-skill — skill system governance and path ownership |
 | `<PREFIX>-docs` | Documentation sync — README and workflow.md |
-| `<PREFIX>-graph` | Delivery graph — projects the log, verifications, ownership and deploy config into a queryable edge index (`covers` / `blast` / `history` / `roadmap-open` / `open-deferrals`); derived and disposable, every caller falls back without it |
+| `<PREFIX>-graph` | Delivery graph — projects the log, verifications, ownership and deploy config into a queryable edge index (`covers` / `blast` / `history` / `roadmap-open` / `open-deferrals` / `open-gates`); derived and disposable, every caller falls back without it |
 
 ### Domain
 
@@ -511,6 +519,10 @@ chmod +x .claude/hooks/post-commit.sh
 
 Use `tpl-skill-guard.md § settings.json`. If the file does not exist, create it from the template. If it already exists, merge the `hooks` key — add all hook entries without removing unrelated settings. Do not tell the user to wire hooks manually; write the file in this step.
 
+**Step 4 — Schedule headless shifts (opt-in, macOS only)**
+
+`.claude/pilot/shift.sh` is already copied and staged (Phase 2). Ask once, with `AskUserQuestion`: "Schedule headless shifts on this machine? — a launchd job runs `/pilot --max-tasks N` every interval with a dollar cap, orchestrator on Opus, subagents on Sonnet; you answer what it parks at check-in." Options: `Yes — every 30 min, 3 tasks, $15 cap (Recommended)` / `Not now`; the automatic "Other" takes an interval, task cap, budget and a Discord/Slack webhook URL for `PILOT_NOTIFY_URL`. On yes, run `bash .claude/pilot/shift.sh install [--interval S] [--max-tasks N] [--budget USD] [--notify URL]` and show its output; on no, print that same command so the user can run it later. Never install without asking — it writes to `~/Library/LaunchAgents`, outside the repo — and never run this step from inside a shift or any non-interactive session. Remind the user that gates default on their own `askUserQuestionTimeout` (`/config`, user scope) and that the interactive loop form (`/loop /pilot --max-tasks 3`) needs no install at all.
+
 ---
 
 ## Phase 4 — Wire CLAUDE.md
@@ -599,6 +611,11 @@ Walk the checklist before declaring done:
 - [ ] `<PREFIX>-test/references/custom-tests.md § Execution` pins `last.commit` **once** at the start of the run (not `rev-parse HEAD` per verification) and commits outcomes **as they go**, so a killed agent loses one record rather than the run's
 - [ ] `.claude/skills/<PREFIX>-test/scripts/run-checks.py` exists, is **byte-identical** to the plugin's `shared/run-checks.py`, and is tracked by git; `custom-tests.md § Execution` routes the Integration set through `run-checks.py run` in chunks of ≤10 and records **every** type through `run-checks.py record`. The runner must return observations only — if any instruction anywhere lets it emit a `pass`, that is the finding, because a scripted verdict discharges a vacuous check permanently
 - [ ] `<PREFIX>-log`'s `**UAT-deferred:**` format requires a spaced dash and the reason each verification could not run; `graph.py` emits `reason` on the `DEFERRED` edge and `open-deferrals` renders it
+- [ ] `.claude/pilot/shift.sh` exists, is **byte-identical** to the plugin's `shared/shift.sh`, and is tracked by git; `git check-ignore -v .claude/pilot/state.json` names a rule and `git check-ignore .claude/pilot/shift.sh` exits 1 (the negation holds); `governed-paths.conf` `PATH_MAP` has `'^\.claude/pilot/:EXEMPT'` before the `.claude/` catch-all
+- [ ] `pilot.md` carries the standing mission: `(no goal, no flag)` and `--deferrals` rows in the Decompose store table, `Standing-mission gate`, `One run at a time`, a `Models` scorecard row, `last-run.json`, `Next shift`, `runnable rows left` and `PILOT_NOTIFY_URL`, and a `whats-up-store:` frontmatter block with a `live:` line; `whats-up.md`'s store schema documents `live:` and its closing line names `/pilot` with no arguments as the batch for runnable rows
+- [ ] `code.md`, `fix.md` and `pilot.md` pass a `Graph blast:` block to both the qa and pm prompts (`code.md`/`fix.md` contain `Pre-ground qa and pm`); `custom-tests.md § Prior-selection` and `§ Regression scope` and `<PREFIX>-pm.md` step 1.5 each read the pack when present and query otherwise; `graph.py blast` accepts `--ids`
+- [ ] `custom-tests.md § Splitting` spawns every child with `model: sonnet` and `<PREFIX>-qa.md`'s `Fanned out:` field carries the model; `pilot.md` Step 2 `Models` dispatches every subagent on `model: sonnet` only when the run is unattended
+- [ ] `<PREFIX>-log`'s entry-format template lists `<user|timeout|agent|pilot-auto>` and the field guidance says `<how>` is exactly one of those four words; `code.md`/`fix.md` Gate policy names `askUserQuestionTimeout` and neither says a timeout "costs 60 seconds"
 - [ ] That same section carries the **row-placement test** (*does this need a decision or an action from you now?* → Open naming the command, else Emerged naming its store), the rule that filing is orthogonal to urgency and **an item never appears in both blocks**, the three legal Emerged homes with **no home → the row is Open**, and the **closing line derived from the Open rows** (none → `none — nothing open, safe to start a fresh session`; one → its `Next`; 2+ all carrying ids → `/pilot --items`; 2+ with any unfiled → a goal-shaped `/pilot` naming the set — two or more always batches, never one row at a time)
 - [ ] `pilot.md` carries the verdict ladder in Step 2 (`superseded`/`expired`/`moot`/`waiting` concluded by the run, `drifted`/`live`/`judgment` by the user), the unattended rule that a run with nobody present takes only the first two rows, `--gates` in Usage/Step 0/Decompose, `apply:` in the `pilot-lane:` schema, and Step 3 `(a0)` — preflight the apply route, one batched `AskUserQuestion`, answers written to `Decisions:` before any apply, and no `approved` without a cited commit or an `**Addresses:**` id
 - [ ] `pilot.md` Step 3 `(a3)` runs `<PREFIX>-docs` and `<PREFIX>-skill` once over the union of paths touched by tasks that did **not** run the pipeline lane — the only lane that spawns `<PREFIX>-pm` — and the scorecard's `Docs` and `Ref sync` rows say `n/a` with a reason rather than going blank

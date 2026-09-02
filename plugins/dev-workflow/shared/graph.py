@@ -11,7 +11,10 @@ must fall back to its pre-graph behaviour if this script is absent or exits non-
 
     graph.py build                   reproject the index from scratch (<1s on a 200-entry log)
     graph.py covers <path>...        verifications whose paths intersect these
-    graph.py blast <path>...         owning skills - covering verifs - deliveries - deferrals
+    graph.py blast <path>... [--ids <roadmap-id>...]
+                                     owning skills - covering verifs - deliveries - deferrals -
+                                     affine or named roadmap items - gates holding them; the one
+                                     pack a task's qa and pm prompts carry inline
     graph.py history <path>          what has been delivered, verified and reverted here
     graph.py roadmap-open [--for <path>...]   open items, path-affine ones marked ~match
     graph.py open-deferrals [--with-fail] [<path>...]   deferred or blocked, not passing since
@@ -319,16 +322,37 @@ def _scalar(v: str) -> str:
     return v
 
 
+def _quote_open(v: str) -> bool:
+    """True when `v` opens a single-quoted scalar that has not closed yet — a `'` at the
+    start and no lone `'` after it (doubled `''` is an escaped quote, not a close)."""
+    return v.startswith("'") and "'" not in v[1:].replace("''", "")
+
+
 def parse_custom_tests(text: str) -> list[dict]:
     """Minimal reader for the fixed, machine-written custom-tests.yaml shape.
 
-    Handles `paths:` as a block list or an inline flow list, and the optional
-    `last:` block. Deliberately not a general YAML parser — the schema is fixed.
+    Handles `paths:` as a block list or an inline flow list, the optional `last:` block,
+    and a single-quoted scalar that spans lines. Deliberately not a general YAML parser —
+    the schema is fixed.
+
+    The multi-line case matters: a hand-shaped `reason:` routinely wraps, and reading only
+    its first physical line handed `open-deferrals` a truncated reason — while a wrapped
+    line that happened to contain a `:` was parsed as a new key. The continuation lines
+    are joined with single spaces until the closing quote arrives.
     """
     tests: list[dict] = []
     cur: dict | None = None
     key: str | None = None
+    pending: tuple[dict, str, list[str]] | None = None  # (target, key, pieces) of an open '…'
     for raw in text.splitlines():
+        if pending is not None:
+            target, k, pieces = pending
+            pieces.append(raw.strip())
+            joined = " ".join(p for p in pieces if p)
+            if not _quote_open(joined):
+                target[k] = _scalar(joined)
+                pending = None
+            continue
         if not raw.strip() or raw.lstrip().startswith("#"):
             continue
         stripped = raw.strip()
@@ -357,11 +381,13 @@ def parse_custom_tests(text: str) -> list[dict]:
         if k == "last":
             key = "last"
             continue
-        if key == "last" and indent >= 6:
-            cur["last"][k] = _scalar(v)
-            continue
-        key = None
-        cur[k] = _scalar(v)
+        target = cur["last"] if key == "last" and indent >= 6 else cur
+        if target is cur:
+            key = None
+        if _quote_open(v):
+            pending = (target, k, [v])
+        else:
+            target[k] = _scalar(v)
     return tests
 
 
@@ -970,6 +996,51 @@ def deliveries(edges: list[dict], changed: list[str]) -> list[dict]:
     return [{"commit": node_id(c), "task": t} for c, t in hits.items()]
 
 
+def roadmap_open(edges: list[dict], src: "Sources", changed: list[str]) -> dict:
+    """Every open roadmap item with its prior tasks, the newest log entry citing it, and a
+    status breakdown of the total. `changed` marks items *affine* to those paths — ones
+    whose prior delivered tasks touched them.
+
+    Read from the roadmap file directly rather than the index: the file is the store and
+    the edge index carries only the `ADDRESSES` half of the join."""
+    addressed: dict[str, list[str]] = {}
+    latest_addr: dict[str, str] = {}
+    for e in by_kind(edges, "ADDRESSES"):
+        rid = node_id(e["to"])
+        addressed.setdefault(rid, []).append(node_id(e["from"]))
+        ts = e.get("props", {}).get("ts", "")
+        if ts > latest_addr.get(rid, ""):
+            latest_addr[rid] = ts
+    items, counts = [], {}
+    for it in parse_roadmap(read(src.roadmap)):
+        if not it["open"]:
+            continue
+        # A bare total is not trustworthy: an item with no `**Status:**` line defaults to
+        # open, and on one real roadmap that is a third of the file. Dropping those would
+        # be breaking — an item must surface rather than disappear — so the count is
+        # reported broken down instead, and the caller prints what it is made of.
+        counts_key = it["status"] if "Status" in it["fields"] else "no status line"
+        counts[counts_key] = counts.get(counts_key, 0) + 1
+        prior = addressed.get(it["id"], [])
+        items.append(
+            {
+                "id": it["id"],
+                "title": it["title"],
+                "status": it["status"],
+                "priority": it["priority"],
+                "prior_tasks": prior,
+                "last_addressed": latest_addr.get(it["id"], ""),
+                "affine": bool(changed and prior),
+            }
+        )
+    lead = ["open", "in-progress", "no status line"]
+    ranked = [(k, counts[k]) for k in lead if k in counts] + sorted(
+        ((k, v) for k, v in counts.items() if k not in lead),
+        key=lambda kv: (-kv[1], kv[0]),
+    )
+    return {"open": len(items), "status_counts": dict(ranked), "items": items}
+
+
 def emit(payload, as_json: bool, lines: list[str]) -> None:
     print(json.dumps(payload, indent=2) if as_json else "\n".join(lines) or "(none)")
 
@@ -1025,7 +1096,16 @@ def main(argv: list[str]) -> int:
         emit({"verifications": names}, as_json, names)
 
     elif cmd == "blast":
+        # `blast <paths…> [--ids <roadmap-id>…]` — one composed pack per task, resolved
+        # once at the top level and pasted into the qa and pm prompts, so the agents read
+        # it from the cached prefix instead of each spending a turn on its own query.
+        ids: list[str] = []
+        if "--ids" in rest:
+            at = rest.index("--ids")
+            ids, rest = rest[at + 1 :], rest[:at]
         stat = last_status(edges)
+        roadmap = roadmap_open(edges, src, rest)["items"]
+        affine_ids = {i["id"] for i in roadmap if i["affine"]} | set(ids)
         report = {
             "owners": sorted({owner_of(edges, p) for p in rest}),
             "verifications": [
@@ -1034,17 +1114,61 @@ def main(argv: list[str]) -> int:
             ],
             "recent_deliveries": deliveries(edges, rest)[:5],
             "open_deferrals": open_verifications(edges, rest),
+            # Named ids first, then path-affine items: the pm step decides `Addresses:`
+            # from exactly this set, and the qa step sees what the task claims to close.
+            "roadmap": [
+                {k: i[k] for k in ("id", "title", "status", "priority", "last_addressed")}
+                for i in roadmap
+                if i["id"] in affine_ids
+            ],
+            # Gates whose entry addressed one of those ids: the decisions holding this
+            # work, which is what a task touching it needs to know before it re-opens one.
+            "gates": [
+                {k: g[k] for k in ("gate", "condition", "age_days", "releases")}
+                for g in open_gates(edges)
+                if set(g.get("releases", [])) & affine_ids
+            ],
         }
+        # Text form is what gets pasted into a prompt, so it folds: passing verifications
+        # and path-affine items are one line of names each — the reader needs the set,
+        # not a row per member — while anything unproven or named keeps its own row.
+        passing = [v["name"] for v in report["verifications"] if v["status"] == "pass"]
+        affine_only = [i for i in report["roadmap"] if i["id"] not in ids]
         emit(
             report,
             as_json,
             [f"owners: {', '.join(report['owners'])}"]
-            + [f"verif: {v['name']} [{v['status']}]" for v in report["verifications"]]
+            + ([f"verif (pass, {len(passing)}): {', '.join(passing)}"] if passing else [])
+            + [
+                f"verif: {v['name']} [{v['status']}]"
+                + (f" — {clip(v['reason'], 100)}" if v.get("reason") else "")
+                for v in report["verifications"]
+                if v["status"] != "pass"
+            ]
             + [
                 f"delivered: {d['commit']} {d['task']}"
                 for d in report["recent_deliveries"]
             ]
-            + [f"open: {open_line(d)}" for d in report["open_deferrals"]],
+            + [f"open: {open_line(d)}" for d in report["open_deferrals"]]
+            + [
+                f"roadmap: {i['id']} [{i['status']}] {clip(i['title'], 90)}"
+                for i in report["roadmap"]
+                if i["id"] in ids
+            ]
+            + (
+                [
+                    f"roadmap (affine, {len(affine_only)}): "
+                    + ", ".join(i["id"] for i in affine_only)
+                ]
+                if affine_only
+                else []
+            )
+            + [
+                f"gate: {g['gate']} ({g['age_days']}d)"
+                + (f" · awaits {clip(g['condition'], 80)}" if g["condition"] else "")
+                + f" · releases {', '.join(g['releases'])}"
+                for g in report["gates"]
+            ],
         )
 
     elif cmd == "history":
@@ -1073,48 +1197,17 @@ def main(argv: list[str]) -> int:
 
     elif cmd == "roadmap-open":
         changed = rest[rest.index("--for") + 1 :] if "--for" in rest else []
-        addressed: dict[str, list[str]] = {}
-        latest_addr: dict[str, str] = {}
-        for e in by_kind(edges, "ADDRESSES"):
-            rid = node_id(e["to"])
-            addressed.setdefault(rid, []).append(node_id(e["from"]))
-            ts = e.get("props", {}).get("ts", "")
-            if ts > latest_addr.get(rid, ""):
-                latest_addr[rid] = ts
-        items, counts = [], {}
-        for it in parse_roadmap(read(src.roadmap)):
-            if not it["open"]:
-                continue
-            # A bare total is not trustworthy: an item with no `**Status:**` line defaults to
-            # open, and on one real roadmap that is a third of the file. Dropping those would
-            # be breaking — an item must surface rather than disappear — so the count is
-            # reported broken down instead, and the caller prints what it is made of.
-            counts_key = it["status"] if "Status" in it["fields"] else "no status line"
-            counts[counts_key] = counts.get(counts_key, 0) + 1
-            prior = addressed.get(it["id"], [])
-            items.append(
-                {
-                    "id": it["id"],
-                    "title": it["title"],
-                    "status": it["status"],
-                    "priority": it["priority"],
-                    "prior_tasks": prior,
-                    "last_addressed": latest_addr.get(it["id"], ""),
-                    "affine": bool(changed and prior),
-                }
-            )
-        lead = ["open", "in-progress", "no status line"]
-        ranked = [(k, counts[k]) for k in lead if k in counts] + sorted(
-            ((k, v) for k, v in counts.items() if k not in lead),
-            key=lambda kv: (-kv[1], kv[0]),
-        )
+        report = roadmap_open(edges, src, changed)
         emit(
-            {"open": len(items), "status_counts": dict(ranked), "items": items},
+            report,
             as_json,
-            [f"{len(items)} open — " + " · ".join(f"{v} {k}" for k, v in ranked)]
+            [
+                f"{report['open']} open — "
+                + " · ".join(f"{v} {k}" for k, v in report["status_counts"].items())
+            ]
             + [
                 f"{'~match ' if i['affine'] else ''}{i['id']} [{i['priority'] or '?'}] {i['title']}"
-                for i in items
+                for i in report["items"]
             ],
         )
 

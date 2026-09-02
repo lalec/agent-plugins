@@ -5,11 +5,17 @@ Copied **verbatim** into a project at `.claude/skills/<PREFIX>-test/scripts/run-
 by dev-workflow install — no substitution, so it stays byte-identical across projects.
 Fix the plugin, never the copy.
 
-    run-checks.py run    [--timeout 120] [--head 400] < manifest.json
+    run-checks.py run    [--timeout 30] [--jobs 4] [--head 400] < manifest.json
     run-checks.py record < results.json
 
 `run` executes resolved commands and reports what happened. `record` writes each
 verification's `last:` block and commits it.
+
+`run` executes a chunk concurrently (`--jobs`) with a short per-command `--timeout`, so a
+chunk of ten finishes inside the single Bash tool call that invoked it — the caller's own
+call times out at 120 s by default, and one hung target run sequentially at 120 s each
+used to take every other observation in the chunk down with it. Output stays in manifest
+order whatever finished first.
 
 THE INVARIANT THIS FILE EXISTS TO HOLD: **`run` never emits a verdict.** It reports an
 exit code, a duration and the head of the output; the caller decides `pass | fail |
@@ -30,6 +36,7 @@ import re
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -102,8 +109,13 @@ def run_cmd(cmd: str, timeout: int, head: int) -> dict:
             cmd, shell=True, capture_output=True, text=True, timeout=timeout
         )
         secs = round(time.monotonic() - started, 1)
-        body = clip(p.stdout or p.stderr, head)
-        return {"exit": p.returncode, "secs": secs, "observed": body}
+        # Both streams: a failing command routinely prints partial output on stdout and
+        # the reason on stderr, and `stdout or stderr` dropped the reason whenever the
+        # partial output was non-empty.
+        body = p.stdout or ""
+        if p.stderr and p.stderr.strip():
+            body = f"{body} [stderr] {p.stderr}" if body.strip() else p.stderr
+        return {"exit": p.returncode, "secs": secs, "observed": clip(body, head)}
     except subprocess.TimeoutExpired:
         return {
             "exit": None,
@@ -115,7 +127,8 @@ def run_cmd(cmd: str, timeout: int, head: int) -> dict:
 
 
 def cmd_run(payload: dict, argv: list[str]) -> int:
-    timeout = int(opt(argv, "--timeout", "120"))
+    timeout = int(opt(argv, "--timeout", "30"))
+    jobs = max(1, int(opt(argv, "--jobs", "4")))
     head = int(opt(argv, "--head", "400"))
     entries = payload.get("entries")
     if not isinstance(entries, list) or not entries:
@@ -124,10 +137,16 @@ def cmd_run(payload: dict, argv: list[str]) -> int:
         if not isinstance(e, dict) or not e.get("name") or not e.get("cmd"):
             die(f"every entry needs a name and a cmd: {e!r}")
 
-    rows = []
-    for e in entries:
-        obs = run_cmd(e["cmd"], timeout, head)
-        rows.append({"name": e["name"], "cmd": e["cmd"], **obs})
+    # Concurrent, order-preserving: `map` yields results in manifest order regardless of
+    # completion order, so the evidence lines line up with the entries the caller sent.
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        observations = list(
+            pool.map(lambda e: run_cmd(e["cmd"], timeout, head), entries)
+        )
+    rows = [
+        {"name": e["name"], "cmd": e["cmd"], **obs}
+        for e, obs in zip(entries, observations)
+    ]
 
     if "--json" in argv:
         print(json.dumps({"observations": rows}, indent=2))
@@ -180,7 +199,9 @@ def last_block(result: dict, commit: str, indent: str) -> list[str]:
     out = [f"{indent}last:", f"{sub}status: {result['status']}"]
     if result.get("reason"):
         out.append(f"{sub}reason: {quote(result['reason'])}")
-    out.append(f"{sub}commit: {commit}")
+    # Quoted: roughly one sha7 in 25 is all digits, which YAML reads as an integer (and
+    # a leading zero as octal). graph.py's parser strips the quotes either way.
+    out.append(f"{sub}commit: '{commit}'")
     out.append(f"{sub}ts: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}")
     return out
 
@@ -298,6 +319,7 @@ def cmd_record(payload: dict, argv: list[str]) -> int:
 
     before = names_in(original)
     root, lines, done = find_root(), original.splitlines(), []
+    last_good = original  # the newest text already written (and committed) — never older
     for r in results:
         name = r["name"]
         spans = entry_spans(lines)  # line numbers move as blocks grow or shrink
@@ -305,9 +327,17 @@ def cmd_record(payload: dict, argv: list[str]) -> int:
         lines = splice(lines, spans[name], block)
         text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
         if names_in(text) != before:
-            path.write_text(original)
-            die(f"{name}: write changed the entry set — rolled back, nothing committed")
+            # Roll back to the last good write, not to `original`: earlier results in this
+            # batch are already committed, and restoring the pre-batch file would leave
+            # the tree silently reverting them.
+            path.write_text(last_good)
+            kept = sum(1 for d in done if d[2] == "committed")
+            die(
+                f"{name}: write changed the entry set — rolled back to the previous "
+                f"write; {kept} earlier result(s) in this batch stay committed"
+            )
         path.write_text(text)
+        last_good = text
         done.append((name, r["status"], git_commit(root, path)))
 
     if "--json" in argv:

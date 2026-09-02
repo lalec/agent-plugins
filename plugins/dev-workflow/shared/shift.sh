@@ -13,7 +13,8 @@
 # A shift is one fresh headless `claude -p "/pilot --max-tasks N"` — the standing mission — with
 # the orchestrator on Opus, every subagent on Sonnet (pilot.md decides that, not this script), a
 # dollar cap, and a one-minute question timeout so a gate nobody answers defaults instead of
-# hanging. Everything the run concludes lands in the project's own stores (log, roadmap,
+# hanging. The timeout value is one of the CLI's enum strings ("60s" | "5m" | "10m" | "never") —
+# the shipped schema drops anything else silently and the default is "never", i.e. wait forever. Everything the run concludes lands in the project's own stores (log, roadmap,
 # custom-tests.yaml); this script keeps only a run marker, `state.json`, and the raw result.
 #
 # The usage window: Claude Code's auto-continue-at-limit is interactive-only, so when a shift is
@@ -151,7 +152,7 @@ PY
 
 set_flags() {  # the full flag set, passed on BOTH the resume and the fresh invocation
   FLAGS=(--model opus --output-format json --permission-mode bypassPermissions
-    --max-budget-usd "$BUDGET" --settings '{"askUserQuestionTimeout":60000}')
+    --max-budget-usd "$BUDGET" --settings '{"askUserQuestionTimeout":"60s"}')
 }
 
 # ---------------------------------------------------------------------------------- run

@@ -141,6 +141,27 @@ edr poll
 If `mode: local` (Phase A): the wrapper prints "Phase A — no cloud yet, nothing to drain." and exits.
 If `mode: cloud` (Phase B+): list `pending_actions/`, drain each (`investigate` = expanded enrichment + new email; `respond` = generate IR plan, prompt user `y/n` per step, run `respond.py` primitives on `y`).
 
+## Privileged actions — use the admin dialog, never sudo
+
+`sudo` cannot work from this session: there is no TTY, so it fails with *"a terminal is required to read the password"*. Telling the user to run the command themselves fails the same way — Claude Code's `!` prefix executes in that same TTY-less shell. Do not hand over a `sudo` command and call the step done.
+
+Route everything needing root through `runtime/privileged.py`, which raises the standard macOS authentication dialog:
+
+```python
+import privileged
+privileged.run(["launchctl", "bootout", "system/com.example.job"], prompt="Disable the example daemon")
+privileged.run_script("cp /path/x /backup/ && rm -f /path/x", prompt="Remove the stale daemon")
+```
+
+- `run(argv, prompt)` — one command, arguments shell-quoted for you. Never build a command string by hand.
+- `run_script(body, prompt)` — a multi-step bash body for uninstalls, so backup + unload + delete is one authorisation instead of three dialogs.
+- `prompt` is shown to the user in the dialog. Write it as the action, not the command: *"Remove the stale Edge updater daemon"*.
+- A dismissed dialog returns `cancelled=True`. That is a decision, not an error — report the step as declined and stop; never retry it or look for a way around.
+
+`respond.py` primitives escalate on their own when a path is root-owned, so prefer them over raw calls: `remove_path` for uninstalls (backs up to quarantine first), `launchctl_unload` for system-domain jobs, `quarantine_file` for root-owned files.
+
+The per-step confirmation rule is unchanged. The dialog authorises the *privilege*; it does not replace asking the user whether to take the action.
+
 ## Hard rules
 
 1. **Never read or echo the contents of credential files** (`~/.aws/credentials`, `~/.gcloud/*`, `~/.ssh/*` keys, `.env`, etc.). The collector emits hashes; that's enough to detect change. Reading the body leaks secrets to logs.
@@ -148,3 +169,4 @@ If `mode: cloud` (Phase B+): list `pending_actions/`, drain each (`investigate` 
 3. **Never lower a triage-set floor severity.** You may raise it.
 4. **Never modify `~/.claude/edr/state/baseline.json` by hand.** Baseline grows only on FP confirmation through the proper flow.
 5. **Stay silent if there's nothing to report.** No anomalies = no email = no chat noise. The point of `edr` is to surface *signal*, not run-of-show ack.
+6. **Never hand the user a `sudo` command to run.** It cannot work — there is no TTY in this session or behind the `!` prefix. Privileged actions go through `runtime/privileged.py` and the native macOS admin dialog. A step you cannot complete that way is blocked, not delegated.

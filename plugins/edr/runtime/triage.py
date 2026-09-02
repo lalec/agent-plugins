@@ -69,9 +69,17 @@ def apply(anomalies: list[Anomaly], rules: list[dict[str, Any]], fp_sigs: set[st
 def _rule_matches(rule: dict[str, Any], anomaly: Anomaly) -> bool:
     if rule.get("collector") and rule["collector"] != anomaly.evidence.collector:
         return False
-    match = rule.get("match", {}) or {}
+    if not _conditions_hold(rule.get("match", {}) or {}, anomaly):
+        return False
+    exclude = rule.get("exclude") or {}
+    if exclude and _conditions_hold(exclude, anomaly):
+        return False
+    return True
+
+
+def _conditions_hold(conditions: dict[str, Any], anomaly: Anomaly) -> bool:
     ev = anomaly.evidence
-    for field, expected in match.items():
+    for field, expected in conditions.items():
         if field == "change":
             actual = anomaly.change
         elif field == "kind":

@@ -10,6 +10,10 @@
 #   id: short stable id
 #   collector: which collector's evidence to match against
 #   match: list of conditions (field-path: predicate). All must hold.
+#   exclude: optional conditions (same grammar). If all hold, the rule does NOT fire.
+#            Use for a known-benign case inside an otherwise good rule — e.g. a
+#            confirmed-FP daemon whose rotating port makes the FP registry useless.
+#            Host-local exclusions belong in the user override file, not here.
 #   floor: critical | high | medium | low | info
 #   mitre: [ATT&CK technique IDs this rule corresponds to]
 #   rationale: shown in alert evidence

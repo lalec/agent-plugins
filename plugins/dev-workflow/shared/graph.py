@@ -273,6 +273,17 @@ def parse_roadmap(text: str) -> list[dict]:
             # several-to-a-line — the documented format mandates none of these.
             for k, v in roadmap_fields(line):
                 cur["fields"].setdefault(k, v)
+    # Statuses the file itself spells with a hyphen. A multi-word status written with a
+    # space is the same status — `in progress` is `in-progress` — but joining words
+    # unconditionally would turn `blocked on the API` into a status of its own. So the
+    # project's own vocabulary decides: a spaced form is joined only when the joined form
+    # is one this roadmap already uses hyphenated somewhere. Observed: 2 of 13 in-progress
+    # items on a real install were bucketed as a status `in` and vanished from started work.
+    vocab = {
+        m.group(0)
+        for it in items
+        if (m := re.match(r"[a-z]+(?:-[a-z]+)+", it["fields"].get("Status", "").strip().lower()))
+    }
     for it in items:
         # **Id:** is authoritative once present; fall back to the title slug so this
         # works on installs that predate the field and on items not yet backfilled.
@@ -280,8 +291,17 @@ def parse_roadmap(text: str) -> list[dict]:
         # Status values trail free text in several shapes — `done · 2026-07-30`,
         # `closed — superseded by …`, `in-progress · 2026-07-29 (abc1234) — …`. Only the
         # leading token is the status; splitting on one separator misses the others.
-        head = re.match(r"[a-z-]+", it["fields"].get("Status", "open").strip().lower())
+        text = it["fields"].get("Status", "open").strip().lower()
+        head = re.match(r"[a-z-]+", text)
         raw = head.group(0) if head else "open"
+        words = re.match(r"[a-z-]+(?:\s+[a-z-]+){0,2}", text)
+        if words:
+            parts = words.group(0).split()
+            for n in range(len(parts), 1, -1):  # longest match wins
+                joined = "-".join(parts[:n])
+                if joined in vocab:
+                    raw = joined
+                    break
         it["status"] = raw
         # Terminal statuses are blacklisted rather than active ones whitelisted: real
         # roadmaps carry `reopened`, `awaiting`, `blocked` and other local vocabulary,

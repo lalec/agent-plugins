@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 from intel import db as ioc_db  # noqa: E402
 
 FEEDS_DIR = Path(__file__).parent / "feeds"
+PRUNE_AFTER_SEC = 30 * 24 * 3600
 
 
 def discover_feeds() -> list:
@@ -48,7 +49,9 @@ def main() -> int:
                 print(f"[sync] feed {feed.FEED_NAME} failed: {e}", file=sys.stderr)
             counts[feed.FEED_NAME] = n
             print(f"[sync] {feed.FEED_NAME}: {n} IOCs")
-    print(f"[sync] total feeds: {len(counts)}, total IOCs: {sum(counts.values())}")
+        pruned = conn.execute("DELETE FROM iocs WHERE feed != 'mitre_macos' AND last_seen < ?",
+                              (now - PRUNE_AFTER_SEC,)).rowcount
+    print(f"[sync] total feeds: {len(counts)}, total IOCs: {sum(counts.values())}, pruned stale: {pruned}")
     return 0
 
 

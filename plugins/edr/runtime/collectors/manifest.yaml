@@ -1,7 +1,7 @@
 collectors:
   processes:
     maturity: stable
-    version: 2
+    version: 3
     graduated_at_stable: '2026-04-29T00:00:00Z'
   launchd:
     maturity: stable
@@ -9,7 +9,7 @@ collectors:
     graduated_at_stable: '2026-04-29T00:00:00Z'
   network:
     maturity: stable
-    version: 1
+    version: 2
     graduated_at_stable: '2026-04-29T00:00:00Z'
   sensitive_paths:
     maturity: stable
@@ -23,3 +23,12 @@ collectors:
     maturity: stable
     version: 1
     graduated_at_stable: '2026-04-29T00:00:00Z'
+  downloads:
+    maturity: beta
+    version: 1
+  browser:
+    maturity: beta
+    version: 1
+  host_security:
+    maturity: beta
+    version: 1

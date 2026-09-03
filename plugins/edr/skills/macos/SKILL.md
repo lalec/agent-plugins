@@ -26,7 +26,7 @@ Read **both** of these files at every run start:
 - `~/.claude/edr/lessons.md` — human-curated analyst judgment (FP patterns, near-miss heuristics). Treat as judgment bias — if a current anomaly matches a past FP pattern, weight that heavily.
 - `~/.claude/edr/changelog.md` — auto-generated record of collector graduations, manifest version bumps, and `pending_changes/` activity (last 30 days). **Do not edit changelog.md by hand.**
 
-Read `~/.claude/edr/config.yaml` for `alert_floor`, `notify` (channel or `none`) and `schedule`.
+Read `~/.claude/edr/config.yaml` for `alert_floor`, `notify` (channel or `none`) and `schedule`. On a new host, or when a collector reports `unavailable`, run `edr doctor`: it prints the macOS version and which sources this Mac can provide.
 
 ### 2. Drain
 ```bash
@@ -46,7 +46,9 @@ If `bootstrap: true`, print a one-line bootstrap confirmation and exit. Do NOT a
 ```bash
 cat ~/.claude/edr/state/snapshots/{ts}/diff.json
 ```
-Each entry: `{change, sig, evidence, prior, floor_severity, suppressed}`. Drop `suppressed: true`. You may RAISE `floor_severity`, never lower it. `sig` is what `edr accept` and the alert batch key on.
+Each entry: `{change, sig, evidence, prior, floor_severity, suppressed}`. `change` is `added` / `modified` / `removed`, or `flagged` — a command-line rule or an intel hit (`evidence.attrs.intel`) on evidence that was already baselined, such as a long-running shell that picked up a `curl | sh` command line. Drop `suppressed: true`. You may RAISE `floor_severity`, never lower it. `sig` is what `edr accept` and the alert batch key on.
+
+Context kinds, never findings: `*_summary` (aggregates), `unavailable` (a source this macOS version or permission set cannot provide), `error`. **First run of a new or version-bumped collector**: every entry is `added`. Review, then settle with `edr accept --all --collector <name>`.
 
 ### 5. Reason over each anomaly (NIST §3.2.4 Identification)
 
@@ -72,7 +74,14 @@ Collectors give you **starting points**, not conclusions. For anything not obvio
 
 | Anomaly kind | Likely pivot moves |
 |---|---|
-| `processes.process` (added) | `codesign -dv --verbose=4 <exe>`; `lsof -p <pid>`; `ps -p <pid> -o ppid=` then walk parents; `file <exe>`; `shasum -a 256 <exe>`. Key is the executable path; `commands` lists up to 10 distinct command lines. |
+| `processes.process` (added) | `codesign -dv --verbose=4 <exe>`; `lsof -p <pid>`; `ps -p <pid> -o ppid=` then walk parents; `file <exe>`; `edr intel-lookup hash_sha256 <exe_sha256>`. Key is the executable path; `commands` lists up to 10 distinct command lines. Running from Downloads, tmp or a mounted image = dropper. |
+| `processes.lineage` (added) | A `parent → child` pair for shells, interpreters and transfer tools. Office, browser, mail or chat parent = macro / dropper; Terminal, IDE or Claude parent = normal. Check the child's `sample_command`. |
+| `downloads.risky_download` | Installer, bundle, script or archive that arrived via a browser or mail. `agent` = which app; `sha256` → `edr intel-lookup hash_sha256`; unsigned `.app` → high. Correlate with `processes` (did it run?) and `lineage` (what spawned it?). Action: `quarantine_file`. |
+| `network.outbound` (added / flagged) | First-seen (command, remote port) pair. `remote_ips` → `edr intel-lookup ip`; who owns the range; is the command a browser or a scripting tool? `flagged` = a known-bad remote inside a normal pair — treat as critical. |
+| `network.udp_listener` / `netconfig` | UDP on all interfaces from a non-Apple binary; proxy enabled or `/etc/resolver` entry = interception — ask who set it. Resolver changes follow the network and carry no floor. |
+| `browser.extension` (added / modified) | `source` unpacked / sideload / external / policy = not from the store → high. Broad `host_permissions` on a new extension → medium. Look up the id in the store; check the `path` for unpacked ones. Action: `remove_path` on an unpacked directory. |
+| `browser.browser_policy` | Forced extensions, proxy, homepage or search policy on a personal Mac = adware or MITM unless the owner manages the device. |
+| `host_security.*` | New `user`, changed `group|admin`, `remote_access` toggled, Gatekeeper / SIP off, profile or system extension appeared: ask the owner first — each is either their deliberate change or a takeover. |
 | `launchd.launchd_item` (added) | `cat <plist_path>`; resolve `Program` and codesign it; `ls -la` the plist; look for a matching process |
 | `network.tcp_listener` (added) | `lsof -p <pid>`; `ps -p <pid> -o command=`; `bind_addr` 0.0.0.0/:: = exposed; is the binary signed? |
 | `sensitive_paths.ssh_file` modified | `diff` content vs prior sha; for `authorized_keys` look for new lines, `ssh-keygen -lf <key>` |
@@ -90,7 +99,7 @@ Collectors give you **starting points**, not conclusions. For anything not obvio
 - **low**: no high-risk pattern (e.g. new ad-hoc-signed user binary the user likely just installed).
 - **medium**: enough to alert. Unsigned / non-vendor binary; new loopback listener by a user-installed app.
 - **high**: floor-promoted by triage, OR analyst-judged from enrichment (`eval`/`curl|sh` in a shell rc, MCP from a non-vendor source).
-- **critical**: launchd persistence + unsigned target; `authorized_keys` grew; docker `--privileged`/socket; new Claude hook; IOC match.
+- **critical**: launchd persistence + unsigned target; `authorized_keys` grew; docker `--privileged`/socket; new Claude hook; IOC match (`intel` attr, any collector); new user or admin; Gatekeeper or SIP off; a downloaded file that then ran.
 
 ### 6. Output — the alert batch
 

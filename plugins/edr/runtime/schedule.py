@@ -54,6 +54,7 @@ def run() -> int:
     except Exception as e:  # never let the drain stop the scan
         notify.log(f"pre-drain failed: {type(e).__name__}: {e}")
 
+    _intel_sync()
     ended, reason, data = _scan(conf)
     batch = alerts.since(start)
     if ended == "ok" and batch is None:
@@ -77,6 +78,16 @@ def run() -> int:
                  "seen": False})
     notify.log(f"run end: {ended} {reason} findings={findings} posted={posted}")
     return 0 if ended == "ok" else 1
+
+
+def _intel_sync() -> None:
+    """Refresh IOC feeds; a failure is logged, never fatal."""
+    try:
+        proc = subprocess.run([sys.executable, str(paths.RUNTIME_DIR / "intel" / "sync.py")],
+                              capture_output=True, text=True, timeout=180)
+        notify.log(f"intel-sync rc={proc.returncode}: {(proc.stdout or proc.stderr).strip().splitlines()[-1:]}")
+    except (subprocess.TimeoutExpired, OSError) as e:
+        notify.log(f"intel-sync failed: {e}")
 
 
 def _scan(conf: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:

@@ -66,6 +66,14 @@ case "$cmd" in
     exec python3 "$RUNTIME/intel/sync.py"
     ;;
 
+  intel-lookup)
+    exec python3 "$RUNTIME/intel/db.py" lookup "${@:2}"
+    ;;
+
+  doctor)
+    exec python3 "$RUNTIME/macos.py"
+    ;;
+
   --help|-h|help)
     cat <<'EOF'
 edr — Endpoint Detection & Response for macOS
@@ -84,6 +92,8 @@ Usage:
                                Nightly unattended scan via launchd (run = what the job executes)
   edr test {scenario|all}      Run a red-team simulator scenario
   edr intel-sync               Refresh the IOC database from intel feeds
+  edr intel-lookup <type> <v>  Look up an ip | domain | hash_sha256 | mitre_id in the IOC database
+  edr doctor                   macOS version, python/PyYAML, and which sources this host can provide
 
 Environment:
   EDR_HOME                     Override host data dir (default: $HOME/.claude/edr)

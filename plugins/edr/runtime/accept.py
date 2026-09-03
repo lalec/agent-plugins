@@ -28,16 +28,18 @@ def latest_snapshot_ts() -> str | None:
     return dirs[-1] if dirs else None
 
 
-def _collector_meta() -> tuple[dict[str, int], dict[str, list[str]]]:
-    """Current class versions + volatile attrs, by collector name."""
+def _collector_meta() -> tuple[dict[str, int], dict[str, list[str]], set[str]]:
+    """Current class versions, volatile attrs, and the set of stateless (event) collectors."""
     import run_collectors
     manifest = run_collectors.load_manifest()
-    versions, volatile = {}, {}
+    versions, volatile, stateless = {}, {}, set()
     for cls in run_collectors.discover_collectors():
         run_collectors.apply_manifest(cls, manifest)
         versions[cls.name] = cls.version
         volatile[cls.name] = list(cls.volatile_attrs)
-    return versions, volatile
+        if cls.stateless:
+            stateless.add(cls.name)
+    return versions, volatile, stateless
 
 
 def accept(sigs: list[str] | None, snapshot_ts: str | None = None, all_: bool = False,
@@ -48,7 +50,7 @@ def accept(sigs: list[str] | None, snapshot_ts: str | None = None, all_: bool = 
     diff = read_json(snap_dir / "diff.json", default={}) if ts else {}
     anomalies = diff.get("anomalies") or [] if isinstance(diff, dict) else []
     wanted = set(sigs or [])
-    versions, volatile = _collector_meta()
+    versions, volatile, stateless = _collector_meta()
     baseline = baseline_mod.load(paths.STATE_DIR)
     accepted: list[str] = []
 
@@ -56,6 +58,8 @@ def accept(sigs: list[str] | None, snapshot_ts: str | None = None, all_: bool = 
         ev = a.get("evidence") or {}
         if a.get("suppressed") or not ev or (collector and ev.get("collector") != collector):
             continue
+        if ev.get("collector") in stateless:
+            continue  # events are reported once, never baselined
         sig = Evidence(ev["collector"], ev["kind"], ev["key"], ev.get("attrs") or {}).signature_hash()
         if not all_ and sig not in wanted:
             continue

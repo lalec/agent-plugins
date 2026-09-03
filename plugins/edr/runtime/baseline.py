@@ -35,15 +35,19 @@ def _strip_volatile(attrs: dict[str, Any], volatile: list[str]) -> dict[str, Any
 
 def from_snapshot(snapshot: dict[str, list[Evidence]],
                   collector_versions: dict[str, int],
-                  volatile_map: dict[str, list[str]] | None = None) -> dict[str, dict[str, Any]]:
+                  volatile_map: dict[str, list[str]] | None = None,
+                  stateless: dict[str, bool] | None = None) -> dict[str, dict[str, Any]]:
     """Build a baseline from a snapshot — used for bootstrap and after FP graduation.
 
     volatile_map: per-collector attr names to strip before storing (so they're not
-    used in subsequent diff comparisons).
+    used in subsequent diff comparisons). Stateless (event) collectors are never stored.
     """
     volatile_map = volatile_map or {}
+    stateless = stateless or {}
     out: dict[str, dict[str, Any]] = {}
     for collector_name, evidences in snapshot.items():
+        if stateless.get(collector_name):
+            continue
         version = collector_versions.get(collector_name, 1)
         volatile = volatile_map.get(collector_name, [])
         for ev in evidences:
@@ -58,7 +62,8 @@ def diff_against(snapshot: dict[str, list[Evidence]],
                  baseline: dict[str, dict[str, Any]],
                  collector_versions: dict[str, int],
                  volatile_map: dict[str, list[str]] | None = None,
-                 report_removed: dict[str, bool] | None = None) -> list[Anomaly]:
+                 report_removed: dict[str, bool] | None = None,
+                 stateless: dict[str, bool] | None = None) -> list[Anomaly]:
     """Compute anomalies between current snapshot and baseline.
 
     A baseline entry whose collector version doesn't match the current version
@@ -68,14 +73,20 @@ def diff_against(snapshot: dict[str, list[Evidence]],
     report_removed: per-collector switch for the reverse pass; collectors set
     to False never produce 'removed' anomalies (their evidence is expected to
     come and go).
+    stateless: event collectors — every evidence is 'added', nothing is looked up
+    or stored, no reverse pass.
     """
     volatile_map = volatile_map or {}
     report_removed = report_removed or {}
+    stateless = stateless or {}
     anomalies: list[Anomaly] = []
     seen_keys: set[str] = set()
 
     # Forward pass: added or modified
     for collector_name, evidences in snapshot.items():
+        if stateless.get(collector_name):
+            anomalies.extend(Anomaly(change="added", evidence=ev) for ev in evidences)
+            continue
         version = collector_versions.get(collector_name, 1)
         volatile = volatile_map.get(collector_name, [])
         for ev in evidences:
@@ -95,7 +106,7 @@ def diff_against(snapshot: dict[str, list[Evidence]],
                 anomalies.append(Anomaly(change="modified", evidence=ev, prior=prior_ev))
 
     # Reverse pass: removed (only for collectors that ran this tick)
-    ran_collectors = {(c, collector_versions.get(c, 1)) for c in snapshot.keys()}
+    ran_collectors = {(c, collector_versions.get(c, 1)) for c in snapshot if not stateless.get(c)}
     for bk, prior_dict in baseline.items():
         if bk in seen_keys:
             continue

@@ -107,3 +107,260 @@ rules:
     floor: high
     mitre: ["T1053.003"]
     rationale: "New cron or at job"
+
+  # === downloads (event) ===
+  - id: risky_download
+    collector: downloads
+    match:
+      kind: "risky_download"
+    floor: medium
+    mitre: ["T1204.002", "T1105"]
+    rationale: "Installer, bundle, script or archive arrived via a quarantine-aware app"
+
+  - id: risky_download_unsigned_app
+    collector: downloads
+    match:
+      kind: "risky_download"
+      codesign_status: ["unsigned", "adhoc", "broken"]
+    floor: high
+    mitre: ["T1204.002", "T1553.001"]
+    rationale: "Downloaded app bundle is not signed by an identified developer"
+
+  # === processes: command-line patterns and untrusted locations ===
+  - id: proc_curl_pipe_sh
+    collector: processes
+    always: true
+    match:
+      kind: "process"
+      commands_pattern: "(curl|wget)[^|\\n]*\\|\\s*(ba|z|k)?sh\\b"
+    floor: high
+    mitre: ["T1059.004", "T1105"]
+    rationale: "Download piped straight into a shell"
+
+  - id: proc_base64_decode_exec
+    collector: processes
+    always: true
+    match:
+      kind: "process"
+      commands_pattern: "base64\\s+(-d|-D|--decode)"
+    floor: high
+    mitre: ["T1027", "T1140"]
+    rationale: "Encoded payload being decoded on the command line"
+
+  - id: proc_quarantine_strip
+    collector: processes
+    always: true
+    match:
+      kind: "process"
+      commands_pattern: "xattr\\s+(-[a-z]*d[a-z]*\\s+com\\.apple\\.quarantine|-[a-z]*c)"
+    floor: high
+    mitre: ["T1553.001"]
+    rationale: "Gatekeeper quarantine flag being removed"
+
+  - id: proc_gatekeeper_disable
+    collector: processes
+    always: true
+    match:
+      kind: "process"
+      commands_pattern: "spctl\\s+--(master|global)-disable"
+    floor: critical
+    mitre: ["T1562.001"]
+    rationale: "Gatekeeper being switched off"
+
+  - id: proc_osascript_password_prompt
+    collector: processes
+    always: true
+    match:
+      kind: "process"
+      commands_pattern: "osascript.*display dialog.*(password|hidden answer)"
+    floor: critical
+    mitre: ["T1056.002"]
+    rationale: "AppleScript password prompt — the infostealer credential-phish pattern"
+
+  - id: proc_chmod_exec_untrusted_dir
+    collector: processes
+    always: true
+    match:
+      kind: "process"
+      commands_pattern: "chmod\\s+[+ux0-7]*x?\\S*\\s+(/tmp/|/private/tmp/|/Users/[^/]+/Downloads/|/private/var/folders/)"
+    floor: high
+    mitre: ["T1222.002"]
+    rationale: "Making a file in a download or temp directory executable"
+
+  - id: proc_script_from_untrusted_dir
+    collector: processes
+    always: true
+    match:
+      kind: "process"
+      commands_pattern: "^(\\S*/)?((ba|z|k)?sh|python[0-9.]*|perl|ruby|osascript)\\s+(-\\S+\\s+)*(/Users/[^/]+/Downloads/|/tmp/|/private/tmp/|/private/var/folders/\\S+/T/|/Users/Shared/|/Volumes/)"
+    floor: high
+    mitre: ["T1204.002", "T1059"]
+    rationale: "Interpreter running a script from a download, temp or mounted-image location"
+
+  - id: proc_exe_untrusted_dir
+    collector: processes
+    match:
+      kind: "process"
+      change: "added"
+      exe_glob: ["/tmp/*", "/private/tmp/*", "/Users/*/Downloads/*", "/private/var/folders/*/T/*", "/Users/Shared/*", "/Volumes/*"]
+    floor: high
+    mitre: ["T1204.002"]
+    rationale: "Process running from a download, temp or mounted-image location"
+
+  - id: proc_exe_deleted
+    collector: processes
+    match:
+      kind: "process"
+      codesign_status: "missing"
+      exe_glob: ["/*"]
+    floor: high
+    mitre: ["T1070.004"]
+    rationale: "Running executable no longer exists on disk"
+
+  - id: lineage_document_app_spawns_shell
+    collector: processes
+    match:
+      kind: "lineage"
+      change: "added"
+      child: ["sh", "bash", "zsh", "osascript", "curl", "wget", "python", "python3", "perl", "ruby", "nc", "openssl"]
+      parent_name_glob: ["Microsoft *", "Preview", "Safari", "Google Chrome*", "Firefox", "Brave Browser", "Microsoft Edge", "Mail", "Messages", "Slack", "zoom.us", "Discord", "TextEdit", "Notes", "Keynote", "Pages", "Numbers", "Adobe *"]
+    floor: high
+    mitre: ["T1204.002", "T1059"]
+    rationale: "Document, browser or chat app spawned a shell or interpreter"
+
+  # === network ===
+  - id: udp_listener_exposed
+    collector: network
+    match:
+      kind: "udp_listener"
+      change: "added"
+      bind_addr: ["0.0.0.0", "::"]
+    exclude:
+      command: ["mDNSResponder", "rapportd", "sharingd"]   # Bonjour / AirDrop on every Mac
+    floor: medium
+    mitre: ["T1571"]
+    rationale: "New UDP service on all interfaces"
+
+  - id: outbound_from_scripting_tool
+    collector: network
+    match:
+      kind: "outbound"
+      change: "added"
+      command_glob: ["osascript", "curl", "wget", "python*", "perl", "ruby", "nc", "ncat", "openssl", "sh", "bash", "zsh"]
+    floor: medium
+    mitre: ["T1071", "T1105"]
+    rationale: "Scripting or transfer tool holding an outbound connection"
+
+  - id: netconfig_proxy_enabled
+    collector: network
+    match:
+      kind: "netconfig"
+      change: ["added", "modified"]
+      key_glob: ["netconfig|proxy"]
+      any_enabled: true
+    floor: high
+    mitre: ["T1557"]
+    rationale: "System proxy enabled or changed — traffic interception"
+
+  - id: netconfig_etc_resolver_changed
+    collector: network
+    match:
+      kind: "netconfig"
+      change: ["added", "modified"]
+      key_glob: ["netconfig|etc_resolver"]
+    exclude:
+      count: 0
+    floor: high
+    mitre: ["T1584.002"]
+    rationale: "Per-domain resolver override in /etc/resolver"
+
+  # === browser ===
+  - id: browser_ext_sideloaded
+    collector: browser
+    match:
+      kind: "extension"
+      change: "added"
+      source: ["unpacked", "sideload", "external", "policy"]
+    floor: high
+    mitre: ["T1176"]
+    rationale: "Extension not installed from the browser's store"
+
+  - id: browser_ext_broad_permissions
+    collector: browser
+    match:
+      kind: "extension"
+      change: ["added", "modified"]
+      host_permissions_glob: ["<all_urls>", "[*]://[*]/[*]", "http://[*]/[*]", "https://[*]/[*]", "file://[*]/[*]"]
+    floor: medium
+    mitre: ["T1176", "T1185"]
+    rationale: "Extension can read and change every site"
+
+  - id: browser_policy_set
+    collector: browser
+    match:
+      kind: "browser_policy"
+      change: ["added", "modified"]
+    floor: high
+    mitre: ["T1176", "T1557", "T1112"]
+    rationale: "Browser policy forces extensions, proxy, homepage or search — adware/MITM technique"
+
+  # === host security ===
+  - id: user_account_added
+    collector: host_security
+    match:
+      kind: "user"
+      change: "added"
+    floor: critical
+    mitre: ["T1136.001"]
+    rationale: "New local user account"
+
+  - id: admin_group_changed
+    collector: host_security
+    match:
+      kind: "group"
+      change: "modified"
+    floor: critical
+    mitre: ["T1098"]
+    rationale: "Admin group membership changed"
+
+  - id: remote_access_enabled
+    collector: host_security
+    match:
+      kind: "remote_access"
+      change: "modified"
+    floor: high
+    mitre: ["T1021.004", "T1021.005"]
+    rationale: "Remote login, Screen Sharing, Remote Management or SMB toggled"
+
+  - id: gatekeeper_or_sip_disabled
+    collector: host_security
+    match:
+      kind: "security"
+      change: "modified"
+      key_glob: ["security|gatekeeper", "security|sip"]
+      enabled: false
+    floor: critical
+    mitre: ["T1562.001"]
+    rationale: "Gatekeeper or System Integrity Protection switched off"
+
+  - id: profile_or_sysext_changed
+    collector: host_security
+    match:
+      kind: "security"
+      change: ["added", "modified"]
+      key_glob: ["security|profiles", "security|system_extensions"]
+    exclude:
+      count: 0
+    floor: high
+    mitre: ["T1176", "T1547.006"]
+    rationale: "Configuration profile or system extension set changed"
+
+  - id: login_items_changed
+    collector: host_security
+    match:
+      kind: "security"
+      change: "modified"
+      key_glob: ["security|login_items"]
+    floor: medium
+    mitre: ["T1547.015"]
+    rationale: "Login items changed"

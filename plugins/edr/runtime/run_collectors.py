@@ -29,6 +29,7 @@ import yaml  # noqa: E402
 
 import baseline as baseline_mod  # noqa: E402
 import changelog as changelog_mod  # noqa: E402
+import macos  # noqa: E402
 import paths  # noqa: E402
 import triage  # noqa: E402
 from collectors._base import Anomaly, Collector, CollectorContext, Evidence, write_json  # noqa: E402
@@ -147,30 +148,38 @@ def main() -> int:
     versions: dict[str, int] = {}
     volatile_map: dict[str, list[str]] = {}
     removed_map: dict[str, bool] = {}
+    stateless_map: dict[str, bool] = {}
+    durations: dict[str, int] = {}
     for cls in selected:
+        t0 = time.perf_counter()
         evs = run_one(cls, ctx)
+        durations[cls.name] = int((time.perf_counter() - t0) * 1000)
         snapshot[cls.name] = evs
         versions[cls.name] = cls.version
         volatile_map[cls.name] = list(cls.volatile_attrs)
         removed_map[cls.name] = cls.report_removed
+        stateless_map[cls.name] = cls.stateless
         if not args.no_snapshot:
             write_json(snapshot_dir / f"{cls.name}.json",
                        {"version": cls.version, "evidence": [e.to_dict() for e in evs]})
 
     baseline = baseline_mod.load(state_dir)
     if args.bootstrap or not baseline:
-        new_baseline = baseline_mod.from_snapshot(snapshot, versions, volatile_map)
+        new_baseline = baseline_mod.from_snapshot(snapshot, versions, volatile_map, stateless_map)
         if not args.no_snapshot:
             baseline_mod.save(state_dir, new_baseline)
         anomalies: list[Anomaly] = []
         bootstrap = True
     else:
-        anomalies = baseline_mod.diff_against(snapshot, baseline, versions, volatile_map, removed_map)
+        anomalies = baseline_mod.diff_against(snapshot, baseline, versions, volatile_map, removed_map,
+                                              stateless_map)
         bootstrap = False
 
     rules = triage.load_rules()
     fp_sigs = triage.load_fp_registry(state_dir)
     triage.apply(anomalies, rules, fp_sigs)
+    triage.apply_always(anomalies, snapshot, rules)
+    intel_hits = triage.apply_intel(anomalies, snapshot)
 
     if not args.no_snapshot:
         write_json(snapshot_dir / "diff.json", {"anomalies": [a.to_dict() for a in anomalies]})
@@ -180,16 +189,20 @@ def main() -> int:
         "snapshot": snapshot_ts,
         "bootstrap": bootstrap,
         "ran_daily": run_daily,
+        "macos_version": macos.version_str(),
+        "duration_ms": sum(durations.values()),
         "collectors": {
             cls.name: {
                 "tier": cls.tier,
                 "maturity": cls.maturity,
                 "version": cls.version,
                 "evidence_count": len(snapshot.get(cls.name, [])),
+                "duration_ms": durations.get(cls.name, 0),
             }
             for cls in selected
         },
         "anomalies_total": len(anomalies),
+        "intel_hits": intel_hits,
         "anomalies_suppressed": sum(1 for a in anomalies if a.suppressed),
         "anomalies_floored": sum(1 for a in anomalies if a.floor_severity),
     }
@@ -208,8 +221,11 @@ def main() -> int:
         "plugin_dir": str(paths.PLUGIN_DIR),
         "bootstrap": bootstrap,
         "ran_daily": run_daily,
+        "macos_version": macos.version_str(),
+        "duration_ms": sum(durations.values()),
         "collectors_run": [cls.name for cls in selected],
         "anomalies_total": len(anomalies),
+        "intel_hits": intel_hits,
         "anomalies_active": sum(1 for a in anomalies if not a.suppressed),
         "anomalies_floored": [
             {"sig": a.evidence.signature_hash(), "collector": a.evidence.collector,

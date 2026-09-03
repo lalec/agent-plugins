@@ -61,6 +61,18 @@ def upsert(conn: sqlite3.Connection, ioc_type: str, value: str, feed: str,
     )
 
 
+def main(argv: list[str]) -> int:
+    """`edr intel-lookup <ioc_type> <value>` — rows as JSON, exit 1 when none."""
+    import json
+    if len(argv) != 3 or argv[0] != "lookup":
+        print("usage: edr intel-lookup <ip|domain|hash_sha256|mitre_id> <value>")
+        return 2
+    with connect() as conn:
+        rows = lookup(conn, argv[1], argv[2])
+    print(json.dumps(rows, indent=2))
+    return 0 if rows else 1
+
+
 def lookup(conn: sqlite3.Connection, ioc_type: str, value: str) -> list[dict]:
     cur = conn.execute(
         "SELECT feed, severity, first_seen, last_seen, metadata FROM iocs WHERE ioc_type=? AND value=?",
@@ -68,3 +80,7 @@ def lookup(conn: sqlite3.Connection, ioc_type: str, value: str) -> list[dict]:
     )
     return [{"feed": r[0], "severity": r[1], "first_seen": r[2], "last_seen": r[3], "metadata": r[4]}
             for r in cur.fetchall()]
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

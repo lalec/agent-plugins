@@ -40,7 +40,7 @@ class Evidence:
 @dataclass
 class Anomaly:
     """Difference vs baseline. Produced by run_collectors.diff()."""
-    change: Literal["added", "removed", "modified"]
+    change: Literal["added", "removed", "modified", "flagged"]  # flagged = intel hit on baselined evidence
     evidence: Evidence
     prior: Evidence | None = None     # populated for 'modified' / 'removed'
     floor_severity: str | None = None  # set by triage fast-path
@@ -96,6 +96,9 @@ class Collector(ABC):
     # False for collectors whose evidence naturally comes and goes (processes):
     # an entry vanishing from the snapshot is then not reported as an anomaly.
     report_removed: ClassVar[bool] = True
+    # True for event collectors (downloads, exec events): evidence is a window
+    # since the last run, reported once as 'added' and never stored in the baseline.
+    stateless: ClassVar[bool] = False
 
     @abstractmethod
     def collect(self, ctx: CollectorContext) -> list[Evidence]:

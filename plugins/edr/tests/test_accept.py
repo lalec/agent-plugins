@@ -23,7 +23,7 @@ def _snapshot():
 
 
 def test_accept_by_sig_then_all(monkeypatch):
-    monkeypatch.setattr(accept, "_collector_meta", lambda: ({"launchd": 1}, {"launchd": ["mtime"]}))
+    monkeypatch.setattr(accept, "_collector_meta", lambda: ({"launchd": 1}, {"launchd": ["mtime"]}, set()))
     _snapshot()
     baseline_mod.save(paths.STATE_DIR, {
         "launchd@1::/gone.plist": {"kind": "launchd_item", "attrs": {}},

@@ -20,16 +20,17 @@ SHELL_RCS = [
 ]
 SSH_FILES = ["~/.ssh/authorized_keys", "~/.ssh/known_hosts", "~/.ssh/config", "~/.ssh/allowed_signers"]
 # Curated high-signal credential files only — NOT blanket recursion (gcloud cache is 70MB+).
+# Long-lived credentials only. Short-lived token caches (gcloud access_tokens.db,
+# azure accessTokens.json) are rewritten on every CLI call and would alert daily;
+# a stolen or swapped identity shows up in the long-term store, which stays listed.
 CRED_FILES = [
     "~/.aws/credentials", "~/.aws/config",
     "~/.kube/config",
     "~/.gcloud/application_default_credentials.json",
     "~/.config/gcloud/application_default_credentials.json",
     "~/.config/gcloud/credentials.db",
-    "~/.config/gcloud/access_tokens.db",
     "~/.config/gcloud/active_config",
     "~/.azure/azureProfile.json",
-    "~/.azure/accessTokens.json",
     "~/.azure/credentials",
     "~/.docker/config.json",
     "~/.gnupg/pubring.kbx", "~/.gnupg/pubring.gpg",

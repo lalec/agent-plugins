@@ -7,6 +7,8 @@
 #   shift.sh run       [--max-tasks N] [--budget USD] [--dry-run]
 #   shift.sh install   [--interval SECONDS] [--max-tasks N] [--budget USD] [--notify URL] [--dry-run]
 #   shift.sh uninstall
+#   shift.sh pause [<N>h|<N>m]                  hold shifts for a while (default 4h); a stop that ends by itself
+#   shift.sh resume                             lift a pause now
 #   shift.sh status
 #   shift.sh parse <result.json> <exit-code>     what `run` would record from a saved result
 #
@@ -197,7 +199,7 @@ cmd_run() {
   if [ -n "$next" ]; then
     next_epoch=$(python3 -c 'import sys;from datetime import datetime;print(int(datetime.fromisoformat(sys.argv[1]).timestamp()))' "$next" 2>/dev/null || echo 0)
     if [ "$next_epoch" -gt "$(date +%s)" ]; then
-      say "skip: usage limit — next allowed $next"; return 0
+      say "skip: $([ "$(state_get paused_by)" = user ] && echo paused || echo "usage limit") — next allowed $next"; return 0
     fi
   fi
 
@@ -307,6 +309,28 @@ cmd_uninstall() {
   say "removed $LABEL"
 }
 
+# A pause is a stop with an end date. It reuses `next_allowed` — the same field a usage limit
+# sets — so `run` needs no second rule, and a person who pauses and forgets is not a person
+# who has to remember: the shifts come back on their own.
+cmd_pause() {
+  local spec=${1:-4h} secs
+  case "$spec" in
+    *h) secs=$(( ${spec%h} * 3600 )) ;;
+    *m) secs=$(( ${spec%m} * 60 )) ;;
+    *) die "pause takes <N>h or <N>m" ;;
+  esac
+  mkdir -p "$DIR"
+  local until_iso; until_iso=$(python3 -c 'import sys;from datetime import datetime,timedelta;print((datetime.now().astimezone()+timedelta(seconds=int(sys.argv[1]))).strftime("%Y-%m-%dT%H:%M:%S%z"))' "$secs")
+  write_state "next_allowed=$until_iso" "paused_by=user"
+  say "paused until $until_iso — shifts resume on their own after that; \`shift.sh resume\` lifts it now"
+}
+
+cmd_resume() {
+  [ -f "$STATE" ] || { say "nothing to resume"; return 0; }
+  write_state "next_allowed=" "paused_by="
+  say "resumed — the next launchd tick runs"
+}
+
 cmd_status() {
   if [ -f "$PLIST" ]; then
     say "scheduled: $LABEL ($(launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null | sed -n 's/^\s*state = //p' | head -1))"
@@ -314,6 +338,7 @@ cmd_status() {
     say "not scheduled (no $PLIST)"
   fi
   if [ -f "$RUNNING" ]; then say "running since $(cat "$RUNNING")"; else say "no run in flight"; fi
+  [ "$(state_get paused_by)" = "user" ] && say "paused until $(state_get next_allowed)"
   if [ -f "$STATE" ]; then python3 -c 'import json,sys;print(json.dumps(json.load(open(sys.argv[1])),indent=2))' "$STATE"; else say "no state.json yet"; fi
   [ -f "$LOG" ] && { say "last shifts:"; tail -5 "$LOG"; }
   return 0
@@ -325,8 +350,10 @@ case "${1:-}" in
   run) shift; cmd_run "$@" ;;
   install) shift; cmd_install "$@" ;;
   uninstall) cmd_uninstall ;;
+  pause) shift; cmd_pause "$@" ;;
+  resume) cmd_resume ;;
   status) cmd_status ;;
   parse) [ $# -ge 3 ] || die "parse <result.json> <exit-code>"; parse_result "$2" "$3" "${4:-1800}" ;;
   ""|-h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//' ;;
-  *) die "unknown command ${1} — run, install, uninstall, status, parse" ;;
+  *) die "unknown command ${1} — run, install, uninstall, pause, resume, status, parse" ;;
 esac

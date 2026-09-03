@@ -120,22 +120,95 @@ DEPLOYED_RE = re.compile(r"([A-Za-z0-9_-]+)\s*→\s*([A-Za-z0-9_-]+)\s*·\s*(\S+
 # an answer that left its gate reading `parked` for a fortnight. The name admits `/` because
 # `keep/adopt` is a real gate name; the value is whatever precedes the trailing provenance,
 # and the provenance is optional (`defer=none`).
-DECISION_TERM_RE = re.compile(r"^([A-Za-z0-9_/-]+)\s*=\s*(.+?)(?:\s*\(([^()]*)\)\s*)?$")
+DECISION_TERM_RE = re.compile(r"^([A-Za-z0-9_/-]+)\s*=\s*(.+)$")
+
+
+def decision_terms(value: str) -> list[str]:
+    """Split `**Decisions:**` on `·`, but never on one INSIDE the provenance parentheses.
+
+    A parking's condition is free prose — `parked (human-gated — three of four slots · see
+    montage)` is a legal thing for a person to write, and splitting it blindly left the term
+    reading `parked (human-gated — three of four slots`, which is not the word `parked`. The
+    gate then vanished from `open-gates` entirely; worse, that non-parked value ANSWERED the
+    gate, so a malformed re-park silently closed an earlier well-formed parking of the same
+    name and the row went to zero. A gate that disappears because someone typed a bracket is
+    lost work, not a formatting nit.
+
+    Unbalanced parentheses fall back to the naive split: with no reliable depth there is no
+    way to tell a condition's `·` from a term separator, and the old behaviour at least keeps
+    the later terms addressable."""
+    out: list[str] = []
+    buf: list[str] = []
+    depth = 0
+    for ch in value:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth < 0:  # a stray `)` — depth is no longer trustworthy
+                return value.split("·")
+        if ch == "·" and depth == 0:
+            out.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+    if depth != 0:
+        return value.split("·")
+    out.append("".join(buf))
+    return out
+
+
+# The second authoring shape: the provenance parenthesis is closed early and the condition
+# trails outside it — `parked (human-gated) — keep the hold and fix the inversion`. Rejoined
+# into the canonical `<word> — <condition>` so `condition_of` reads it like any other. Measured
+# across all 284 entries of this project's log: this rejoins exactly one term, the one it was
+# written for, so it widens nothing else.
+PROVENANCE_THEN_DASH_RE = re.compile(r"^(.*?)\s*\(([^()]*)\)\s+[—–-]\s+(.+)$")
+
+
+def split_provenance(rest: str) -> tuple[str, str]:
+    """`value (by)` → `(value, by)`, taking `by` as the trailing BALANCED parenthetical.
+
+    Scanned rather than matched because a condition may contain its own parentheses —
+    `parked (human-gated — hold until the next set (all four slots) lands)`. A regex demanding
+    a paren-free provenance did not match those at all, so the whole term became the value and
+    the gate stopped reading as parked."""
+    s = rest.rstrip()
+    if s.endswith(")"):
+        depth = 0
+        for i in range(len(s) - 1, -1, -1):
+            if s[i] == ")":
+                depth += 1
+            elif s[i] == "(":
+                depth -= 1
+                if depth == 0:
+                    # An opening paren with nothing before it is not provenance, it IS the value.
+                    head = s[:i].strip()
+                    if head:
+                        return head, s[i + 1 : -1].strip()
+                    break
+    m = PROVENANCE_THEN_DASH_RE.match(s)
+    if m and m.group(1).strip():
+        return m.group(1).strip(), f"{m.group(2).strip()} — {m.group(3).strip()}"
+    return rest.strip(), ""
 
 
 def decisions(value: str) -> list[tuple[str, str, str]]:
     """`(gate, value, by)` per term. `value` is normalised — markdown stripped, collapsed —
     because the only test anyone runs on it is `== "parked"`, and `**KEEP**` must not read as
-    a different word than `KEEP`."""
+    a different word than `KEEP`. `by` is normalised the same way: the log writes a sha as
+    `` commit `<sha>` `` and a reader grepping for `commit <sha>` must find it either way."""
     out = []
-    for term in value.split("·"):
+    for term in decision_terms(value):
         m = DECISION_TERM_RE.match(term.strip())
         if not m:
             continue
-        gate, val, by = m.group(1), m.group(2), m.group(3) or "unstated"
+        gate, rest = m.group(1), m.group(2)
+        val, by = split_provenance(rest)
         val = " ".join(val.replace("*", "").replace("`", "").split())
+        by = " ".join(by.replace("`", "").split())
         if val:
-            out.append((gate, val, by.strip() or "unstated"))
+            out.append((gate, val, by or "unstated"))
     return out
 
 

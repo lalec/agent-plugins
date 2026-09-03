@@ -105,7 +105,8 @@ def _drain_discord(out: dict[str, Any]) -> None:
             if batch is None:
                 _ack(out, HINT, "discord")
             elif batch.get("reviewed"):
-                _ack(out, f"batch {alerts.local_label(ts)} is closed", "discord")
+                decided = ", ".join(f"{n} {v}" for n, v in sorted((batch.get("answers") or {}).items())) or "shown in chat"
+                _ack(out, f"batch {alerts.local_label(ts)} is closed · {decided}", "discord")
             else:
                 _handle(batch, m["content"], "discord", m["id"], out)
         notify.save_state(last_seen=m["id"])

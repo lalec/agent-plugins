@@ -20,13 +20,20 @@ case "$cmd" in
     exec python3 "$RUN" --bootstrap "${@:2}"
     ;;
 
+  accept)
+    exec python3 "$RUNTIME/accept.py" "${@:2}"
+    ;;
+
   poll)
-    config="${EDR_HOME:-$HOME/.claude/edr}/config.yaml"
-    if grep -qE '^mode:[[:space:]]*cloud' "$config" 2>/dev/null; then
-      echo "Phase B+ poll not yet wired."
-      exit 0
-    fi
-    echo "Phase A — no cloud yet, nothing to drain."
+    exec python3 "$RUNTIME/pending.py" "${@:2}"
+    ;;
+
+  notify)
+    exec python3 "$RUNTIME/notify.py" "${@:2}"
+    ;;
+
+  schedule)
+    exec python3 "$RUNTIME/schedule.py" "${@:2}"
     ;;
 
   test)
@@ -67,12 +74,20 @@ Usage:
   edr                          One-shot scan (default)
   edr scan [args]              Same; pass-through args go to run_collectors.py
   edr bootstrap                Force re-bootstrap of the baseline
-  edr poll                     Drain pending actions (Phase B+; no-op in Phase A)
+  edr accept <sig>... | --all  Fold confirmed-benign anomalies into the baseline
+  edr poll [--wait 20m]        Drain replies: run approved user-scope actions, queue root ones,
+                               list unreviewed batches and unseen unattended runs
+  edr poll --reply "1 ok 2" --batch <ts>
+                               Apply a decision typed in chat (same grammar as a Discord reply)
+  edr notify test | send <ts>  Post a test line / a batch to the notify channel
+  edr schedule install|uninstall|status|run
+                               Nightly unattended scan via launchd (run = what the job executes)
   edr test {scenario|all}      Run a red-team simulator scenario
   edr intel-sync               Refresh the IOC database from intel feeds
 
 Environment:
   EDR_HOME                     Override host data dir (default: $HOME/.claude/edr)
+  EDR_HEADLESS=1               Set by the nightly job; root actions queue instead of raising a dialog
 EOF
     ;;
 

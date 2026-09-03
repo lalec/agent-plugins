@@ -15,10 +15,12 @@ Endpoint Detection & Response for macOS, packaged as a Claude Code plugin. Detec
 | Command | What it does |
 |---|---|
 | `/edr:macos` | One-shot scan: run collectors, diff vs baseline, narrate findings |
-| `/edr:macos poll` | Drain pending actions from the cloud platform (Phase B+; no-op in Phase A) |
+| `/edr:macos headless` | Same scan under the unattended contract — the nightly job runs this |
+| `/edr:macos poll` | Run approved actions (root ones raise the admin dialog), list unreviewed batches from unattended runs |
+| `/edr:macos schedule` | Nightly launchd job: `edr schedule install \| uninstall \| status` |
 | `/edr:macos test fake_launchagent` | Plant a benign LaunchAgent, verify the launchd collector flags it critical, clean up |
 | `/edr:macos test fake_privileged_docker` | Run a `--privileged` container, verify docker collector flags it critical, clean up |
-| `/loop 4h /edr:macos` | Schedule an hourly-ish self-paced scan |
+| `/loop 4h /edr:macos` | Attended-session loop, every 4 h |
 
 ## Code vs host-local data
 
@@ -38,15 +40,21 @@ diff vs baseline → triage fast-path (FP suppress + auto-promote)
    ↓ anomalies
 analyst (Claude in SKILL.md) — pivots, enriches ad-hoc, classifies per NIST §3.2.4
    ↓
-narrate to chat (Phase A) | write Firestore alert + email via Gmail MCP (Phase B+)
+alert batch state/alerts/<ts>.json — one pre-declared action per finding
+   ↓
+narrate to chat | nightly: post to Discord, read replies → edr poll runs approved actions
 ```
+
+## Unattended nightly scan
+
+`edr schedule install` writes a launchd calendar job (default 22:00, fires on wake if missed, runs under `caffeinate`). With `notify.channel: discord` in `config.yaml` the job posts findings to one guild text channel as a numbered list; reply `1`, `1 2`, `ok 2` (accept as benign), `why 1` or `skip`. User-scope actions run the same night; anything needing root queues until the next `/edr:macos` at the Mac, where it raises the admin dialog. With `notify.channel: none` nothing is posted and the batch opens the next interactive run. `edr accept <sig>` / `--all` folds confirmed-benign anomalies into the baseline.
 
 Collectors are pluggable. Drop a `runtime/collectors/foo.py` implementing the `Collector` ABC; it's auto-discovered next tick. Maturity tiers (`experimental → beta → stable`) gate auto-promote behavior. New self-authored proposals land in `${EDR_HOME}/pending_changes/` for user review.
 
-The plugin's `bin/edr` is auto-added to `$PATH` in plugin sessions — `edr`, `edr test all`, `edr poll`, `edr bootstrap`, `edr intel-sync` work directly.
+The plugin's `bin/edr` is auto-added to `$PATH` in plugin sessions — `edr`, `edr accept`, `edr poll`, `edr notify`, `edr schedule`, `edr test all`, `edr bootstrap`, `edr intel-sync` work directly.
 
 See [SKILL.md](skills/macos/SKILL.md) for the full analyst playbook.
 
 ## Status
 
-Phase A (foundation): 6 stable collectors — processes, launchd, network, sensitive_paths, docker, claude_code_config. Local-only narration, no cloud. Phase B (Firebase backend + email alerts), Phase C (interactive IR runner), Phase D (coverage rollout), Phase E (self-evolution) are upcoming.
+Phase A (foundation): 6 stable collectors — processes, launchd, network, sensitive_paths, docker, claude_code_config. Local-only, plus the unattended nightly loop over Discord (no cloud). Phase B (Firebase backend + email alerts), Phase C (interactive IR runner), Phase D (coverage rollout), Phase E (self-evolution) are upcoming.

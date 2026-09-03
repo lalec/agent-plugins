@@ -49,6 +49,7 @@ class Anomaly:
     def to_dict(self) -> dict[str, Any]:
         return {
             "change": self.change,
+            "sig": self.evidence.signature_hash(),
             "evidence": self.evidence.to_dict(),
             "prior": self.prior.to_dict() if self.prior else None,
             "floor_severity": self.floor_severity,
@@ -92,6 +93,9 @@ class Collector(ABC):
     # context but ignored when deciding "modified"). Use for churn-prone metrics
     # like CPU%, pids, started_at — anything observation-volatile but not security-relevant.
     volatile_attrs: ClassVar[list[str]] = []
+    # False for collectors whose evidence naturally comes and goes (processes):
+    # an entry vanishing from the snapshot is then not reported as an anomaly.
+    report_removed: ClassVar[bool] = True
 
     @abstractmethod
     def collect(self, ctx: CollectorContext) -> list[Evidence]:

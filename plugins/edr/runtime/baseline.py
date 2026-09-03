@@ -57,14 +57,20 @@ def from_snapshot(snapshot: dict[str, list[Evidence]],
 def diff_against(snapshot: dict[str, list[Evidence]],
                  baseline: dict[str, dict[str, Any]],
                  collector_versions: dict[str, int],
-                 volatile_map: dict[str, list[str]] | None = None) -> list[Anomaly]:
+                 volatile_map: dict[str, list[str]] | None = None,
+                 report_removed: dict[str, bool] | None = None) -> list[Anomaly]:
     """Compute anomalies between current snapshot and baseline.
 
     A baseline entry whose collector version doesn't match the current version
     is ignored (treated as absent → all current evidence shows as 'added' for
     that collector). This is how version bumps invalidate stale baseline.
+
+    report_removed: per-collector switch for the reverse pass; collectors set
+    to False never produce 'removed' anomalies (their evidence is expected to
+    come and go).
     """
     volatile_map = volatile_map or {}
+    report_removed = report_removed or {}
     anomalies: list[Anomaly] = []
     seen_keys: set[str] = set()
 
@@ -101,6 +107,8 @@ def diff_against(snapshot: dict[str, list[Evidence]],
             continue
         if (collector_name, version) not in ran_collectors:
             continue  # collector didn't run this tick — silent on absence
+        if not report_removed.get(collector_name, True):
+            continue  # transient evidence — absence is not an anomaly
         prior_ev = Evidence(
             collector=collector_name,
             kind=prior_dict["kind"],

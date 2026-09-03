@@ -1,29 +1,35 @@
 """Process inventory collector.
 
-Emits one Evidence per unique (exe, cmdline) pair with codesign verdict.
-PIDs are unstable across runs — keying on (exe, cmdline) gives stable diffs.
+Emits one Evidence per executable path with a codesign verdict. Keyed on the
+executable alone: pids, parents and command lines churn between ticks, so they
+live in volatile attrs and never make an anomaly. A process exiting is not an
+anomaly either (`report_removed = False`).
+
+The executable comes from `ps -o comm=`, which keeps paths with spaces intact
+(`/Applications/Visual Studio Code.app/...`); splitting the command line on
+whitespace truncated those and made codesign report `missing`.
 """
 from __future__ import annotations
 
-import hashlib
 import shutil
 from collections import defaultdict
-from pathlib import Path
 from typing import Any
 
 from collectors._base import Collector, CollectorContext, Evidence
 from collectors._util import codesign_verdict, load_json_cache, run_cmd, save_json_cache
+
+MAX_COMMANDS = 10
 
 
 class ProcessesCollector(Collector):
     name = "processes"
     tier = "T"
     maturity = "stable"
-    version = 1
+    version = 2
     mitre = ["T1059", "T1106"]
+    report_removed = False
     # Per-tick churn — kept in snapshot for analyst context, not used in diff identity.
-    # ppid is volatile because each bash/shell invocation has a distinct pid.
-    volatile_attrs = ["instance_count", "sample_pid", "etime", "pcpu_max", "ppid"]
+    volatile_attrs = ["instance_count", "sample_pid", "etime", "pcpu_max", "ppid", "commands"]
 
     def collect(self, ctx: CollectorContext) -> list[Evidence]:
         rc, out, err = run_cmd(
@@ -33,6 +39,7 @@ class ProcessesCollector(Collector):
         if rc != 0:
             return [self.safe_evidence("error", "ps_failed", error=err.strip()[:500])]
 
+        comm_by_pid = self._comm_by_pid()
         cache_path = ctx.data_dir / "state" / "codesign_cache.json"
         codesign_cache: dict[str, Any] = load_json_cache(cache_path, default={})
         groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -41,20 +48,18 @@ class ProcessesCollector(Collector):
             row = self._parse(line)
             if not row:
                 continue
-            exe = self._extract_exe(row["command"])
-            cmd_hash = hashlib.sha256(row["command"].encode()).hexdigest()[:12]
-            key = f"{exe}|{cmd_hash}"
-            groups[key].append({**row, "exe": exe, "cmd_hash": cmd_hash})
+            exe = self._exe(comm_by_pid.get(row["pid"]), row["command"])
+            if exe:
+                groups[exe].append(row)
 
         evidences: list[Evidence] = []
-        for key, rows in groups.items():
-            sample = rows[0]
-            exe = sample["exe"]
+        for exe, rows in groups.items():
             verdict = codesign_verdict(exe, codesign_cache) if exe.startswith("/") else {"status": "unresolved"}
+            sample = rows[0]
             attrs = {
                 "exe": exe,
-                "command": sample["command"][:500],
-                "user": sample["user"],
+                "users": sorted({r["user"] for r in rows}),
+                "commands": list(dict.fromkeys(r["command"][:200] for r in rows))[:MAX_COMMANDS],
                 "ppid": sample["ppid"],
                 "instance_count": len(rows),
                 "sample_pid": sample["pid"],
@@ -64,10 +69,23 @@ class ProcessesCollector(Collector):
                 "codesign_team_id": verdict.get("team_id"),
                 "codesign_signing_id": verdict.get("signing_id"),
             }
-            evidences.append(Evidence(collector=self.name, kind="process", key=key, attrs=attrs))
+            evidences.append(Evidence(collector=self.name, kind="process", key=exe, attrs=attrs))
 
         save_json_cache(cache_path, codesign_cache)
         return evidences
+
+    @staticmethod
+    def _comm_by_pid() -> dict[int, str]:
+        """pid -> executable path as the kernel knows it (spaces intact)."""
+        rc, out, _ = run_cmd(["ps", "-axww", "-o", "pid=,comm="], timeout=10)
+        table: dict[int, str] = {}
+        if rc != 0:
+            return table
+        for line in out.splitlines():
+            parts = line.strip().split(None, 1)
+            if len(parts) == 2 and parts[0].isdigit():
+                table[int(parts[0])] = parts[1]
+        return table
 
     @staticmethod
     def _parse(line: str) -> dict[str, Any] | None:
@@ -89,17 +107,15 @@ class ProcessesCollector(Collector):
             return None
 
     @staticmethod
-    def _extract_exe(command: str) -> str:
-        """argv[0] heuristic — works for the common case where argv[0] is the path."""
-        if not command:
+    def _exe(comm: str | None, command: str) -> str:
+        """Executable path: prefer `comm`; fall back to argv[0] of the command line."""
+        first = comm or (command.split(None, 1)[0] if command else "")
+        if not first:
             return ""
-        first = command.split(None, 1)[0]
-        # Handle paren-wrapped kernel/orphan markers like "(launchd)"
-        if first.startswith("(") and first.endswith(")"):
+        # Paren-wrapped kernel/orphan markers like "(launchd)" or "<defunct>"
+        if first[0] in "(<" and first[-1] in ")>":
             return first
         # Resolve bare names via PATH (e.g. "python3" -> /opt/homebrew/bin/python3)
         if not first.startswith("/") and "/" not in first:
-            resolved = shutil.which(first)
-            if resolved:
-                return resolved
+            return shutil.which(first) or first
         return first

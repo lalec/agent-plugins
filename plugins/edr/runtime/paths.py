@@ -1,13 +1,14 @@
-"""Single source of truth for plugin install dir + host data dir.
+"""Single source of truth for plugin install dir, host data dir, and host config.
 
 Plugin code (read-only after install) lives under PLUGIN_DIR. Per-host runtime
-state (baseline, snapshots, secrets, lessons, changelog, sqlite, telemetry)
-lives under DATA_DIR — default `~/.claude/edr`, override via EDR_HOME.
+state (baseline, snapshots, alerts, secrets, lessons, changelog, sqlite,
+telemetry) lives under DATA_DIR — default `~/.claude/edr`, override via EDR_HOME.
 """
 from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 # Plugin dirs (computed via __file__; works whether installed in cache or loaded in-place via --plugin-dir)
 RUNTIME_DIR = Path(__file__).parent.resolve()
@@ -24,6 +25,14 @@ LESSONS_FILE = DATA_DIR / "lessons.md"
 CHANGELOG_FILE = DATA_DIR / "changelog.md"
 CONFIG_FILE = DATA_DIR / "config.yaml"
 
+# Unattended loop: alert batches, the approval ledger, transport + scheduler state
+ALERTS_DIR = STATE_DIR / "alerts"
+PENDING_ACTIONS_DIR = STATE_DIR / "pending_actions"
+NOTIFY_STATE = STATE_DIR / "notify.json"
+SCHEDULE_STATE = STATE_DIR / "schedule.json"
+LAUNCHD_LOG = STATE_DIR / "launchd.log"
+NIGHTLY_SHIM = DATA_DIR / "nightly.sh"
+
 # Plugin-shipped defaults (read-only after install)
 DEFAULT_TRIAGE_RULES = RUNTIME_DIR / "triage_rules.yaml"
 DEFAULT_MANIFEST = RUNTIME_DIR / "collectors" / "manifest.yaml"
@@ -33,12 +42,28 @@ USER_TRIAGE_RULES = DATA_DIR / "triage_rules.user.yaml"
 USER_MANIFEST = DATA_DIR / "manifest.user.yaml"
 
 
+def headless() -> bool:
+    """True inside the nightly launchd job (set by the scheduler). No human can answer a dialog."""
+    return os.environ.get("EDR_HEADLESS") == "1"
+
+
+def load_config() -> dict[str, Any]:
+    """Host config as a dict. {} when missing or malformed — callers `.get` with defaults."""
+    import yaml
+    try:
+        data = yaml.safe_load(CONFIG_FILE.read_text()) if CONFIG_FILE.exists() else {}
+    except (OSError, yaml.YAMLError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def ensure() -> None:
     """Create DATA_DIR + subdirs and seed empty user-facing files on first run. Idempotent."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     (STATE_DIR / "snapshots").mkdir(exist_ok=True)
-    (STATE_DIR / "alerts").mkdir(exist_ok=True)
+    ALERTS_DIR.mkdir(exist_ok=True)
+    PENDING_ACTIONS_DIR.mkdir(exist_ok=True)
     SECRETS_DIR.mkdir(parents=True, exist_ok=True)
     INTEL_DIR.mkdir(parents=True, exist_ok=True)
     for sub in ("collectors", "triage", "intel", "patches"):
@@ -94,4 +119,21 @@ tiers:
   OD: on-demand
 
 alert_floor: medium
+
+# Unattended runs post findings here and read your replies back.
+# channel: none keeps everything in chat — findings wait for the next /edr:macos.
+notify:
+  channel: none                 # discord | none
+  channel_id: ""                # snowflake of a guild text channel the bot can read + write
+  user_id: ""                   # your Discord user snowflake; only this author's replies count
+  token_file: ~/.claude/channels/discord/.env
+  token_key: DISCORD_BOT_TOKEN
+  heartbeat: weekly             # weekly | none — one line on Sundays when clean
+
+# `edr schedule install` renders these into the launchd job.
+schedule:
+  at: "22:00"
+  model: opus
+  budget_usd: 2
+  reply_window: 20m
 """

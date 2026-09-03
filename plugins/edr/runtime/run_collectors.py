@@ -146,11 +146,13 @@ def main() -> int:
     snapshot: dict[str, list[Evidence]] = {}
     versions: dict[str, int] = {}
     volatile_map: dict[str, list[str]] = {}
+    removed_map: dict[str, bool] = {}
     for cls in selected:
         evs = run_one(cls, ctx)
         snapshot[cls.name] = evs
         versions[cls.name] = cls.version
         volatile_map[cls.name] = list(cls.volatile_attrs)
+        removed_map[cls.name] = cls.report_removed
         if not args.no_snapshot:
             write_json(snapshot_dir / f"{cls.name}.json",
                        {"version": cls.version, "evidence": [e.to_dict() for e in evs]})
@@ -163,7 +165,7 @@ def main() -> int:
         anomalies: list[Anomaly] = []
         bootstrap = True
     else:
-        anomalies = baseline_mod.diff_against(snapshot, baseline, versions, volatile_map)
+        anomalies = baseline_mod.diff_against(snapshot, baseline, versions, volatile_map, removed_map)
         bootstrap = False
 
     rules = triage.load_rules()

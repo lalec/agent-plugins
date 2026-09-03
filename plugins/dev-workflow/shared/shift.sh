@@ -174,7 +174,11 @@ cmd_run() {
   mkdir -p "$DIR"
 
   # Skip conditions, cheapest first. Each is a line in shifts.log so a quiet day is legible.
-  if [ -f "$RUNNING" ]; then
+  # A run the usage limit cut off leaves its marker behind; that marker belongs to the session
+  # this launch is about to resume, so it must not read as "someone else is active".
+  resumable=0
+  [ "$(state_get ended)" = "limit" ] && [ -n "$(state_get session_id)" ] && resumable=1
+  if [ -f "$RUNNING" ] && [ "$resumable" != 1 ]; then
     age=$(file_age_secs "$RUNNING")
     if [ "$age" -lt "$STALE_SECS" ]; then
       say "skip: a run is active since $(cat "$RUNNING") (${age}s)"; return 0
@@ -208,6 +212,9 @@ cmd_run() {
     else
       run_once "$ts-resume" claude -p --resume "$sid" "${FLAGS[@]}" "$prompt" || true
       [ "$(state_get ended)" = "limit" ] && { say "limit hit again during resume — waiting"; return 0; }
+      # The resumed run's close-out clears its own marker; if it ended without reaching that
+      # step, the marker is stale by definition and must not block the fresh run below.
+      rm -f "$RUNNING"
     fi
   fi
 

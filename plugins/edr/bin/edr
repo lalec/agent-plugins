@@ -85,7 +85,7 @@ Usage:
   edr accept <sig>... | --all  Fold confirmed-benign anomalies into the baseline
   edr poll [--wait 20m]        Drain replies: run approved user-scope actions, queue root ones,
                                list unreviewed batches and unseen unattended runs
-  edr poll --reply "1 ok 2" --batch <ts>
+  edr poll --reply "1 0 2 2" --batch <ts>
                                Apply a decision typed in chat (same grammar as a Discord reply)
   edr notify test | send <ts>  Post a test line / a batch to the notify channel
   edr schedule install|uninstall|status|run

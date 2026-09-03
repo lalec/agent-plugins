@@ -51,7 +51,7 @@ def queued() -> list[dict[str, Any]]:
 
 def build(batch: dict[str, Any], finding: dict[str, Any], verb: str, source: str,
           msg_id: str | None) -> dict[str, Any] | None:
-    """Entry for an approve/ok decision; None when the finding declares no action."""
+    """Entry for a fix / ok decision; None when a fix is asked but no action is declared."""
     if verb == "ok":
         kind, primitive, args = "accept", None, {}
     else:

@@ -1,12 +1,14 @@
 """Reply drain — turns decisions into ledger entries and runs them.
 
 A decision is a Discord reply in the notify channel, or the same text typed
-by the analyst on the user's behalf (`--reply "1 ok 2" --batch <ts>`). Either
+by the analyst on the user's behalf (`--reply "1 0 2 2" --batch <ts>`). Either
 way it is parsed here, strictly, against the finding numbers of one batch;
 reply text never reaches a shell or the model.
 
-Grammar (case-insensitive):  `1` / `1 2` approve · `ok 1` accept as benign ·
-`why 1` narrative · `skip` close batch · anything else → hint, nothing runs.
+Grammar, numbers only: `<finding> <choice>` pairs — `0` ok (accept as benign),
+`1` why (narrative), `2` fix (run the declared remediation), `3` skip. A bare
+choice is accepted when the batch has exactly one finding. Anything else →
+hint, nothing runs.
 
 Root actions are queued while headless (a dialog would hang the job) and run
 at the next interactive `edr poll`, which raises the admin dialog.
@@ -31,24 +33,27 @@ import notify  # noqa: E402
 import paths  # noqa: E402
 from collectors._base import read_json, write_json  # noqa: E402
 
-HINT = "? reply 1 · ok 1 · why 1 · skip"
+HINT = f"? reply <finding> <choice> · {alerts.CHOICE_LINE}"
 POLL_EVERY = 30
 _INT = re.compile(r"^\d+$")
 
 
-def parse(text: str, valid: set[int]) -> list[tuple[str, int | None]] | None:
-    """[(verb, n)] for a well-formed reply, else None. Verbs: approve, ok, why, skip."""
-    toks = text.strip().lower().split()
-    if not toks:
+def parse(text: str, valid: set[int]) -> list[tuple[str, int]] | None:
+    """[(verb, finding)] for a well-formed numeric reply, else None. Verbs: ok, why, fix, skip."""
+    toks = text.strip().split()
+    if not toks or not all(_INT.match(t) for t in toks):
         return None
-    if toks == ["skip"]:
-        return [("skip", None)]
-    verb, nums = ("approve", toks) if _INT.match(toks[0]) else (toks[0], toks[1:])
-    if verb not in ("approve", "ok", "why") or not nums:
+    nums = [int(t) for t in toks]
+    if len(nums) == 1 and len(valid) == 1 and nums[0] in alerts.CHOICES:
+        return [(alerts.CHOICES[nums[0]], next(iter(valid)))]
+    if len(nums) % 2:
         return None
-    if not all(_INT.match(t) and int(t) in valid for t in nums):
-        return None
-    return [(verb, int(t)) for t in dict.fromkeys(nums)]
+    out: list[tuple[str, int]] = []
+    for finding, choice in zip(nums[::2], nums[1::2]):
+        if finding not in valid or choice not in alerts.CHOICES:
+            return None
+        out.append((alerts.CHOICES[choice], finding))
+    return list(dict.fromkeys(out))
 
 
 def drain(wait: int = 0, reply: str | None = None, batch_ts: str | None = None) -> dict[str, Any]:
@@ -113,17 +118,18 @@ def _handle(batch: dict[str, Any], text: str, source: str, msg_id: str | None,
         _ack(out, HINT, source)
         return
     for verb, n in ops:
-        if verb == "skip":
-            alerts.mark(batch["ts"], reviewed=ledger.now())
-            _ack(out, "🤷 closed, nothing changed", source)
-            continue
         f = alerts.finding(batch, n)
         if verb == "why":
             _ack(out, f"{n} · {str(f.get('narrative') or f.get('headline') or '')[:1500]}", source)
             continue
+        if verb == "skip":
+            _record_answer(batch["ts"], n, verb)
+            _ack(out, f"🤷 {n} · skipped, nothing changed", source)
+            continue
         entry = ledger.build(batch, f, verb, source, msg_id)
-        if entry is None:
-            _ack(out, f"{n} · nothing to run; reply ok {n} to accept or skip", source)
+        if entry is None:  # fix asked, no primitive declared: the fix is the recommendation
+            _record_answer(batch["ts"], n, verb)
+            _ack(out, f"🛠 {n} · no automatic fix — {f.get('recommend') or 'see why'}", source)
             continue
         _record_answer(batch["ts"], n, verb)
         if entry["needs_root"] and paths.headless():

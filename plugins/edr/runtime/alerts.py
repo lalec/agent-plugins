@@ -6,8 +6,11 @@ it. Code renders the channel message from here, so the format is enforced
 rather than requested.
 
 Fields the loop maintains: `posted` (message id once sent), `answers`
-({n: verb}), `reviewed` (timestamp once every finding is answered, the batch
-is skipped, or it was shown in an interactive session).
+({n: verb}), `reviewed` (timestamp once every finding is answered or the batch
+was shown in an interactive session).
+
+Reply grammar is numeric: `<finding> <choice>` pairs, choices 0 ok · 1 why ·
+2 fix · 3 skip; a bare choice when the batch has one finding.
 """
 from __future__ import annotations
 
@@ -20,6 +23,8 @@ import paths
 from collectors._base import read_json, write_json
 
 SEV_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+CHOICES = {0: "ok", 1: "why", 2: "fix", 3: "skip"}
+CHOICE_LINE = " · ".join(f"{c} {v}" for c, v in CHOICES.items())
 SEV_ICON = {"critical": "🔴", "high": "🔴", "medium": "🟠", "low": "🟡", "info": "🟢"}
 TS_FORMAT = "%Y%m%dT%H%M%SZ"
 
@@ -112,8 +117,9 @@ def render(batch: dict[str, Any]) -> str | None:
     for f in findings:
         rec = f" → {f['recommend']}" if f.get("recommend") else ""
         lines.append(f"{_n(f)} · {f.get('headline', '')}{rec}")
-    ns = [str(_n(f)) for f in findings]
-    lines.append(f"Reply: {ns[0]} · {' '.join(ns[:2])} · ok {ns[-1]} · why {ns[0]} · skip")
+    ns = sorted(_n(f) for f in findings)
+    which = str(ns[0]) if len(ns) == 1 else f"{ns[0]}–{ns[-1]}"
+    lines.append(f"Reply: {which} · {CHOICE_LINE}")
     return "\n".join(lines)
 
 

@@ -32,7 +32,7 @@ Read `~/.claude/edr/config.yaml` for `alert_floor`, `notify` (channel or `none`)
 ```bash
 edr poll
 ```
-Prints JSON: `executed` (approved actions that ran now — root ones raise the admin dialog here), `queued` (still waiting for a session at the Mac), `unreviewed` (batches from unattended runs nobody has seen), `unseen_runs` (unattended runs that ended `incomplete` or `limit`). Narrate each non-empty key in one line. For each **unreviewed batch**: present its findings as in step 6, take the user's decisions, and apply them with `edr poll --reply "1 ok 2" --batch <ts>` (same grammar as a channel reply). A batch is listed once; `--batch <ts>` still works on any batch later.
+Prints JSON: `executed` (approved actions that ran now — root ones raise the admin dialog here), `queued` (still waiting for a session at the Mac), `unreviewed` (batches from unattended runs nobody has seen), `unseen_runs` (unattended runs that ended `incomplete` or `limit`). Narrate each non-empty key in one line. For each **unreviewed batch**: present its findings as in step 6, take the user's decisions, and apply them with `edr poll --reply "1 0 2 2" --batch <ts>` (same numeric grammar as a channel reply). A batch is listed once; `--batch <ts>` still works on any batch later.
 
 ### 3. Run collectors
 ```bash
@@ -124,8 +124,8 @@ Collectors give you **starting points**, not conclusions. For anything not obvio
 
 - `findings` holds only anomalies at or above `alert_floor`, numbered from 1. Clean run → `"findings": []`.
 - `headline` and `recommend` ≤ 80 chars each; they are the whole phone message. Depth goes in `narrative` (pulled by `why N`, never pushed).
-- `action` is the one thing you would do, as a `respond.py` primitive with its args (`kill_pid`, `launchctl_unload`, `quarantine_file`, `remove_path`, `ssh_revoke_key`), or `null` when the right answer is "confirm it's you" — `ok N` (accept as benign) and `skip` still apply.
-- Then narrate to chat: headline line `N anomalies — X critical, Y high, Z medium, K low (J suppressed)` or `Clean — no anomalies`; per finding the numbered line plus a short narrative; end with the reply grammar the user can answer in chat: `1` / `1 2` approve, `ok 1` accept as benign, `why 1`, `skip`. Apply their answer with `edr poll --reply "…" --batch {ts}`.
+- `action` is the one thing you would do, as a `respond.py` primitive with its args (`kill_pid`, `launchctl_unload`, `quarantine_file`, `remove_path`, `ssh_revoke_key`), or `null` when the fix is the user's to make — then `fix` answers with `recommend`, so make it the exact change (`bind it to 127.0.0.1`). `ok` (accept as benign) and `skip` always apply.
+- Then narrate to chat: headline line `N anomalies — X critical, Y high, Z medium, K low (J suppressed)` or `Clean — no anomalies`; per finding the numbered line plus a short narrative; end with the reply grammar the user can answer in chat — `<finding> <choice>` with `0 ok · 1 why · 2 fix · 3 skip` (a bare choice when there is one finding). Apply their answer with `edr poll --reply "1 2" --batch {ts}`.
 
 With `notify.channel: discord` the nightly job posts the batch itself; interactive runs stay in chat.
 
@@ -168,7 +168,7 @@ Same as step 2, on its own. Root actions the user approved from the phone run he
 ## Hard rules
 
 1. **Never read or echo the contents of credential files** (`~/.aws/credentials`, `~/.gcloud/*`, `~/.ssh/*` keys, `.env`, etc.). Hashes are enough to detect change.
-2. **Never auto-execute `respond.py` primitives.** A reply naming a finding number — in the notify channel, or typed in chat and applied with `edr poll --reply` — *is* the per-step confirmation for that finding's declared action, and nothing else is. The plan rejected fully-autonomous response.
+2. **Never auto-execute `respond.py` primitives.** A `fix` reply (`<finding> 2`) — in the notify channel, or typed in chat and applied with `edr poll --reply` — *is* the per-step confirmation for that finding's declared action, and nothing else is. The plan rejected fully-autonomous response.
 3. **Never lower a triage-set floor severity.** You may raise it.
 4. **Baseline changes go through `edr accept`** (or `ok N`, which calls it). Never edit `state/baseline.json` by hand.
 5. **Stay silent if there's nothing to report.** No findings = empty batch = no post, no chat noise. The point of `edr` is signal.

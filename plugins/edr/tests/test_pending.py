@@ -40,18 +40,20 @@ def isolated(monkeypatch):
 
 
 @pytest.mark.parametrize("text,valid,expected", [
-    ("1", {1, 2}, [("approve", 1)]),
-    ("1 2", {1, 2}, [("approve", 1), ("approve", 2)]),
-    ("1 1", {1}, [("approve", 1)]),
-    ("OK 2", {1, 2}, [("ok", 2)]),
-    ("why 1", {1}, [("why", 1)]),
-    ("Skip", {1}, [("skip", None)]),
-    ("3", {1, 2}, None),
+    ("1 2", {1, 2}, [("fix", 1)]),
+    ("1 0 2 2", {1, 2}, [("ok", 1), ("fix", 2)]),
+    ("1 2 1 2", {1}, [("fix", 1)]),
+    ("2", {1}, [("fix", 1)]),            # bare choice, single finding
+    ("0", {1}, [("ok", 1)]),
+    ("3", {1}, [("skip", 1)]),
+    ("2", {1, 2}, None),                 # bare choice is ambiguous with two findings
+    ("1 5", {1}, None),                  # unknown choice
+    ("3 2", {1, 2}, None),               # unknown finding
+    ("1", {1, 2}, None),                 # odd length
+    ("ok 1", {1}, None),                 # words are not accepted
     ("rm -rf /", {1}, None),
     ("", {1}, None),
-    ("ok", {1}, None),
-    ("skip 1", {1}, None),
-    ("1; ok 2", {1, 2}, None),
+    ("1; 2", {1}, None),
 ])
 def test_parse(text, valid, expected):
     assert pending.parse(text, valid) == expected
@@ -72,22 +74,22 @@ def test_chat_reply_executes_user_scope_action(tmp_path):
     target = tmp_path / "evil.sh"
     target.write_text("x")
     b = make_batch(action={"primitive": "quarantine_file", "args": {"path": str(target)}})
-    out = pending.drain(reply="1", batch_ts=b["ts"])
+    out = pending.drain(reply="1 2", batch_ts=b["ts"])
     assert not target.exists()
     assert out["executed"][0]["status"] == "done"
     entry = read_json(paths.PENDING_ACTIONS_DIR / f"{TS}-1.json")
     assert entry["source"] == "chat" and entry["status"] == "done" and entry["needs_root"] is False
-    assert alerts.load(TS)["answers"] == {"1": "approve"}
+    assert alerts.load(TS)["answers"] == {"1": "fix"}
     assert alerts.load(TS)["reviewed"]
 
 
 def test_why_then_skip():
     make_batch()
-    out = pending.drain(reply="why 1", batch_ts=TS)
+    out = pending.drain(reply="1 1", batch_ts=TS)
     assert "because" in out["acks"][0] and not ledger_files()
     assert not alerts.load(TS)["reviewed"]
-    out = pending.drain(reply="skip", batch_ts=TS)
-    assert "closed" in out["acks"][0] and alerts.load(TS)["reviewed"] and not ledger_files()
+    out = pending.drain(reply="3", batch_ts=TS)
+    assert "skipped" in out["acks"][0] and alerts.load(TS)["reviewed"] and not ledger_files()
 
 
 def test_garbage_is_hint_only():
@@ -96,16 +98,17 @@ def test_garbage_is_hint_only():
     assert out["acks"] == [pending.HINT] and not ledger_files() and not out["executed"]
 
 
-def test_approve_without_declared_action():
+def test_fix_without_declared_action_reports_recommendation():
     make_batch(action=None)
-    out = pending.drain(reply="1", batch_ts=TS)
-    assert "nothing to run" in out["acks"][0] and not ledger_files()
+    out = pending.drain(reply="1 2", batch_ts=TS)
+    assert "no automatic fix" in out["acks"][0] and "r" in out["acks"][0] and not ledger_files()
+    assert alerts.load(TS)["reviewed"]  # answered
 
 
 def test_headless_queues_root_action_then_interactive_runs_it(monkeypatch):
     monkeypatch.setenv("EDR_HEADLESS", "1")
     make_batch(action={"primitive": "remove_path", "args": {"path": "/usr/bin/nonexistent-edr"}})
-    out = pending.drain(reply="1", batch_ts=TS)
+    out = pending.drain(reply="1 2", batch_ts=TS)
     assert out["queued"] and not out["executed"]
     assert read_json(paths.PENDING_ACTIONS_DIR / f"{TS}-1.json")["status"] == "queued"
     assert "needs admin" in out["acks"][0]
@@ -120,7 +123,7 @@ def test_discord_reply_author_check(monkeypatch, tmp_path):
     make_batch(action={"primitive": "quarantine_file", "args": {"path": str(target)}})
     notify.save_state(last_seen="100", posts={"200": TS})
     msgs = [{"id": "300", "author_id": "intruder", "content": "1"},
-            {"id": "301", "author_id": "u1", "content": "why 1"}]
+            {"id": "301", "author_id": "u1", "content": "1 1"}]
     posted: list[str] = []
     monkeypatch.setattr(notify, "user_id", lambda: "u1")
     monkeypatch.setattr(notify, "fetch", lambda after: [m for m in msgs if int(m["id"]) > int(after or 0)])
@@ -136,7 +139,7 @@ def test_first_drain_never_replays_history(monkeypatch, tmp_path):
     target.write_text("x")
     make_batch(action={"primitive": "quarantine_file", "args": {"path": str(target)}})
     monkeypatch.setattr(notify, "user_id", lambda: "u1")
-    monkeypatch.setattr(notify, "fetch", lambda after: [{"id": "5", "author_id": "u1", "content": "1"}])
+    monkeypatch.setattr(notify, "fetch", lambda after: [{"id": "5", "author_id": "u1", "content": "1 2"}])
     pending.drain()
     assert target.exists() and not ledger_files()
     assert notify.state()["last_seen"] == "5"
@@ -147,7 +150,7 @@ def test_discord_reply_to_closed_batch_is_hint(monkeypatch):
     notify.save_state(last_seen="100", posts={"200": TS})
     posted: list[str] = []
     monkeypatch.setattr(notify, "user_id", lambda: "u1")
-    monkeypatch.setattr(notify, "fetch", lambda after: [{"id": "300", "author_id": "u1", "content": "1"}])
+    monkeypatch.setattr(notify, "fetch", lambda after: [{"id": "300", "author_id": "u1", "content": "1 2"}])
     monkeypatch.setattr(notify, "post", lambda t: posted.append(t) or "999")
     pending.drain()
     assert posted and "closed" in posted[0] and not ledger_files()
@@ -175,7 +178,7 @@ def test_render():
     b = make_batch()
     text = alerts.render(b)
     assert text.splitlines()[0].endswith("1 to decide")
-    assert "1 · h → r" in text and text.splitlines()[-1].startswith("Reply:")
+    assert "1 · h → r" in text and text.splitlines()[-1] == "Reply: 1 · 0 ok · 1 why · 2 fix · 3 skip"
     assert alerts.render({"ts": TS, "findings": []}) is None
     assert alerts.since(alerts.parse_ts(TS) + 0.7)["ts"] == TS  # same-second start still counts
     assert alerts.since(alerts.parse_ts(TS) + 1.0) is None

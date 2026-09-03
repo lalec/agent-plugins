@@ -274,7 +274,7 @@ Translate honestly from what the agents reported, and never upgrade a status on 
 | Item | Why it is open | Next |
 |---|---|---|
 
-**Three columns, always.** Compressing to two is a contract violation, and the column that must never be the one dropped is `Next` — a report that names no command cannot be acted on, which is the whole point of the block. **`Next` is a runnable command**, not a bare roadmap id and not a description: `/fix <id>` is a `Next`; `hosting-emulator-does-not-check-the-artifact-it-serves-is-complete` is not.
+**Three columns, always.** Compressing to two is a contract violation, and the column that must never be the one dropped is `Next` — a report that names no command cannot be acted on, which is the whole point of the block. **`Next` is a runnable command**, not a bare roadmap id and not a description: `/fix <id>` is a `Next`; `hosting-emulator-does-not-check-the-artifact-it-serves-is-complete` is not — and neither is a bare `/fix` or `/code`, which needs its goal: carry the row's one-line fix or the item's id as the argument, so the line runs as printed and a standing mission reads the same text as its task.
 
 One row each for: a parked gate, a gate decided on a **timeout** (labelled as auto-decided, never as their choice), a verification recorded `fail` that **nothing already tracks** (`open-deferrals` excludes a bare fail by design — but if a roadmap item covers it, `/roadmap` raises it and the row belongs in Emerged instead), a task recorded `UAT-only` that nobody has verified, work left in the tree, an unreached task. `Next` is the exact thing to run or click. **Order: the parked gate first, then `failed`, then the rest** — the `Next:` line below is the top row. Nothing open → write `None`.
 

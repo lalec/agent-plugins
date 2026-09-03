@@ -1433,6 +1433,8 @@ Single source of truth for *how* <PROJECT> deploys. Agents and other skills dele
 
 Read `references/deploy-config.yaml` before any deploy action.
 
+**Env kinds.** Every env declares exactly one of `run:` (a **serve-env** — a long-lived process, started only at the command top level, never deployed), `deploy:` (a **ship-env** — a terminating deploy command or CI-push description, run here) or `invoke:` (an **invoke-env** — a job that runs to completion and exits: a batch run, a scheduled task, a one-shot function). Serve-envs and ship-envs carry a `url`; an invoke-env answers at no address and carries none. Everything that walks a component's envs in declaration order **passes over** an invoke-env rather than stopping at it — an env that cannot answer is not the same as no env left, and conflating the two reports a component down that was never up.
+
 **Caller contract.** Caller passes `target`:
 - `target: non-prod` → deploy only to the **first** non-prod env **with a `deploy:` command** (declaration order). Serve-envs (`run:`) are never deployed — they are started at the command top level, not here. If a component has no non-prod ship-env, return silently for that component. **Early exit:** if no component in the yaml declares a non-prod ship-env at all, report `non-prod: no-op (no non-prod ship-env declared)` immediately — don't walk components one by one.
 - `target: prod` → deploy only to the env named `prod`. If `prod` is not declared (pre-launch component), return silently.
@@ -1440,13 +1442,14 @@ Read `references/deploy-config.yaml` before any deploy action.
 Never deploy across the boundary regardless of caller request. `<PREFIX>-dev` always passes `non-prod` (mid-pipeline, so `<PREFIX>-qa` tests a running stack). `target: prod` is passed only by the top-level `/code --prod` / `/fix --prod` command step **after** QA sign-off — never by a subagent, because the prod gate below needs `AskUserQuestion` and that only reaches the user at the top level. If `target: prod` is ever requested from a context where `AskUserQuestion` can't reach the user (i.e. invoked inside a subagent), refuse and return without deploying — prod requires the top-level command.
 
 **Fill-in pass** (before any deploy action, for the resolved target env):
-- Required per ship-env: `deploy`, `url`. Required per serve-env: `run`, `url`.
+- Required per ship-env: `deploy`, `url`. Required per serve-env: `run`, `url`. Required per invoke-env: `invoke` only — it answers at no address, so a `url` is not a gap to fill and must not be asked for. `verify:` is required of a component that declares any serve-env or ship-env, and must be absent from one whose envs are all invoke-envs; neither case is ever filled by inventing a url.
 - If any required field is missing or empty, batch every gap into a single `AskUserQuestion`. Apply the answers back to `deploy-config.yaml` and commit with `chore(deploy-config): fill <env> values` before proceeding.
 - Never invent values; never write placeholder text like `<fill in>`.
 
-**Per affected component**, resolve `verify:` to its named env:
+**Per affected component**, resolve `verify:` to its named env. A component with **no `verify:` line** — the shape a component whose only envs are invoke-envs takes — has nothing to deploy here and nothing that reachability could prove. The caller contract above already returns silently for it, since it declares no ship-env, and this skill **never runs an `invoke:` command**: a job runs on the project's own schedule or trigger, not on a deploy. Report it as `<component> → no deployable env` and move on. The missing `verify:` is the correct state for that shape, not a gap to fill. Otherwise:
 - `verify:` names a **serve-env** (`run:`) → check its `url` (suffixed by `health_path` if set, else `/`) returns HTTP 2xx/3xx. If not reachable, **do not auto-start it** — when this skill is invoked from the `<PREFIX>-dev` subagent, `AskUserQuestion` (and a long-running server process) can't be driven from there. Report `<env> not running — start with envs.<env>.run` and return without deploying; the caller surfaces it and the user (or the command's ensure-stack step) starts it, then re-runs.
 - `verify:` names a **ship-env** (`deploy:`) → run its `deploy`, wait for it to finish, then confirm its `url` (suffixed by `health_path` if set, else `/`) returns HTTP 2xx/3xx.
+- `verify:` names an **invoke-env** (`invoke:`) → a job that runs to completion proves nothing by being reachable. Report `<env> cannot verify — invoke-envs serve no url; point verify: at a serve-env or ship-env` and return without deploying. This is a config error, not a deploy failure, so say which field is wrong.
 
 **Gates** (per env):
 - `gate: auto` → run the deploy command directly. Default for any env not named `prod`.
@@ -1665,7 +1668,7 @@ during the run"), never a restatement of the assert. Single-quoted, same reason 
 
 1. Read `type`, `assert`, `task`, `paths`.
 2. Resolve the concrete target deterministically:
-   - **UX / E2E** → the component's **first non-prod env url** from `<PREFIX>-deploy/references/deploy-config.yaml` (declaration order) — **never `envs.prod.url`**: QA runs before the prod deploy, so prod carries the old code. No non-prod env declared → report the verification **blocked** (`no non-prod env for <component> — add one with run: or deploy: to deploy-config.yaml`).
+   - **UX / E2E** → the url of the component's **first non-prod env that declares a `url:`** in `<PREFIX>-deploy/references/deploy-config.yaml` (declaration order) — **never `envs.prod.url`**: QA runs before the prod deploy, so prod carries the old code. An env with no `url:` — an invoke-env, a job that runs to completion and answers at no address — is **passed over**, not stopped at; resolution continues to the next non-prod env. No non-prod env with a url → report the verification **blocked** (`no non-prod env url for <component> — add one with run: or deploy: to deploy-config.yaml`).
    - **Integration** → endpoint from `test-commands.md`, or subject query from `test-commands.md § Functional Feature Subjects` — whichever the assert names
 3. Execute and check the predicate:
 

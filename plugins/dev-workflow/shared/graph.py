@@ -504,11 +504,17 @@ def parse_deploy_config(text: str) -> list[tuple[str, str, dict]]:
             env = k
             envs.append((comp, env, {}))
         elif indent >= 8 and env and envs:
-            if k in ("url", "run", "deploy", "trigger", "gate"):
+            if k in ("url", "run", "deploy", "invoke", "trigger", "gate"):
                 envs[-1][2][k] = _scalar(v)
     for _, _, props in envs:
         props["kind"] = (
-            "serve" if "run" in props else "ship" if "deploy" in props else "?"
+            "serve"
+            if "run" in props
+            else "ship"
+            if "deploy" in props
+            else "invoke"
+            if "invoke" in props
+            else "?"
         )
     return envs
 

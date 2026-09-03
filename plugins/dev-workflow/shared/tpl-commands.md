@@ -146,6 +146,7 @@ Run only if verifications with type `UX` or `E2E` were captured. For each affect
 - Env has `deploy:` (ship-env) → nothing to do; <PREFIX>-dev already deployed it.
 - Env has `run:` (serve-env) → start or restart it here at the top level (subagents can't hold a server), applying the env's `stack:` block if declared — env-var overrides that wire the frontend to the local backend, the `seed:` command, the `auth:` strategy (see the deploy-config schema). Then poll the url until HTTP 2xx (up to ~60s). If still unreachable, surface the output and ask the user how to proceed before spawning <PREFIX>-qa.
   **Freshness:** a server started before dev's commits is running stale code — restart it so QA tests the new code; a green check against a stale server is non-evidence.
+- Env has `invoke:` (invoke-env) → skip it. A run-to-completion job holds no process and answers at no address, so there is nothing to start and nothing to probe — probing it reports a component down that was never up. Continue to the component's **next** non-prod env, and fall through to the row below only when none is left.
 - No non-prod env → continue; <PREFIX>-test reports those verifications blocked and Step 2 handles it.
 
 Leave any server you started running — note it under Done.
@@ -174,8 +175,8 @@ Task:
 After <PREFIX>-qa returns, parse its `## Handoff` block:
 - `Status: signed-off` → continue to Step 3.
 - `Status: signed-off-with-deferrals` → **first check what is being deferred.** Hop-level checks (a boundary, a surface) defer normally. If a deferral covers the **end state** of the acceptance statement, the journey is unproven, and what happens next depends on *why* — which `deploy-config.yaml` already answers, so read it rather than judging:
-  - **A non-prod env for that component exists** and the end state still wasn't walked → the gap is fixable and is being avoided. Do not offer the deferral. Say which journey cannot be walked and what is missing (usually seed data, auth, or a `stack:` block), and ask whether to build that or stop. **This is the only case that blocks.**
-  - **No non-prod env is declared** (the component ships only to prod) → nothing was avoided; the project cannot prove this before shipping and never could. Carry the end-state check forward as `prod-walk: <verification name>` into Step 4 and continue. It is **not** discharged here and **not** handed to the user.
+  - **A non-prod env that can answer exists** — one declaring a `url:` — and the end state still wasn't walked → the gap is fixable and is being avoided. Do not offer the deferral. Say which journey cannot be walked and what is missing (usually seed data, auth, or a `stack:` block), and ask whether to build that or stop. **This is the only case that blocks.**
+  - **No non-prod env declares a `url:`** — the component ships only to prod, or every non-prod env it has is a job that runs to completion and answers nowhere → nothing was avoided; the project cannot prove this before shipping and never could. Carry the end-state check forward as `prod-walk: <verification name>` into Step 4 and continue. It is **not** discharged here and **not** handed to the user.
   - **The end state is triggered out-of-band** (a schedule, a webhook, an external callback) → it cannot be walked on demand at any point in this run. Defer it, but only with a **named trigger, expected observable, and where to look** (e.g. "next 03:00 run writes a summary row for yesterday; check the jobs collection"). A deferral without those three is not a deferral, it is a shrug — send it back rather than accepting it. Otherwise ask via AskUserQuestion: "QA is clean except these verifications no environment can run: `<UAT-deferred list with reasons>`. Defer to UAT and continue, or stop?" On **Defer** — carry `UAT-deferred: <names> (user-confirmed)` into the Step 3 pm prompt and continue. On timeout — reversible gate: continue, but carry `UAT-deferred: <names> (auto-accepted on timeout — not user-confirmed)`. On **Stop** — halt and report. Never re-spawn qa to relabel its handoff — the deferral status IS the sign-off vocabulary.
 - `Status: blocked` with code-fix `Notes:` → re-spawn <PREFIX>-dev with the fix request, then on dev complete re-spawn <PREFIX>-qa with `mode=retest` (review already passed, run tests only) — passing **the scope qa resolved on the first pass**, taken from its `Tests:` line, never `auto` again. Re-sending `auto` would let the scope flip mid-task, and the delivery log records one `regression=` value for the task. Repeat until signed-off or user aborts.
 
@@ -490,6 +491,7 @@ Run only if verifications with type `UX` or `E2E` were captured. For each affect
 - Env has `deploy:` (ship-env) → nothing to do; <PREFIX>-dev already deployed it.
 - Env has `run:` (serve-env) → start or restart it here at the top level (subagents can't hold a server), applying the env's `stack:` block if declared — env-var overrides that wire the frontend to the local backend, the `seed:` command, the `auth:` strategy (see the deploy-config schema). Then poll the url until HTTP 2xx (up to ~60s). If still unreachable, surface the output and ask the user how to proceed before spawning <PREFIX>-qa.
   **Freshness:** a server started before dev's commits is running stale code — restart it so QA tests the new code; a green check against a stale server is non-evidence.
+- Env has `invoke:` (invoke-env) → skip it. A run-to-completion job holds no process and answers at no address, so there is nothing to start and nothing to probe — probing it reports a component down that was never up. Continue to the component's **next** non-prod env, and fall through to the row below only when none is left.
 - No non-prod env → continue; <PREFIX>-test reports those verifications blocked and Step 3 handles it.
 
 Leave any server you started running — note it under Done.
@@ -519,8 +521,8 @@ Task:
 After <PREFIX>-qa returns, parse its `## Handoff` block:
 - `Status: signed-off` → continue to Step 4.
 - `Status: signed-off-with-deferrals` → **first check what is being deferred.** Hop-level checks (a boundary, a surface) defer normally. If a deferral covers the **end state** of the acceptance statement, the journey is unproven, and what happens next depends on *why* — which `deploy-config.yaml` already answers, so read it rather than judging:
-  - **A non-prod env for that component exists** and the end state still wasn't walked → the gap is fixable and is being avoided. Do not offer the deferral. Say which journey cannot be walked and what is missing (usually seed data, auth, or a `stack:` block), and ask whether to build that or stop. **This is the only case that blocks.**
-  - **No non-prod env is declared** (the component ships only to prod) → nothing was avoided; the project cannot prove this before shipping and never could. Carry the end-state check forward as `prod-walk: <verification name>` into Step 5 and continue. It is **not** discharged here and **not** handed to the user.
+  - **A non-prod env that can answer exists** — one declaring a `url:` — and the end state still wasn't walked → the gap is fixable and is being avoided. Do not offer the deferral. Say which journey cannot be walked and what is missing (usually seed data, auth, or a `stack:` block), and ask whether to build that or stop. **This is the only case that blocks.**
+  - **No non-prod env declares a `url:`** — the component ships only to prod, or every non-prod env it has is a job that runs to completion and answers nowhere → nothing was avoided; the project cannot prove this before shipping and never could. Carry the end-state check forward as `prod-walk: <verification name>` into Step 5 and continue. It is **not** discharged here and **not** handed to the user.
   - **The end state is triggered out-of-band** (a schedule, a webhook, an external callback) → it cannot be walked on demand at any point in this run. Defer it, but only with a **named trigger, expected observable, and where to look** (e.g. "next 03:00 run writes a summary row for yesterday; check the jobs collection"). A deferral without those three is not a deferral, it is a shrug — send it back rather than accepting it.
 
   Otherwise ask via AskUserQuestion: "QA is clean except these verifications no environment can run: `<UAT-deferred list with reasons>`. Defer to UAT and continue, or stop?" On **Defer** — carry `UAT-deferred: <names> (user-confirmed)` into the Step 4 pm prompt and continue. On timeout — reversible gate: continue, but carry `UAT-deferred: <names> (auto-accepted on timeout — not user-confirmed)`. On **Stop** — halt and report. Never re-spawn qa to relabel its handoff — the deferral status IS the sign-off vocabulary.
@@ -593,7 +595,7 @@ Report per `code.md § Done` — the same five blocks (Verdict · Learned · Sta
 description: Autonomous multi-task run — decompose a goal into tasks, route each through the right lane (full pipeline or tweak), and work unattended until the goal is met. One up-front gate, no mid-run questions, single batched close-out. With no goal it runs the standing mission — whatever the project's own stores say needs doing next.
 whats-up-store:
   reads: .claude/pilot/last-run.json — the newest run's marker (ts, mode, verdict, runnable_left) — and .claude/pilot/running, present while a run is in flight
-  healthy: last-run.json absent → n/a (no run has happened yet); else its verdict is not `failed` and either its ts is within 2 h or its runnable_left is 0 — a standing loop that stopped firing while work was left is the failure this store exists to name
+  healthy: last-run.json absent → n/a (no run has happened yet); else its verdict is not `failed` and either its ts is within 2 h, or its runnable_left is 0 **and the roadmap and unproven-work stores this reader just read are themselves empty** — a marker's 0 is a claim about the moment it was written, and work landing since is exactly when a loop that stopped firing still reports healthy, which is the failure this store exists to name
   live: .claude/pilot/running present and under 6 h old
   when-bad: degraded
 ---
@@ -719,8 +721,8 @@ Work the task list in order until: tasks exhausted, all success criteria pass, o
 4. Spawn `<PREFIX>-qa` `mode=initial`, `regression_mode:` the mission scope (`smart` unless `--regression` set it), with the new verification names + changed paths + the `Graph blast:` pack (`/code` Step 2 says how it is produced — one call here, pasted into this prompt and pm's). Branch on its handoff:
    - `signed-off` → continue to 5.
    - `signed-off-with-deferrals` → **auto-accept the deferral, but first route each deferred verification by declared project fact** — the same three branches as `/code` Step 2, read from `deploy-config.yaml`, not judged. Auto-accept means no mid-run *gate*; it does not mean every unrun check is equivalent:
-     - **A non-prod env exists and the end state still wasn't walked** → this is not a deferral, it is an unproven feature. Treat it exactly like `blocked`: re-spawn dev, spend a fix cycle, and if it still can't be walked mark the task **failed**. Never auto-accept this branch — an unattended run is the worst place to let a feature ship unwalked, because nobody is present to notice.
-     - **No non-prod env is declared** (the component ships only to prod) → carry it forward as `prod-walk: <verification name>` into Step 3(a) and walk it **after** the prod deploy. It is not discharged here.
+     - **A non-prod env declaring a `url:` exists and the end state still wasn't walked** → this is not a deferral, it is an unproven feature. Treat it exactly like `blocked`: re-spawn dev, spend a fix cycle, and if it still can't be walked mark the task **failed**. Never auto-accept this branch — an unattended run is the worst place to let a feature ship unwalked, because nobody is present to notice.
+     - **No non-prod env declares a `url:`** (ships only to prod, or its non-prod envs are all run-to-completion jobs) → carry it forward as `prod-walk: <verification name>` into Step 3(a) and walk it **after** the prod deploy. It is not discharged here.
      - **The end state is triggered out-of-band** (schedule, webhook, external callback) → defer with a named trigger, expected observable, and where to look. Without those three it is not a deferral; send it back to qa's `Notes:` rather than accepting a shrug.
      Carry `UAT-deferred: <names> (auto-accepted — pilot run, not user-confirmed)` into the pm prompt and the mission report for the branches that were genuinely deferred, then continue to 5.
    - `blocked` with code-fix `Notes:` → re-spawn `<PREFIX>-dev` with the fix, then `<PREFIX>-qa` `mode=retest`. At most **2 fix cycles per task**; still blocked → mark the task **failed** with qa's notes. If the failure leaves the tree broken (smoke fails), `git revert` the task's commits before moving on. If later tasks depend on this one, stop the loop and go to Step 3.
@@ -918,7 +920,7 @@ Read-only, in parallel. **A store that is absent or errors gets a `not done` Sta
 ```yaml
 whats-up-store:
   reads: <one line — the command or file that answers it>
-  healthy: <what a good answer looks like>
+  healthy: <what a good answer looks like — may also test it against the six universal stores, whose Step 1 numbers as reconciled by Step 2 are in hand before this is evaluated; a cached count is a claim about the moment it was written>
   live: <optional — what the read looks like while the thing is running right now>
   when-bad: degraded | live      # degraded = it should have run and did not; live = it is running now
 ```
@@ -1074,7 +1076,7 @@ Run when the user says done, or asks to push or deploy. (The `close-out-gate` ho
 2. **Log** — one `<PREFIX>-log` entry covering the whole burst (name the commits it spans).
 3. **Docs + references** — use `<PREFIX>-docs` to check staleness; use `<PREFIX>-skill` for reference sync scoped to the affected skills.
 4. **Push + scorecard** — same close-out as `/code` Step 5: push policy via the `<PREFIX>-deploy` skill § Push policy (a push that fires prod CI is an irreversible gate — ask, park on timeout), then the verified scorecard (committed / pushed / logged / docs / ref-sync, each evidence-checked).
-5. **Report** — per `code.md § Done`: the same five blocks, the closing line, the same closed status words. The burst is one Status row per tweak plus the close-out rows; the end-state walk from step 1.5 is the row that carries `proven` or `not proven` for the journey as a whole. This lane runs no `<PREFIX>-dev`, so scope the burst uncovered has no writer but this one — file it per `code.md § Done` block 4 and cite the id, or leave it Open with the command that picks it up.
+5. **Report** — per `code.md § Done`: the same five blocks (Verdict · Learned · Status · Open · Emerged), the closing line, the same closed status words. The burst is one Status row per tweak plus the close-out rows; the end-state walk from step 1.5 is the row that carries `proven` or `not proven` for the journey as a whole. This lane runs no `<PREFIX>-dev`, so scope the burst uncovered has no writer but this one — file it per `code.md § Done` block 4 and cite the id, or leave it Open with the command that picks it up.
 ```
 
 ---
@@ -1108,7 +1110,7 @@ Use `<PREFIX>-log`: one entry naming what was reverted and why. Flip any roadmap
 
 ## Step 4 — Close out
 
-Push + verified scorecard, same as `/code` Step 5. If the original change was deployed, redeploy the reverted state to the same envs via `<PREFIX>-deploy` (prod requires its gate — park on timeout). Then report per `code.md § Done` — the same five blocks, the closing line and the same status words, with a Status row for the re-verification: a reverted state nobody re-checked is `not proven`. What the revert re-opened belongs in Emerged, and Step 3's flip back to `open` is what earns it that block — the row cites the roadmap id.
+Push + verified scorecard, same as `/code` Step 5. If the original change was deployed, redeploy the reverted state to the same envs via `<PREFIX>-deploy` (prod requires its gate — park on timeout). Then report per `code.md § Done` — the same five blocks (Verdict · Learned · Status · Open · Emerged), the closing line and the same status words, with a Status row for the re-verification: a reverted state nobody re-checked is `not proven`. What the revert re-opened belongs in Emerged, and Step 3's flip back to `open` is what earns it that block — the row cites the roadmap id.
 ```
 
 ---

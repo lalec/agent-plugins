@@ -195,8 +195,9 @@ components:
       <env_name>:                     # e.g. local, dev, staging, prod — names are free; only "prod" is special
         run: "<cmd>"                  # serve-env: long-lived command that starts the component here (e.g. a dev server)
         deploy: "<cmd>"               # ship-env: terminating deploy command; when trigger: ci, a description of the triggering push/PR
+        invoke: "<cmd>"               # invoke-env: run-to-completion job (batch, cron, one-shot function) — no process, no url
         trigger: manual | ci          # ship-envs only; default: manual
-        url: "<url>"                  # where the component is reachable in this env
+        url: "<url>"                  # where the component is reachable in this env — serve-envs and ship-envs only; an invoke-env declares none
         health_path: "<path>"         # optional, default "/" — appended to url for HTTP 2xx/3xx verification
         gate: auto | user_confirm     # ship-envs only; default: user_confirm for env named "prod", auto otherwise
         stack:                        # serve-envs only, optional — how to compose a verifiable local stack
@@ -207,17 +208,17 @@ components:
 ~~~
 
 Rules encoded in the schema:
-- **Every env declares exactly one of `run:` / `deploy:`.** `run:` marks a **serve-env** — a long-lived process started in place (typically `local`, a dev server); it is started only at the command top level, never by a subagent, and is never "deployed". `deploy:` marks a **ship-env** — a terminating command (or CI-push description) run by `<PREFIX>-deploy`.
+- **Every env declares exactly one of `run:` / `deploy:` / `invoke:`.** `run:` marks a **serve-env** — a long-lived process started in place (typically `local`, a dev server); it is started only at the command top level, never by a subagent, and is never "deployed". `deploy:` marks a **ship-env** — a terminating command (or CI-push description) run by `<PREFIX>-deploy`. `invoke:` marks an **invoke-env** — a job that runs to completion and exits (a batch run, a scheduled task, a one-shot function). It holds no process and answers at no address, so it declares no `url`, is never started, never health-probed, and never a verification target. Everything that walks a component's envs in declaration order **passes over** an invoke-env rather than stopping at it — an env that cannot answer is not the same as no env left.
 - **Env selection is by simple predicate** (declaration order everywhere):
   - `<PREFIX>-dev` deploy (`target: non-prod`) → first non-prod env **with `deploy:`**; none → silent no-op.
-  - Typed verifications (`<PREFIX>-test` UX/E2E) → first non-prod env's url — **never `prod`**; none → the verification is blocked.
-  - `/code|/fix` pre-QA ensure-stack → first non-prod env **with `run:`** whose url is unreachable → started in background at the top level.
+  - Typed verifications (`<PREFIX>-test` UX/E2E) → the first non-prod env **that declares a `url:`** — **never `prod`**; an invoke-env declares none, so resolution continues past it; no such env → the verification is blocked.
+  - `/code|/fix` pre-QA ensure-stack → first non-prod env **with `run:`** whose url is unreachable → started in background at the top level; an invoke-env in front of it is skipped, never probed.
   - `target: prod` → the env named `prod` only.
 - A component may declare only the envs that currently exist. Omitting `envs.prod` means "cannot deploy to prod yet" — this is how pre-launch components (typically frontends) are represented. Adding `envs.prod` is the GTM flip.
 - `prod` is implicitly `gate: user_confirm` even if the field is omitted. Any other env name defaults to `gate: auto`.
 - `trigger: ci` is the recommended default for prod. `<PREFIX>-deploy` does **not** run the command itself for `trigger: ci` — it gates via `AskUserQuestion`, then describes the push/PR that fires the deploy.
-- `verify:` names the env whose `url` (+ optional `health_path`) `<PREFIX>-deploy` checks after acting. Any env name is valid.
-- A component that can run locally should declare an `envs.local` serve-env even when it ships elsewhere — it is the zero-cost non-prod target typed verifications resolve to when no cloud non-prod env exists.
+- `verify:` names the env whose `url` (+ optional `health_path`) `<PREFIX>-deploy` checks after acting. Any **serve-env or ship-env** name is valid. It may never name an invoke-env — one answers at no address, so there is nothing to check; `<PREFIX>-deploy` reports that as a config error rather than a failed deploy. A component whose only envs are invoke-envs **omits `verify:`**: nothing can prove it by being reachable, and an invented target is worse than an absent one.
+- A component that can be *served* locally should declare an `envs.local` serve-env even when it ships elsewhere — it is the zero-cost non-prod target typed verifications resolve to when no cloud non-prod env exists. A component that only ever runs to completion has no servable form, so this does not apply to it.
 - **Composed local stack (`stack:`).** A serve-env's plain `run` often starts a component wired to prod (frontend pointing at the prod API, no auth session, no data) — headless verification against it silently degrades to nothing. When that's the case, declare `stack:` on the serve-env: `env:` overrides that wire components to each other locally (e.g. the frontend's API-base-URL var pointing at the local backend), an optional `seed:` command for test data, and an `auth:` strategy for headless login. The command's ensure-stack step applies `stack:` when starting the env; `<PREFIX>-test` then has a target it can actually verify. If a component's local verification is impossible even with overrides (e.g. hard dependency on a cloud-only service), leave `stack:` out — typed verifications will report blocked, which is the honest state.
 - `health_path` is optional everywhere. When set, the skill appends it to the base url and checks HTTP 2xx/3xx; when absent, the skill checks the base url itself (effectively `/`).
 - **Prefer one trigger workflow / deploy script per component.** The schema accommodates a monolithic trigger (one `deploy.yml` with multi-job branches keyed off paths or inputs) and per-component triggers (`deploy-<component>.yml`) equally — but only the split shape gets cleanly scoped top-level `paths:` filters and per-component dispatch. When `deploy-config.yaml` shows two or more components sharing the same `deploy:` value, that's a deferred refactor signal: every push has to evaluate cross-component job conditionals, and a tiny path-filter mistake silently bills the whole monolith. Split when adding a new component or when CI runtime starts mattering.

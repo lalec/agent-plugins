@@ -95,7 +95,9 @@ if limit:
         h = (h % 12) + (12 if ap == "pm" else 0)
         t = now.replace(hour=h, minute=mi, second=0, microsecond=0) + timedelta(minutes=2)
         if t < now:
-            t += timedelta(days=1)
+            # A named time already behind us: the window is five hours, so a reset up to
+            # five hours ago has happened (allowed now); older means it is tomorrow's.
+            t = now if now - t <= timedelta(hours=5) else t + timedelta(days=1)
         t = min(t, now + timedelta(hours=5))
     else:
         t = now + timedelta(seconds=interval)

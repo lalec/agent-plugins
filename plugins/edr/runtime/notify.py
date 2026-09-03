@@ -27,6 +27,8 @@ from collectors._base import read_json, write_json  # noqa: E402
 
 API = "https://discord.com/api/v10"
 MAX_LEN = 1900  # Discord caps at 2000
+RETRIES = 3          # transient transport errors — the job starts seconds after the Mac wakes
+RETRY_DELAY = 5
 _bot_id: str | None = None
 
 
@@ -86,19 +88,22 @@ def _request(method: str, path: str, body: Any = None) -> Any:
         headers={"Authorization": f"Bot {tok}", "Content-Type": "application/json",
                  "User-Agent": "edr-notify (https://github.com/lalec/agent-plugins, 0.2)"},
     )
-    for attempt in (1, 2):
+    for attempt in range(1, RETRIES + 1):
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 raw = resp.read()
                 return json.loads(raw) if raw else {}
         except urllib.error.HTTPError as e:
-            if e.code == 429 and attempt == 1:
+            if e.code == 429 and attempt < RETRIES:
                 time.sleep(min(float(e.headers.get("Retry-After", "1") or 1), 10))
                 continue
             log(f"{method} {path} -> HTTP {e.code}")
             return None
-        except (urllib.error.URLError, OSError, ValueError) as e:
-            log(f"{method} {path} failed: {e}")
+        except (urllib.error.URLError, OSError, ValueError) as e:  # DNS, TLS, reset: retry
+            if attempt < RETRIES:
+                time.sleep(RETRY_DELAY)
+                continue
+            log(f"{method} {path} failed after {RETRIES} attempts: {e}")
             return None
     return None
 

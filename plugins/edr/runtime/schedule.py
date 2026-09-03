@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -31,6 +32,7 @@ import pending  # noqa: E402
 from collectors._base import read_json, write_json  # noqa: E402
 
 CLAUDE_TIMEOUT = 3 * 3600
+NETWORK_SETTLE_SEC = 90  # a calendar job fires the second the Mac wakes; DNS and TLS need a moment
 KEEP_RUNS = 14
 LIMIT_RE = re.compile(r"hit your (session|weekly|opus|sonnet)?\s*limit|usage limit reached", re.I)
 FAIL_SUBTYPES = {"error_max_budget_usd", "error_max_turns", "error_during_execution"}
@@ -49,6 +51,7 @@ def run() -> int:
     start = time.time()
     conf = cfg()
     notify.log(f"run start (model={conf['model']}, budget={conf['budget_usd']})")
+    _wait_for_network()
     try:
         pending.drain()  # replies that arrived since last run; root actions stay queued
     except Exception as e:  # never let the drain stop the scan
@@ -78,6 +81,18 @@ def run() -> int:
                  "seen": False})
     notify.log(f"run end: {ended} {reason} findings={findings} posted={posted}")
     return 0 if ended == "ok" else 1
+
+
+def _wait_for_network(timeout: int = NETWORK_SETTLE_SEC) -> None:
+    """Block until a public name resolves, or give up after `timeout` and log it."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            socket.getaddrinfo("discord.com", 443)
+            return
+        except OSError:
+            time.sleep(5)
+    notify.log(f"network did not settle within {timeout}s; continuing")
 
 
 def _intel_sync() -> None:

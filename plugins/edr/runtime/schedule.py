@@ -79,7 +79,10 @@ def run() -> int:
                  "reason": reason, "cost_usd": data.get("total_cost_usd"),
                  "turns": data.get("num_turns"), "findings": findings, "posted": posted,
                  "seen": False})
-    notify.log(f"run end: {ended} {reason} findings={findings} posted={posted}")
+    summary = f"run end: {ended} {reason} findings={findings} posted={posted}".replace("  ", " ")
+    notify.log(summary)
+    if sys.stdout.isatty():
+        print(summary)  # a hand-run should say what happened; launchd already gets the log
     return 0 if ended == "ok" else 1
 
 

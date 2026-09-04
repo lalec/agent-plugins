@@ -364,3 +364,15 @@ rules:
     floor: medium
     mitre: ["T1547.015"]
     rationale: "Login items changed"
+
+  # === auto-accept: churn that is never a finding ===
+  - id: auto_accept_apple_platform_binary
+    collector: processes
+    auto_accept: true
+    match:
+      kind: "process"
+      change: ["added", "modified"]
+      codesign_status: "signed-apple"
+      exe_glob: ["/System/*", "/usr/*", "/bin/*", "/sbin/*", "/Library/Apple/*"]
+    mitre: []
+    rationale: "Apple platform binary (leaf authority Software Signing) in an Apple-owned location — daemons come and go"

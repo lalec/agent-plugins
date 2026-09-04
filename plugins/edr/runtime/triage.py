@@ -7,6 +7,10 @@ Three responsibilities only:
   3. Intel match: any attr that names an ip, domain or sha256 is looked up in
      the IOC database; a hit floors the anomaly at critical.
 
+A rule with `auto_accept: true` folds its matches straight into the baseline
+(Apple platform binaries coming and going): they are marked suppressed with
+`auto_accepted: <rule id>` and never reach the analyst.
+
 A rule with `always: true` is also evaluated against evidence that produced no
 anomaly (a baselined shell running a new `curl | sh` command line, for
 instance); a match becomes an anomaly with change='flagged'.
@@ -72,7 +76,7 @@ def apply(anomalies: list[Anomaly], rules: list[dict[str, Any]], fp_sigs: set[st
             anomaly.suppressed = True
             continue
         for rule in rules:
-            if not _rule_matches(rule, anomaly):
+            if rule.get("auto_accept") or not _rule_matches(rule, anomaly):
                 continue
             floor = rule.get("floor", "info")
             if floor not in SEVERITY_ORDER:
@@ -80,6 +84,21 @@ def apply(anomalies: list[Anomaly], rules: list[dict[str, Any]], fp_sigs: set[st
             if anomaly.floor_severity is None or SEVERITY_ORDER[floor] > SEVERITY_ORDER[anomaly.floor_severity]:
                 anomaly.floor_severity = floor
     return anomalies
+
+
+def auto_accept(anomalies: list[Anomaly], rules: list[dict[str, Any]]) -> list[Anomaly]:
+    """Mark anomalies matched by an `auto_accept` rule; the caller folds them into the baseline."""
+    accepting = [r for r in rules if r.get("auto_accept")]
+    taken: list[Anomaly] = []
+    for anomaly in anomalies:
+        if anomaly.suppressed or anomaly.change not in ("added", "modified"):
+            continue
+        rule = next((r for r in accepting if _rule_matches(r, anomaly)), None)
+        if rule:
+            anomaly.suppressed = True
+            anomaly.evidence.attrs["auto_accepted"] = rule.get("id")
+            taken.append(anomaly)
+    return taken
 
 
 def apply_always(anomalies: list[Anomaly], snapshot: dict[str, list[Evidence]],

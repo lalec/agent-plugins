@@ -178,6 +178,10 @@ def main() -> int:
     rules = triage.load_rules()
     fp_sigs = triage.load_fp_registry(state_dir)
     triage.apply(anomalies, rules, fp_sigs)
+    auto_accepted = triage.auto_accept(anomalies, rules)
+    if auto_accepted and not bootstrap and not args.no_snapshot:
+        baseline_mod.fold(baseline, auto_accepted, versions, volatile_map)
+        baseline_mod.save(state_dir, baseline)
     triage.apply_always(anomalies, snapshot, rules)
     intel_hits = triage.apply_intel(anomalies, snapshot)
 
@@ -203,6 +207,7 @@ def main() -> int:
         },
         "anomalies_total": len(anomalies),
         "intel_hits": intel_hits,
+        "anomalies_auto_accepted": len(auto_accepted),
         "anomalies_suppressed": sum(1 for a in anomalies if a.suppressed),
         "anomalies_floored": sum(1 for a in anomalies if a.floor_severity),
     }
@@ -226,6 +231,7 @@ def main() -> int:
         "collectors_run": [cls.name for cls in selected],
         "anomalies_total": len(anomalies),
         "intel_hits": intel_hits,
+        "anomalies_auto_accepted": len(auto_accepted),
         "anomalies_active": sum(1 for a in anomalies if not a.suppressed),
         "anomalies_floored": [
             {"sig": a.evidence.signature_hash(), "collector": a.evidence.collector,

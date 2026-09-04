@@ -144,3 +144,18 @@ def add_to_baseline(state_dir: Path, collector: str, version: int, evidence_key:
         "attrs": evidence.attrs,
     }
     save(state_dir, baseline)
+
+
+def fold(baseline: dict[str, dict[str, Any]], anomalies: list[Anomaly],
+         collector_versions: dict[str, int],
+         volatile_map: dict[str, list[str]] | None = None) -> int:
+    """Store these anomalies' current evidence in the baseline (auto-accept). Returns the count."""
+    volatile_map = volatile_map or {}
+    for a in anomalies:
+        ev = a.evidence
+        baseline[_key(ev.collector, collector_versions.get(ev.collector, 1), ev.key)] = {
+            "kind": ev.kind,
+            "attrs": _strip_volatile({k: v for k, v in ev.attrs.items() if k != "auto_accepted"},
+                                     volatile_map.get(ev.collector, [])),
+        }
+    return len(anomalies)

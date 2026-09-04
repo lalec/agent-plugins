@@ -57,7 +57,7 @@ edr doctor
 
 Command-line pattern rules and the IOC match run over the **whole snapshot** every time, not only over what changed: a baselined shell that picks up `curl | sh`, or a known-bad remote inside a normal (command, port) pair, surfaces as `change: flagged`. An IOC hit floors at **critical**.
 
-*State* collectors diff against a baseline that grows only through `edr accept`. *Event* collectors report each event once and never baseline it. On the first run of a new or version-bumped collector everything appears as `added`: review, then `edr accept --all --collector <name>`.
+*State* collectors diff against a baseline that grows only through `edr accept` — plus one deterministic exception: Apple platform binaries (leaf authority "Software Signing") under `/System`, `/usr`, `/bin`, `/sbin`, `/Library/Apple` are auto-accepted, because daemons come and go and are never a finding. *Event* collectors report each event once and never baseline it. On the first run of a new or version-bumped collector everything appears as `added`: review, then `edr accept --all --collector <name>`.
 
 ## Unattended nightly scan
 

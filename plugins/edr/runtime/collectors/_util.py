@@ -23,49 +23,69 @@ def run_cmd(args: list[str], timeout: int = 15, input_data: str | None = None) -
         return -1, "", f"unexpected error: {e}"
 
 
+VERDICT_VERSION = 2  # bump when the status semantics change; old cache entries are then ignored
+
+
 def codesign_verdict(path: str, cache: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
     """Return {status, signing_id, team_id, authority} for a binary path.
 
-    status: 'signed-apple' | 'signed-developer' | 'adhoc' | 'unsigned' | 'broken' | 'missing'
+    status: 'signed-apple' (Apple platform binary — leaf authority "Software Signing")
+          | 'signed-store' (App Store — leaf "Apple Mac OS Application Signing")
+          | 'signed-developer' (Developer ID or other chain)
+          | 'adhoc' | 'unsigned' | 'broken' | 'missing'
 
-    Optional cache keyed by (path, mtime, size) speeds up repeated lookups across runs.
+    Every valid chain ends at Apple Root CA, so only the *leaf* authority may
+    decide "Apple-signed"; Firefox is not an Apple binary.
+
+    Optional cache keyed by (version, path, mtime, size) speeds up repeated lookups.
     """
     p = Path(path)
     if not p.exists() or not p.is_file():
         return {"status": "missing"}
     try:
         st = p.stat()
-        cache_key = f"{path}|{int(st.st_mtime)}|{st.st_size}"
+        cache_key = f"v{VERDICT_VERSION}|{path}|{int(st.st_mtime)}|{st.st_size}"
     except OSError:
-        cache_key = path
+        cache_key = f"v{VERDICT_VERSION}|{path}"
 
     if cache is not None and cache_key in cache:
         return cache[cache_key]
 
     rc, out, err = run_cmd(["codesign", "-dv", "--verbose=4", path], timeout=5)
-    combined = (out + err).lower()
+    verdict = parse_codesign(rc, out + err)
+
+    if cache is not None:
+        cache[cache_key] = verdict
+    return verdict
+
+
+def parse_codesign(rc: int, text: str) -> dict[str, Any]:
+    """Verdict from `codesign -dv --verbose=4` output (stdout+stderr)."""
+    combined = text.lower()
     verdict: dict[str, Any] = {"status": "unsigned"}
     if rc == 0 or "signature=" in combined or "authority=" in combined:
         verdict["status"] = "signed-developer"
-        for line in (out + err).splitlines():
+        for line in text.splitlines():
             line_l = line.lower()
             if line_l.startswith("authority="):
                 verdict.setdefault("authority", []).append(line.split("=", 1)[1])
-                if "apple" in line_l:
-                    verdict["status"] = "signed-apple"
             elif line_l.startswith("teamidentifier="):
-                verdict["team_id"] = line.split("=", 1)[1]
+                team = line.split("=", 1)[1].strip()
+                verdict["team_id"] = None if team == "not set" else team
             elif line_l.startswith("identifier="):
                 verdict["signing_id"] = line.split("=", 1)[1]
             elif "adhoc" in line_l or "ad-hoc" in line_l:
                 verdict["status"] = "adhoc"
+        leaf = (verdict.get("authority") or [""])[0].strip().lower()
+        if verdict["status"] != "adhoc":
+            if leaf == "software signing":
+                verdict["status"] = "signed-apple"
+            elif leaf.startswith("apple mac os application signing"):
+                verdict["status"] = "signed-store"
     elif "code object is not signed" in combined or "not signed at all" in combined:
         verdict["status"] = "unsigned"
     elif "invalid signature" in combined or "broken" in combined:
         verdict["status"] = "broken"
-
-    if cache is not None:
-        cache[cache_key] = verdict
     return verdict
 
 

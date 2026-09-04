@@ -48,7 +48,7 @@ cat ~/.claude/edr/state/snapshots/{ts}/diff.json
 ```
 Each entry: `{change, sig, evidence, prior, floor_severity, suppressed}`. `change` is `added` / `modified` / `removed`, or `flagged` — a command-line rule or an intel hit (`evidence.attrs.intel`) on evidence that was already baselined, such as a long-running shell that picked up a `curl | sh` command line. Drop `suppressed: true`. You may RAISE `floor_severity`, never lower it. `sig` is what `edr accept` and the alert batch key on.
 
-Context kinds, never findings: `*_summary` (aggregates), `unavailable` (a source this macOS version or permission set cannot provide), `error`. **First run of a new or version-bumped collector**: every entry is `added`. Review, then settle with `edr accept --all --collector <name>`.
+Context kinds, never findings: `*_summary` (aggregates), `unavailable` (a source this macOS version or permission set cannot provide), `error`. `suppressed: true` with `auto_accepted: <rule>` = Apple platform binary churn already folded into the baseline; ignore it. **First run of a new or version-bumped collector**: every entry is `added`. Review, then settle with `edr accept --all --collector <name>`.
 
 ### 5. Reason over each anomaly (NIST §3.2.4 Identification)
 
@@ -95,7 +95,7 @@ Collectors give you **starting points**, not conclusions. For anything not obvio
 
 #### Severity guidance
 
-- **info**: first-seen, Apple/known-developer signed, expected location. No alert.
+- **info**: first-seen, Apple platform (`signed-apple`), App Store (`signed-store`) or known Developer ID (`signed-developer` + team id) binary in an expected location. No alert.
 - **low**: no high-risk pattern (e.g. new ad-hoc-signed user binary the user likely just installed).
 - **medium**: enough to alert. Unsigned / non-vendor binary; new loopback listener by a user-installed app.
 - **high**: floor-promoted by triage, OR analyst-judged from enrichment (`eval`/`curl|sh` in a shell rc, MCP from a non-vendor source).

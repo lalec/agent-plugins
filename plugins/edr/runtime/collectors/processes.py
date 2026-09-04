@@ -33,7 +33,7 @@ class ProcessesCollector(Collector):
     name = "processes"
     tier = "T"
     maturity = "stable"
-    version = 3
+    version = 4
     mitre = ["T1059", "T1106", "T1204.002"]
     report_removed = False
     # Per-tick churn — kept in snapshot for analyst context, not used in diff identity.

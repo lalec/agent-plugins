@@ -13,7 +13,7 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 **What gets installed:**
 - 3 orchestrator agents: `<PREFIX>-dev`, `<PREFIX>-qa`, `<PREFIX>-pm`
 - 8 lifecycle skills: `<PREFIX>-log`, `<PREFIX>-review`, `<PREFIX>-debug`, `<PREFIX>-deploy`, `<PREFIX>-test`, `<PREFIX>-skill`, `<PREFIX>-docs`, `<PREFIX>-graph`
-- 10 slash commands: `/code` + `/fix` + `/pilot` + `/tweak` + `/revert` + `/tidy` + `/design` (conditional on design skill) + `/whats-up` + `/roadmap` + `/wrap`
+- 11 slash commands: `/code` + `/fix` + `/pilot` + `/tweak` + `/revert` + `/tidy` + `/design` (conditional on design skill) + `/whats-up` + `/roadmap` + `/blueprint` + `/wrap`
 - `docs/roadmap.md` stub — source of truth for open items; tracked by `<PREFIX>-dev` (new entries) and `<PREFIX>-pm` (status updates)
 - Domain skills: one per substantive source dir, derived from discovery (not hardcoded)
 - `.claude/hooks/governed-paths.conf` — single source of truth for path→skill ownership (incl. per-skill self-ownership entries), `DEPLOY_PATHS`, and `REF_WATCH`; sourced by skill-guard, path-coverage-check, ref-sync-check, and close-out-gate
@@ -153,7 +153,7 @@ What will be created:
 - 8 lifecycle skills: <PREFIX>-log, <PREFIX>-review, <PREFIX>-debug, <PREFIX>-deploy, <PREFIX>-test, <PREFIX>-skill, <PREFIX>-docs, <PREFIX>-graph
 - 1 design skill: <PREFIX>-design  ← omit if no frontend category
 - <N> domain skills: <comma-separated list>
-- <N> slash commands: /code, /fix, /pilot, /tweak, /revert, /tidy, /whats-up, /roadmap, /wrap[, /design if frontend]
+- <N> slash commands: /code, /fix, /pilot, /tweak, /revert, /tidy, /whats-up, /roadmap, /blueprint, /wrap[, /design if frontend]
 - 9 hook scripts + governed-paths.conf + settings.json
 - CLAUDE.md with workflow sections
 
@@ -209,6 +209,7 @@ Create these files (skip if already present, offer to overwrite if stale):
 .claude/commands/tidy.md          ← from tpl-commands.md § /tidy, substitute <PROJECT> and <PREFIX>
 .claude/commands/whats-up.md      ← from tpl-commands.md § /whats-up, substitute <PROJECT> and <PREFIX>
 .claude/commands/roadmap.md       ← from tpl-commands.md § /roadmap, substitute <PROJECT> and <PREFIX>
+.claude/commands/blueprint.md     ← from tpl-commands.md § /blueprint, substitute <PROJECT> and <PREFIX>; keep its `model:` line — the planning lane runs on the strongest model
 .claude/commands/wrap.md          ← from tpl-commands.md § /wrap, substitute <PROJECT> and <PREFIX>
 .claude/commands/design.md        ← from tpl-commands.md § /design (only if a design domain skill was discovered in Phase 1)
 ```
@@ -272,6 +273,10 @@ existing items to match a different one.
 is what links a shipped commit back to the scope it closed. Assign one when the item is created and
 **never change it**, even if the title is later rewritten; a title-derived id silently orphans every
 prior reference the moment the title changes.
+
+A plan written by `/blueprint` is one umbrella item plus children that carry `**Parent:**` (the
+umbrella's id) and `**Depends on:**` (sibling ids, or `nothing`). Readers nest children under their
+umbrella; the umbrella closes when its last child does.
 
 ---
 
@@ -349,7 +354,7 @@ Also create `docs/workflow.md` if not present — generate with real content usi
   (top level) close out — push per <PREFIX>-deploy § Push policy + verified scorecard
 ```
 
-Iterative work (pixel nudges, copy rounds, small hotfixes) uses `/tweak` — top-level, inline-verified, close-out batched at exit and enforced by the `close-out-gate` hook at push time. Rollbacks use `/revert` (git revert + scoped re-verify + logged reversal). Leftover WIP — a dirty tree, orphaned stashes, stale branches — uses `/tidy`: it sweeps, probes history to establish what each item actually is, and routes every item to commit / deliver / discard / ignore. Multi-task autonomous runs (a roadmap batch, a goal to iterate toward) use `/pilot` — it decomposes the goal, gates once up-front, routes each task through the pipeline or the tweak lane, and closes out once at the end. `/pilot --gates` is the same lane aimed at a store instead of a goal: it re-measures every parked verdict, closes on its own the ones whose proposal the measurement killed or whose trigger has not fired, and brings the rest back as one batched decision with a recommendation per row — nothing that writes is ever concluded without an answer. `/roadmap` is the way in from tracked work: it ranks the open items (one rank rule, defined in `roadmap.md § Rank` and cited by `/pilot`) and either hands the top set to `/pilot --items <id>,…` as a mission or starts a single item through `/code`/`/fix`. It selects and never implements, so run constraints — task cap, retry limit, budget — live only in `/pilot`. `/whats-up` is the read-only composed reader for a fresh session: it reads every store that outlives a session, reconciles them, and reports what needs a person — and `/pilot` with no arguments is the **standing mission** that takes exactly that report's rows as its task list, asks nothing up front, and at close-out asks only the high or critical rows. That is what runs unattended: `/loop 30m /pilot --max-tasks 1` in a session left open with Remote Control (a fixed interval, never self-paced — a self-paced loop dies when its own wake is refused at the usage limit, a fixed one fires again after the reset and resumes its own interrupted run; gates reach the phone and default on the `askUserQuestionTimeout` you set in `/config`), or `.claude/pilot/shift.sh install` for headless launchd shifts that need no open session at all. An unattended run dispatches every subagent on Sonnet and keeps the orchestrator on the session model; an attended run uses the agents' own models. A check-in is `/whats-up` → `/pilot --gates`, which asks everything the unattended runs parked, in one sitting.
+Iterative work (pixel nudges, copy rounds, small hotfixes) uses `/tweak` — top-level, inline-verified, close-out batched at exit and enforced by the `close-out-gate` hook at push time. Rollbacks use `/revert` (git revert + scoped re-verify + logged reversal). Leftover WIP — a dirty tree, orphaned stashes, stale branches — uses `/tidy`: it sweeps, probes history to establish what each item actually is, and routes every item to commit / deliver / discard / ignore. Multi-task autonomous runs (a roadmap batch, a goal to iterate toward) use `/pilot` — it decomposes the goal, gates once up-front, routes each task through the pipeline or the tweak lane, and closes out once at the end. `/pilot --gates` is the same lane aimed at a store instead of a goal: it re-measures every parked verdict, closes on its own the ones whose proposal the measurement killed or whose trigger has not fired, and brings the rest back as one batched decision with a recommendation per row — nothing that writes is ever concluded without an answer. `/roadmap` is the way in from tracked work: it ranks the open items (one rank rule, defined in `roadmap.md § Rank` and cited by `/pilot`) and either hands the top set to `/pilot --items <id>,…` as a mission or starts a single item through `/code`/`/fix`. It selects and never implements, so run constraints — task cap, retry limit, budget — live only in `/pilot`. `/blueprint` is the way in for work nobody has planned yet: it reads the record, verifies every landing site in the code, makes every decision an executor would otherwise guess, and writes one umbrella plus `/pilot`-shaped child items to `docs/roadmap.md` — planning on the strongest model (its frontmatter `model:`), execution unchanged; `/pilot --items <umbrella-id>` expands to the children. `/whats-up` is the read-only composed reader for a fresh session: it reads every store that outlives a session, reconciles them, and reports what needs a person — and `/pilot` with no arguments is the **standing mission** that takes exactly that report's rows as its task list, asks nothing up front, and at close-out asks only the high or critical rows. That is what runs unattended: `/loop 30m /pilot --max-tasks 1` in a session left open with Remote Control (a fixed interval, never self-paced — a self-paced loop dies when its own wake is refused at the usage limit, a fixed one fires again after the reset and resumes its own interrupted run; gates reach the phone and default on the `askUserQuestionTimeout` you set in `/config`), or `.claude/pilot/shift.sh install` for headless launchd shifts that need no open session at all. An unattended run dispatches every subagent on Sonnet and keeps the orchestrator on the session model; an attended run uses the agents' own models. A check-in is `/whats-up` → `/pilot --gates`, which asks everything the unattended runs parked, in one sitting.
 
 ## Agents
 
@@ -532,7 +537,7 @@ Read `../../shared/tpl-domain-skill.md` § "Project file sections" for the secti
 
 Upsert the following sections in `CLAUDE.md` (add if missing, replace if present):
 
-- `## Plan Mode` — two bullets: (1) `docs/workflow.md` as the source of truth for the delivery pipeline; (2) "After finalizing a plan, invoke `/code` to hand off to the agent pipeline"
+- `## Plan Mode` — two bullets: (1) `docs/workflow.md` as the source of truth for the delivery pipeline; (2) the one-task → `/code`, several-tasks → `/blueprint` routing from the template
 - `## Agents` — the pipeline line plus the routing paragraph (pipeline-shaped work → `/code`/`/fix`, iterative rounds → `/tweak`) from the template
 - `## Skills` — "Path→skill ownership is defined in `.claude/hooks/governed-paths.conf` — edit that file to add or change path ownership. Both `skill-guard.sh` and `path-coverage-check.sh` source it automatically."
 - `## Roadmap` — single line: `docs/roadmap.md` is the source of truth for open items.
@@ -549,7 +554,8 @@ Walk the checklist before declaring done:
 - [ ] `.claude/skills/` has all 8 lifecycle skills (`<PREFIX>-log`, `-review`, `-debug`, `-deploy`, `-test`, `-skill`, `-docs`, `-graph`) + all confirmed domain skills, all named `<PREFIX>-*`
 - [ ] `.claude/skills/<PREFIX>-skill/references/skill-manifest.md` exists and lists all installed lifecycle and domain skills
 - [ ] `.claude/skills/<PREFIX>-test/references/` has `test-commands.md` (with `## Smoke`, `## Regression`, `## Functional Feature Subjects` headings), `sync-checklist.md`, `custom-tests.md`, and `custom-tests.yaml` (initialized to `tests: []`). `<PREFIX>-test/SKILL.md` has a `## Test Plan` with the three tiers and no `## E2E Browser Tests` section. `custom-tests.md`'s schema uses `type: UX | Integration | E2E` (not `surface`)
-- [ ] `.claude/commands/code.md`, `fix.md`, `pilot.md`, `tweak.md`, `revert.md`, `tidy.md`, `whats-up.md`, `roadmap.md`, and `wrap.md` exist (markdown format, `$ARGUMENTS`)
+- [ ] `.claude/commands/code.md`, `fix.md`, `pilot.md`, `tweak.md`, `revert.md`, `tidy.md`, `whats-up.md`, `roadmap.md`, `blueprint.md`, and `wrap.md` exist (markdown format, `$ARGUMENTS`)
+- [ ] `blueprint.md` carries a `model:` line in its frontmatter, states that `docs/roadmap.md` is its only write, and its Step 6 is one AskUserQuestion (Confirm + Decide); `roadmap.md § Rank` carries `Plans stay together`; `pilot.md` carries `Plan decisions:` and the `**Size:** medium` override; `<PREFIX>-pm.md` step 2.5 carries `closed by its last child`
 - [ ] `whats-up.md` reads six universal stores plus any declared via a `whats-up-store:` frontmatter key (each with a stated fallback), calls `open-deferrals --with-fail` and `open-gates`, reconciles a `parked` gate against later evidence before reporting it, states that it never writes, and reports per `code.md § Done` with the ranked `Open` table as its plan — **no** separate numbered action list. Its Step 3 ladder must say it **ranks the report rather than filtering it**, and its § Done must carry the in-progress exception: one `Open` row per `in-progress` item (stalled at 21+ days since `last_addressed`), the `Emerged` roadmap count broken down by status, a gate row naming what it `releases`, and the closing line staged decisions → repairs → items
 - [ ] `roadmap.md` ranks via `graph.py roadmap-open` (with the read-the-file fallback), applies `$ARGUMENTS` as a filter, and routes to `/pilot --items` or a single `/code`/`/fix`; the rank rule appears **only** in `roadmap.md § Rank` — `pilot.md` cites it rather than restating it
 - [ ] `.claude/skills/<PREFIX>-debug/` has SKILL.md + `references/systematic-debugging.md`, `references/root-cause-tracing.md`, `references/defense-in-depth.md`, `references/verification.md` + `scripts/find-polluter.sh` (executable) + `scripts/find-polluter.test.md`. SKILL.md contains a `## Read Map` and **no** `## Reference Sync` section (static-content skill).

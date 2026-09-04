@@ -16,7 +16,8 @@ must fall back to its pre-graph behaviour if this script is absent or exits non-
                                      affine or named roadmap items - gates holding them; the one
                                      pack a task's qa and pm prompts carry inline
     graph.py history <path>          what has been delivered, verified and reverted here
-    graph.py roadmap-open [--for <path>...]   open items, path-affine ones marked ~match
+    graph.py roadmap-open [--for <path>...]   open items, path-affine ones marked ~match,
+                                              a plan's children nested under their umbrella
     graph.py open-deferrals [--with-fail] [<path>...]   deferred or blocked, not passing since
     graph.py open-gates              every parking no later decision answered, with its
                                      condition and age in days
@@ -226,6 +227,20 @@ def slug(text: str, limit: int = 60) -> str:
     return s.strip("-") or "untitled"
 
 
+def id_refs(value: str) -> list[str]:
+    """Roadmap ids named in a `**Parent:**` / `**Depends on:**` value.
+
+    Backticked tokens win when any are present — a value like
+    "`a-b` (build FIRST — the founder is on it)" carries prose that must not be
+    scanned. With no backticks, the kebab tokens of the value are the ids; `nothing`
+    and plain words are not kebab and fall out.
+    """
+    ticked = [c.strip() for c in re.findall(r"`([^`]+)`", value)]
+    if ticked:  # explicit — a one-word id (`consent`) is legal here
+        return [c for c in ticked if re.match(r"^[a-z0-9][a-z0-9_-]*$", c)]
+    return [c for c in re.split(r"[,\s·]+", value) if TOKEN_RE.match(c)]
+
+
 def parse_fields(lines: list[str]) -> dict[str, str]:
     """`**Name:** value` blocks. A value continues onto following lines until a blank
     line, another field, or a new heading — real entries wrap long values that way."""
@@ -384,7 +399,32 @@ def parse_roadmap(text: str) -> list[dict]:
         # and an unrecognised status must stay VISIBLE rather than silently vanish.
         it["open"] = raw.rstrip(".") not in TERMINAL_STATUS
         it["priority"] = it["fields"].get("Priority", "").strip().lower()
+        # A `/blueprint` writes one umbrella and N children; the children name it as
+        # `**Parent:**` and each other as `**Depends on:**`. Read here so `roadmap-open`
+        # can nest a plan and `build` can warn on a reference to an id that is not in
+        # the file — the planner's validation step and the reader's grouping share one
+        # parse rather than each scanning the field.
+        refs = id_refs(it["fields"].get("Parent", ""))
+        it["parent"] = refs[0] if refs else ""
+        it["depends_on"] = id_refs(it["fields"].get("Depends on", ""))
     return items
+
+
+def dangling_roadmap_refs(items: list[dict]) -> list[tuple[str, str, str]]:
+    """(item id, field, ref) for every Parent / Depends-on naming an id not in the file.
+
+    A child whose parent is missing is invisible to the plan grouping, and a dependency
+    on an id that does not exist can never be ordered — both are the planner's typo,
+    and both are silent unless `build` says so."""
+    ids = {it["id"] for it in items}
+    out = []
+    for it in items:
+        if it["parent"] and it["parent"] not in ids:
+            out.append((it["id"], "Parent", it["parent"]))
+        for d in it["depends_on"]:
+            if d not in ids:
+                out.append((it["id"], "Depends on", d))
+    return out
 
 
 def _scalar(v: str) -> str:
@@ -1091,7 +1131,14 @@ def roadmap_open(edges: list[dict], src: "Sources", changed: list[str]) -> dict:
         if ts > latest_addr.get(rid, ""):
             latest_addr[rid] = ts
     items, counts = [], {}
-    for it in parse_roadmap(read(src.roadmap)):
+    everything = parse_roadmap(read(src.roadmap))
+    # Umbrella → its children, open or not: a plan is closed by its last child, and
+    # the reader needs both numbers to say "3 of 6 left".
+    children: dict[str, list[dict]] = {}
+    for it in everything:
+        if it["parent"]:
+            children.setdefault(it["parent"], []).append(it)
+    for it in everything:
         if not it["open"]:
             continue
         # A bare total is not trustworthy: an item with no `**Status:**` line defaults to
@@ -1110,14 +1157,78 @@ def roadmap_open(edges: list[dict], src: "Sources", changed: list[str]) -> dict:
                 "prior_tasks": prior,
                 "last_addressed": latest_addr.get(it["id"], ""),
                 "affine": bool(changed and prior),
+                "parent": it["parent"],
+                "depends_on": it["depends_on"],
             }
         )
+    # Children nest under their umbrella in dependency order: an item's slot in the
+    # ranked list is its parent's, never its own — `roadmap.md § Rank` states the rule,
+    # this is the shape that lets every reader honour it without re-deriving it.
+    by_id = {i["id"]: i for i in items}
+    plans = {
+        pid: {
+            "open": sum(1 for c in kids if c["open"]),
+            "total": len(kids),
+        }
+        for pid, kids in children.items()
+        if pid in by_id
+    }
+    items = nest_children(items, by_id)
     lead = ["open", "in-progress", "no status line"]
     ranked = [(k, counts[k]) for k in lead if k in counts] + sorted(
         ((k, v) for k, v in counts.items() if k not in lead),
         key=lambda kv: (-kv[1], kv[0]),
     )
-    return {"open": len(items), "status_counts": dict(ranked), "items": items}
+    return {
+        "open": len(items),
+        "status_counts": dict(ranked),
+        "plans": plans,
+        "items": items,
+    }
+
+
+def nest_children(items: list[dict], by_id: dict[str, dict]) -> list[dict]:
+    """Reorder so each open child follows its umbrella, in dependency order, with
+    `depth` 1. A child whose parent is not open stays where it is at depth 0 — the
+    plan closed or was never written, and the child must not vanish with it."""
+    out: list[dict] = []
+    placed: set[str] = set()
+    for it in items:
+        if it["id"] in placed:
+            continue
+        if it["parent"] in by_id and it["parent"] not in placed:
+            continue  # emitted under its umbrella below
+        it["depth"] = 0
+        out.append(it)
+        placed.add(it["id"])
+        kids = [c for c in items if c["parent"] == it["id"]]
+        for c in dependency_order(kids):
+            c["depth"] = 1
+            out.append(c)
+            placed.add(c["id"])
+    return out
+
+
+def dependency_order(items: list[dict]) -> list[dict]:
+    """Stable topological order on `depends_on` within the set; a cycle or a dependency
+    outside the set does not block — the item is emitted in file order after what it
+    can wait for, and `build` has already warned about the reference."""
+    ids = {i["id"] for i in items}
+    done: list[dict] = []
+    seen: set[str] = set()
+    remaining = list(items)
+    while remaining:
+        progressed = False
+        for it in list(remaining):
+            if all(d in seen or d not in ids for d in it["depends_on"]):
+                done.append(it)
+                seen.add(it["id"])
+                remaining.remove(it)
+                progressed = True
+        if not progressed:  # cycle — emit the rest in file order
+            done.extend(remaining)
+            break
+    return done
 
 
 def emit(payload, as_json: bool, lines: list[str]) -> None:
@@ -1157,6 +1268,13 @@ def main(argv: list[str]) -> int:
             print(
                 f"WARNING: {missed} log {'entry' if missed == 1 else 'entries'} did not parse "
                 f"and contribute nothing to the graph — check the `### ` heading format",
+                file=sys.stderr,
+            )
+        for rid, field, ref in dangling_roadmap_refs(parse_roadmap(read(src.roadmap))):
+            print(
+                f"WARNING: roadmap item {rid!r} names `**{field}:** {ref}` and no item "
+                f"carries that id — a plan child with a missing parent is grouped "
+                f"nowhere, and a dependency on a missing id can never be ordered",
                 file=sys.stderr,
             )
         for title, n in headless_roadmap_items(read(src.roadmap)):
@@ -1283,9 +1401,23 @@ def main(argv: list[str]) -> int:
             [
                 f"{report['open']} open — "
                 + " · ".join(f"{v} {k}" for k, v in report["status_counts"].items())
+                + (
+                    f" · {len(report['plans'])} "
+                    f"{'plan' if len(report['plans']) == 1 else 'plans'}"
+                    if report["plans"]
+                    else ""
+                )
             ]
             + [
-                f"{'~match ' if i['affine'] else ''}{i['id']} [{i['priority'] or '?'}] {i['title']}"
+                "  " * i.get("depth", 0)
+                + f"{'~match ' if i['affine'] else ''}{i['id']} [{i['priority'] or '?'}] "
+                + (
+                    f"{report['plans'][i['id']]['open']}/{report['plans'][i['id']]['total']} "
+                    "children open · "
+                    if i["id"] in report["plans"]
+                    else ""
+                )
+                + i["title"]
                 for i in report["items"]
             ],
         )

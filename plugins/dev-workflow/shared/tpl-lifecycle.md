@@ -2156,7 +2156,8 @@ python3 .claude/graph/graph.py blast <path>... [--ids <roadmap-id>...]
                                                       affine or named roadmap items · gates holding them — the
                                                       one pack a task's qa and pm prompts carry inline
 python3 .claude/graph/graph.py history <path>             what shipped, was verified, or was reverted here
-python3 .claude/graph/graph.py roadmap-open [--for <path>...]   open items + status breakdown; ~match = path-affine
+python3 .claude/graph/graph.py roadmap-open [--for <path>...]   open items + status breakdown; ~match = path-affine;
+                                                      a plan's children nested under their umbrella
 python3 .claude/graph/graph.py open-deferrals [--with-fail] [<path>...] deferred or blocked, not passing since
 python3 .claude/graph/graph.py open-gates             every parking no later decision answered — with what would
                                                       answer it, its age in days, and what it releases

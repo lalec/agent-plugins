@@ -233,7 +233,7 @@ Runs on every completion, regardless of `ship_mode`.
 
 ## Done — the close-out report
 
-**State where things stand. Do not narrate the run.** `docs/project-log.md` already records what happened; this report exists so the user can see the state of the work without reading the transcript. Every closing command reports in this shape and cites this section — `/fix`, `/wrap`, `/tweak`, `/revert`, `/tidy`, `/pilot`, `/whats-up`.
+**State where things stand. Do not narrate the run.** `docs/project-log.md` already records what happened; this report exists so the user can see the state of the work without reading the transcript. Every closing command reports in this shape and cites this section — `/fix`, `/wrap`, `/tweak`, `/revert`, `/tidy`, `/pilot`, `/whats-up`, `/blueprint`.
 
 Five blocks, in this order, then one closing line, and nothing else. No preamble, no recap, no step-by-step account.
 
@@ -633,7 +633,7 @@ After the single Step 1 gate, the run is unattended until close-out:
 ## Step 1 — Mission plan + single gate
 
 **Decompose.** Build the task list from whichever source applies:
-- **Pre-selected items** (`--items <id>[,<id>…]`, how `/roadmap` hands over a set): the ids **are** the selection, already ranked — take them in the given order and read each item's body in `docs/roadmap.md` for its description. Skip selection and ranking only; everything below still applies to each item, including the per-task derivation and the split rule. An id that matches no roadmap item is reported at the gate and dropped — never silently guessed at.
+- **Pre-selected items** (`--items <id>[,<id>…]`, how `/roadmap` hands over a set): the ids **are** the selection, already ranked — take them in the given order and read each item's body in `docs/roadmap.md` for its description. Skip selection and ranking only; everything below still applies to each item, including the per-task derivation and the split rule. An id that matches no roadmap item is reported at the gate and dropped — never silently guessed at. **An id other items name as their `**Parent:**` is an umbrella** (what `/blueprint` writes): it expands in place to its open children in `**Depends on:**` order and is never run itself — its body is the plan's context and decisions, so paste its `**Decisions made here so the executor does not:**` block into every child task's dev prompt under `Plan decisions:`, where a subagent reads it from the cached prefix instead of re-deriving a choice the planner already made. A child whose `**Depends on:**` names a sibling that failed in this run is skipped and reported, never started on top of it.
 - **A store of open claims** (`--gates` today): the flag names a store, the store's query returns the claims, and each returned claim is one task. Nothing else about the mission changes. A **claim** is a record plus the condition that would resolve it — a parked verdict, and later a deferral or a stalled item; they decay the same way, so they decompose the same way and this bullet takes each new store as another row, never as a second mechanism.
 
   | Flag | Store | Query | Fallback when the query cannot run |
@@ -712,7 +712,7 @@ Timeout → same risk split as the `/code` Gate policy: launch on the recommende
 
 Work the task list in order until: tasks exhausted, all success criteria pass, or `max_tasks` tasks completed. No user gates inside the loop.
 
-**Models.** An **unattended** run dispatches every subagent — `<PREFIX>-dev`, `<PREFIX>-qa`, `<PREFIX>-pm`, a discovered lane's command, a claim's re-measure — with the Agent tool's per-call `model: sonnet`. An attended run passes no model, so each agent runs on its own frontmatter or the session's. The orchestrator — this command, doing the planning, gating, routing and close-out — never changes model in either case, and fan-out children inside `<PREFIX>-test` are Sonnet in both (that rule lives in `custom-tests.md § Splitting`). The split is deliberate and priced: the work a person is not watching is the fan-out, and the judgment that decides what to fan out stays where it was. Record the three models as dispatched in the scorecard's `Models` row; never assume them.
+**Models.** An **unattended** run dispatches every subagent — `<PREFIX>-dev`, `<PREFIX>-qa`, `<PREFIX>-pm`, a discovered lane's command, a claim's re-measure — with the Agent tool's per-call `model: sonnet`. An attended run passes no model, so each agent runs on its own frontmatter or the session's. The orchestrator — this command, doing the planning, gating, routing and close-out — never changes model in either case, and fan-out children inside `<PREFIX>-test` are Sonnet in both (that rule lives in `custom-tests.md § Splitting`). One override, and it comes from the record rather than from any agent file: a task whose roadmap item declares `**Size:** medium` is dispatched with `model: opus` on an unattended run — the planner that wrote the item sized it, which is one of the decisions a `/blueprint` makes so the run does not; `small`, or no `**Size:**` line, takes Sonnet as above. Name every override in the `Models` row. The split is deliberate and priced: the work a person is not watching is the fan-out, and the judgment that decides what to fan out stays where it was. Record the three models as dispatched in the scorecard's `Models` row; never assume them.
 
 **(a) Pipeline lane** — run the `/code` machinery without its interactive steps (`.claude/commands/code.md` holds the exact mechanics; reuse them, replacing every mid-run AskUserQuestion with the autonomous branch below):
 1. Spawn `<PREFIX>-dev` with the task + its verifications (`/code` Step 1 prompt shape). The salvage protocol and the no-top-level-edits rule apply verbatim.
@@ -979,8 +979,8 @@ Report per `code.md § Done` — the same five blocks (Verdict · Learned · Sta
 - **Verdict** — Step 3's diagnosis and the two numbers behind it.
 - **Learned** — what Step 2's reconcile changed, at most 3 bullets: a gate that reads `parked` and is not, a roadmap item already delivered, a `blocked` whose trigger has since happened. Nothing to correct → `None`. This is the block that makes the command worth running rather than reading the stores yourself.
 - **Status** — one row per store, `done` with the number it returned or `not done` with why it could not be read. Held commits are a Status row carrying the count **and what holds them**. The repo sweep is one row: `clean`, or the counts with `/tidy` as its evidence. Each declared store is its own row carrying what it observed against its `healthy:` line; a store whose block would not parse is a `not done` row naming the file. Fold every store in a good state into a single row.
-- **Open** — the ranked plan, and the only block that proposes work. **Order it so a row that unblocks a later one comes first**, then per `code.md § Done`: the parked gate, then `failed`, then the rest. This lane routinely has several actionable rows, so the closing line is usually the **batch** form — and each row must therefore state the disposition this run would take, because that recommendation is what a mission's single gate confirms. A row you cannot recommend on is still Open; it just does not join the batch. `Why it is open` carries the one line of why; `Next` is the command that does it. A row needing a decision only you can make states the options **and which one this run would pick** — a gate reported without a recommendation is how gates sit for weeks. When Step 2's classify says the evidence is too old to recommend on, the recommendation *is* the re-measure: `Next` is `/pilot --gates <name>`. That is still a recommendation; what is forbidden is a row that names a decision and offers nothing. **Every in-progress roadmap item is a row here** — one each, carrying what remains and the command that finishes it, and marked **stalled** with its day count when Step 2's reconcile says so. More than five: list the five closest to done and fold the rest into one count row, so the block stays a plan. A parked gate's row **names the items it releases** — `open-gates` returns them — because a gate holding the blocked half of started work is the shortest way back into that work, and reported as a bare chore it reads like the cheapest row in the table instead of the most valuable.
-- **Emerged** — the backlog that already has a reader, **counted per store, never listed**: roadmap items **nobody has started** → `/roadmap`, carrying the status breakdown `roadmap-open` returns rather than one number (in-progress items are Open rows and are not part of this count; an item with no `**Status:**` line is counted separately, because it is backlog nobody has classified rather than backlog nobody has started); structurally unprovable deferrals → the prod walk; a named stash → `/tidy`. These are the rows that do not need you now. Listing them is the inventory this command exists to replace. This lane produces no scope of its own, so it never files anything here. **This is the one sanctioned inversion of `code.md § Done`'s *only what this run produced* rule**: there is no run, the standing backlog is the subject, and the counted form is what keeps it from becoming the dump that rule prevents.
+- **Open** — the ranked plan, and the only block that proposes work. **Order it so a row that unblocks a later one comes first**, then per `code.md § Done`: the parked gate, then `failed`, then the rest. This lane routinely has several actionable rows, so the closing line is usually the **batch** form — and each row must therefore state the disposition this run would take, because that recommendation is what a mission's single gate confirms. A row you cannot recommend on is still Open; it just does not join the batch. `Why it is open` carries the one line of why; `Next` is the command that does it. A row needing a decision only you can make states the options **and which one this run would pick** — a gate reported without a recommendation is how gates sit for weeks. When Step 2's classify says the evidence is too old to recommend on, the recommendation *is* the re-measure: `Next` is `/pilot --gates <name>`. That is still a recommendation; what is forbidden is a row that names a decision and offers nothing. **Every in-progress roadmap item is a row here** — one each, carrying what remains and the command that finishes it, and marked **stalled** with its day count when Step 2's reconcile says so. More than five: list the five closest to done and fold the rest into one count row, so the block stays a plan. An in-progress item with a `**Parent:**` names it in the row, and siblings in progress under one umbrella are **one row** whose `Next` is `/pilot --items <umbrella-id>` — that expands to the open children, so a plan never reads as six unrelated rows. A parked gate's row **names the items it releases** — `open-gates` returns them — because a gate holding the blocked half of started work is the shortest way back into that work, and reported as a bare chore it reads like the cheapest row in the table instead of the most valuable.
+- **Emerged** — the backlog that already has a reader, **counted per store, never listed**: roadmap items **nobody has started** → `/roadmap`, carrying the status breakdown `roadmap-open` returns rather than one number (in-progress items are Open rows and are not part of this count; an item with no `**Status:**` line is counted separately, because it is backlog nobody has classified rather than backlog nobody has started; an umbrella and its open children are **one plan**, counted once by the umbrella id with its children count beside it — `roadmap-open` prints the plan count for exactly this); structurally unprovable deferrals → the prod walk; a named stash → `/tidy`. These are the rows that do not need you now. Listing them is the inventory this command exists to replace. This lane produces no scope of its own, so it never files anything here. **This is the one sanctioned inversion of `code.md § Done`'s *only what this run produced* rule**: there is no run, the standing backlog is the subject, and the counted form is what keeps it from becoming the dump that rule prevents.
 
 **The Open/Emerged split is the whole command.** Coming from a store is not what makes a row `Emerged` — every row here comes from a store. What places it is `code.md § Done`'s test: needs a decision or an action from you now → `Open` with its command; does not → `Emerged` as a count naming its reader.
 
@@ -1023,6 +1023,8 @@ Order the open set by, in this order:
 3. **Dependency** — an item another selected item depends on comes first. This outranks category because it is a correctness constraint, not a preference: running a dependent first wastes the run.
 4. **Category** — integration > improvement > tech-debt > other
 
+**Plans stay together.** An item with a `**Parent:**` ranks in its umbrella's slot, never on its own: the umbrella takes its place by the four rules above, and its open children fill that slot in `**Depends on:**` order — `roadmap-open` nests them that way. The umbrella itself is never handed to a run; `/pilot --items <umbrella-id>` expands to its open children, so the gate list shows one umbrella line with its children indented. Children of different umbrellas never interleave.
+
 This is the project's single rank rule: `/pilot` cites this section rather than restating it, so a mission runs items in the order the user was shown them.
 
 ## Step 3 — Present and route
@@ -1041,6 +1043,140 @@ Recommend the mission when 2+ items qualify, and the single item when only one d
 - **Mission** → invoke `/pilot --items <id>,<id>,…` with the ranked `**Id:**` values and any flags the user passed. **Do not pre-answer `/pilot`'s gate** — it asks a different question (this plan, with the lanes and verifications it derives) than the one just answered here (which items).
 - **Just the first one** → classify it as a new feature (→ `/code`) or a bug/regression (→ `/fix`) — this classification is the one thing this command knows that `/pilot` does not — then say "Starting: `<item title>`" and invoke that command. A lone item is better served by `/code`'s own gate than by a mission whose autonomy contract suppresses the questions a present user could answer.
 - **None of these** → ask whether to show more items or cancel.
+```
+
+---
+
+## § /blueprint — blueprint.md (Claude Code)
+
+```markdown
+---
+description: Plan on the strongest model, execute elsewhere — turn a goal, or a roadmap item that is only a name, into one umbrella plus /pilot-shaped child items in docs/roadmap.md, with every decision the executor would otherwise face made here. Writes the roadmap only; never edits source, never runs /code or /pilot.
+model: fable
+---
+
+# Blueprint
+
+**Usage:** `/blueprint <goal>` or `/blueprint <roadmap-id>` — the second form expands an item whose body is a title and a sentence into children an unattended run can execute. `--max-items N` caps the children (default 10, the same as `/pilot --max-tasks`, so one plan is one mission).
+
+**Examples:**
+- `/blueprint <a goal that spans several tasks>`
+- `/blueprint <the id of a roadmap item that is only a name>`
+- `/blueprint <goal> --max-items 4`
+
+**Why this is its own lane.** `/pilot` decomposes at its gate, on the session model, with no time to read the record — so an item written as prose steps becomes one oversized task, and the executor then picks the judge model, the threshold and the budget itself. This lane does that decomposition once, on the planning model named in the frontmatter, against the record, and writes the result where `/pilot --items` reads it. The executors are unchanged: `/pilot` on the session model, its subagents on Sonnet or, where a child says so, Opus. It is a slash command rather than plan mode because plan mode designs one change for *this* session; a blueprint is a plan a session with no memory of this one — or a shift nobody watches — can run.
+
+**This command writes `docs/roadmap.md` and nothing else.** No source edit, no `/code`, no `/pilot`, no push, no delivery-log entry — a roadmap edit is bookkeeping, and the deliveries that cite these ids are what the log records. It commits that one file and reprojects the graph. The roadmap is `EXEMPT` in PATH_MAP, so no skill load is needed.
+
+## Gate policy
+
+The `.claude/commands/code.md § Gate policy` applies, with one addition. A plan whose **user-owned decisions** went unanswered is **not written**: a value defaulted on timeout would be executed by a run that treats the plan as authoritative, which is the executor's guess moved one level up. Park it — print the plan, say which decisions await, stop. A plan with no user-owned decisions proceeds on a Confirm timeout, with `auto-selected on timeout — not user-confirmed` on the umbrella's `**Planned by:**` line.
+
+## Step 0 — Flags + entry hygiene
+
+**Flag parse (first):** `--max-items N` → cap on child items (default 10). Strip flags from the goal. If the remaining text is one token that matches a roadmap `**Id:**`, this is the **expand** form: that item becomes the umbrella, keeps its id and every field it already has, and gains the umbrella fields below. Otherwise it is the **goal** form and the umbrella is new.
+
+**Model:** state in one line the model this session runs on, from your own context. This lane is meant to run on the planning model the frontmatter names, and the reader should see when it did not — the `model:` line is the one project-editable value in this file.
+
+**Entry hygiene:** run `git status --porcelain`. If `docs/roadmap.md` is already dirty, stop and say so — this lane's only commit is that file, and it must not sweep someone else's edits in; `/tidy docs/roadmap.md` first. Any other dirty path is reported in one line and left alone.
+
+## Step 1 — Read the record before proposing anything
+
+Read-only. Every project rule of the form "read X before proposing Y" applies here in full — this is the step those rules were written for.
+
+| Read | For | Fallback |
+|---|---|---|
+| `docs/roadmap.md` | **Prior art** — an open or closed item on the same ground. Name its id, or write "no prior art found" | none — the file is the store |
+| `docs/project-log.md` and `git log --grep=^Revert --oneline` | **Reverted levers** — a change the record shows tried and reverted is off-limits unless this plan carries new evidence, and the umbrella's Out of scope names it | `git log` alone |
+| `.claude/commands/whats-up.md § Step 1–2` | the stores and their reconcile, run once as that command runs them — a gate holding the area, a stalled in-progress item, a `blocked` check on its paths | that command's per-store fallbacks |
+| `python3 .claude/graph/graph.py blast <paths the goal touches> --ids <prior-art ids>` | owners, verifications with status, deliveries, deferrals, affine items and the gates holding them | inference from `governed-paths.conf` and the log |
+| auto-memory already in context | project rules and findings that bear on the goal — cite the memory by name where it decides something | none |
+
+State in one block what the record says: prior art, reverted levers, gates on the area, memory that applies. A plan that contradicts any of it is not written.
+
+## Step 2 — Verify every landing site in the code
+
+Every `file:line` the plan will cite is grepped now and exists; a reference that cannot be verified is not written. For each site, name the **existing mechanism to reuse** before proposing a new one — a config key, a helper, a naming convention the code already honours — and say so in the child's `**What:**` ("reuse X; do not build a second override"). A second mechanism beside a working one is the failure this step exists to catch, and it is invisible to an executor that never read the code.
+
+Where the edit is known, record the literal `before → after` in the child. Where it is not, record the invariant the edit must keep.
+
+## Step 3 — Make every decision the executor would otherwise face
+
+List them in the umbrella under **`Decisions made here so the executor does not:`** — numbered, each with its value and a one-line reason: model or API choice, thresholds, budgets and caps, what is refused, lane, size. The test for what belongs here: *would a Sonnet subagent with no transcript have to choose it?* If yes, choose it now.
+
+Two kinds:
+- **Yours** — anything the record and the code settle. Decide, write the reason.
+- **The user's** — money, product tradeoffs, anything that binds a person. Carry these to the Step 6 gate with a recommended value each; after the answer they are written as decided, in the same block, with `(user)` after the value.
+
+The umbrella states the **executor rule** verbatim: *an executor that finds a decision missing reports `blocked — decision missing: <what>` in its handoff and never guesses.* `/pilot` marks such a task failed and it lands in Open, which is where a missing decision belongs.
+
+## Step 4 — Emit one umbrella + N children
+
+Match the metadata convention `docs/roadmap.md` already uses — list items, bare, or packed; read a neighbour first and never reformat existing items — exactly as `<PREFIX>-dev` step 1.5 requires. New items go at the top of their section: umbrella first, children in dependency order.
+
+**Umbrella** — `**Id:**` (a stable kebab slug; in the expand form the existing id, never rewritten), `**Category:**`, `**Priority:**`, `**Status:** open`, `**Added:** YYYY-MM-DD HH:MM`, `**Planned by:** <model>, <date>, for execution by /pilot`, then:
+- `**Origin:**` — the ask, quoted, and where it was made
+- `**Context:**` — why this shape: what the record said (Step 1) and the mechanisms reused (Step 2)
+- `**Decisions made here so the executor does not:**` — Step 3's numbered list, ending with the executor rule
+- `**Run:**` — `/pilot --items <child ids in dependency order> --no-push`, naming which children are parallel-safe; then *this umbrella closes when `<last child id>` closes* — `<PREFIX>-pm` flips it with the last child, never by hand
+- `**Verification (umbrella):**` — the whole-plan check and the **stop rule**: the measurement that, going the wrong way, halts the plan and files an `**Updated:**` line here
+- `**Out of scope:**` — including every reverted lever Step 1 found, by name
+
+**Each child** — `**Id:**` (umbrella-prefixed, `<abbr>-<n>-<slug>`, so a sibling set sorts and reads as one), `**Category:**`, `**Priority:**`, `**Status:** open`, `**Added:**`, then:
+- `**Parent:**` the umbrella id · `**Depends on:**` sibling ids, or `nothing` · `**Lane:**` from the registry `.claude/commands/pilot.md § Lane registry` discovers — `pipeline` | `tweak` | any `pilot-lane:` command, by filename · `**Size:**` `small` (one Sonnet subagent, unattended) | `medium` (`/pilot` dispatches it on Opus)
+- `**What:**` — WHERE (the verified `file:line`, or the new path) + HOW (the literal `before → after` where known; the mechanism reused) + WHY
+- `**Acceptance statement:**` — the end state in the user's terms, where they land, exactly as `/code` Step 0.5 defines it
+- `**Verifications:**` — 1–3 as `{assert, type: UX | Integration | E2E}` with **concrete expected values** — counts the record already knows, exit codes, a known-bad input that must be flagged — and the end state among them, mandatory as in `/code` Step 0.5
+- `**Done when:**` — the verifications, plus any record the child must leave (an `**Updated:**` line, a docs sentence)
+
+**Split rule.** A child is **one lane's task, small enough for one unattended run** — one review unit, at most ~5 files of one change, no mid-task decision. Anything larger splits; anything `/pilot` would tag `[large]` is two children. Stop at `max_items`: if the plan needs more, keep the umbrella and the first `max_items` children and list the remainder in the umbrella's `**Out of scope:**` as `next blueprint: <what they would be>` — never a child that is secretly three.
+
+## Step 5 — Validate before writing
+
+Against the draft, before any write:
+- **Ids** — unique in the file, lowercase kebab as the roadmap's format line requires, every child carrying the umbrella's abbreviation.
+- **Dependencies** — every `**Depends on:**` resolves to an id in the file (a sibling, the umbrella, or an existing item) with no cycle; the `**Run:**` order respects them.
+- **Landing sites** — re-grep every `file:line` any child cites; one that fails is repaired or removed, never left.
+- **Dry-decompose** each child the way `.claude/commands/pilot.md § Step 1` would: derive its lane, acceptance statement and verifications from the child's body alone. A child that derivation cannot read is not written — rewrite it until it is.
+- **Decisions** — every choice a child's `**What:**` depends on appears in the umbrella's block; a child that says "pick a threshold" is a child with a missing decision.
+
+Then write the draft to a scratch copy of the roadmap and run `python3 .claude/graph/graph.py build` against it — it warns on a `**Parent:**` or `**Depends on:**` naming an id it cannot find, and on a headless item — and proceed only on a clean build. No `python3` → check the ids and dependencies by hand and say so.
+
+## Step 6 — Single gate, then write
+
+One `AskUserQuestion` — the only interaction of the run:
+
+1. **Confirm**:
+   - question: "Write this plan? <umbrella title> — <N> items: <numbered list: id · lane · size · depends on> · Decisions taken: <the numbered block, one line each> · Prior art: <id or none> · Reverted levers refused: <names or none>"
+   - header: "Confirm"
+   - options:
+     - label: "Write it (Recommended)" — description: "Append the umbrella and children to docs/roadmap.md and commit"
+     - label: "No, cancel" — description: "Stop here; nothing is written"
+   - The automatic "Other" reorders, drops, adds or resizes items and amends decisions — incorporate, re-run Step 5, and re-ask the full gate once.
+2. **Decide** (only when Step 3 carried user-owned decisions):
+   - question: "These are yours: <numbered rows — decision · recommended value · why>"
+   - header: "Decide"
+   - options:
+     - label: "Take the recommended values (Recommended)" — description: "Write them as decided, marked (user)"
+     - label: "None — cancel the plan" — description: "Nothing is written"
+   - The automatic "Other" overrides per row.
+
+Timeout → the Gate policy above.
+
+**On confirm:** write `docs/roadmap.md` with the decisions as answered, `git add docs/roadmap.md`, commit as `roadmap: blueprint <umbrella-id> — <N> items`, run `python3 .claude/graph/graph.py build`, and confirm `roadmap-open` lists the umbrella with its children nested. No push: the commit rides with the next lane's close-out, and every lane's Step 0 reports it as held until then.
+
+## Done
+
+Report per `code.md § Done` — the same five blocks (Verdict · Learned · Status · Open · Emerged) and closing line, the same closed status words, the same writing rules.
+
+**This run's rows.**
+
+- **Verdict** — written and committed, or parked on the decisions it names.
+- **Learned** — what the record changed about the ask: prior art that already covers part of it, a lever the log shows reverted, a landing site that did not exist. Usually the reason this lane was worth running.
+- **Status** — the record read (`done`, with the prior-art id or "none"), landing sites (`proven`, N refs grepped), items written (`done`, umbrella + N), the commit (`done`, sha), the graph build (`done`, or `not done — no python3`), the model this session ran on.
+- **Open** — one row for the plan: it needs a person to launch it. `Next` is the umbrella's `**Run:**` line verbatim — `/pilot --items <ids> --no-push`; the why cell names the alternative for a run someone wants to sit in on, `/code <first child id>`. A gate this run parked outranks it.
+- **Emerged** — `None` as a rule: the items are what was asked for, so they are Status rows, not scope that appeared.
+- The closing line derives from Open as `code.md § Done` states — normally the `/pilot --items … --no-push` line, which is the whole point of the run.
 ```
 
 ---

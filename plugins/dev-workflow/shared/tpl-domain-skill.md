@@ -241,13 +241,13 @@ Substitute:
 ## Plan Mode
 
 - `<SOURCE_OF_TRUTH_DOCS>` — check before assuming how the delivery pipeline is structured
-- After finalizing a plan, invoke `/code` to hand off to the agent pipeline
+- A plan that is one task hands off to `/code`; one that spans several tasks goes through `/blueprint`, which writes it to `docs/roadmap.md` as `/pilot`-shaped items with every executor decision made
 
 ## Agents
 
 Pipeline: `/code` or `/fix` → <PREFIX>-dev → <PREFIX>-qa → <PREFIX>-pm. Details in `docs/workflow.md`.
 
-Pipeline-shaped work started mid-conversation (a feature or fix that needs review and testing) routes through `/code` or `/fix` — never spawn the pipeline agents ad hoc; the commands own the capture, gating, and close-out steps the agents can't do. For small iterative rounds (pixel nudges, copy, hotfixes), use `/tweak` — its close-out is batched and enforced at push time. For multi-task autonomous runs (a roadmap batch, a goal to iterate toward), use `/pilot` — one up-front gate, per-task lane routing, single batched close-out. For leftover WIP (a dirty tree, orphaned stashes, stale branches), use `/tidy` — it establishes what each item is from history before proposing a disposition, rather than stashing or discarding blind.
+Pipeline-shaped work started mid-conversation (a feature or fix that needs review and testing) routes through `/code` or `/fix` — never spawn the pipeline agents ad hoc; the commands own the capture, gating, and close-out steps the agents can't do. For small iterative rounds (pixel nudges, copy, hotfixes), use `/tweak` — its close-out is batched and enforced at push time. For multi-task autonomous runs (a roadmap batch, a goal to iterate toward), use `/pilot` — one up-front gate, per-task lane routing, single batched close-out. For leftover WIP (a dirty tree, orphaned stashes, stale branches), use `/tidy` — it establishes what each item is from history before proposing a disposition, rather than stashing or discarding blind. For work bigger than one task that nobody has planned yet, use `/blueprint` — it reads the record, verifies every landing site, decides what an executor would otherwise guess, and writes one umbrella plus child items that `/pilot --items` runs; it never edits source.
 
 ## Skills
 

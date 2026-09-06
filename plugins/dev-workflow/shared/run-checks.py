@@ -319,7 +319,6 @@ def cmd_record(payload: dict, argv: list[str]) -> int:
 
     before = names_in(original)
     root, lines, done = find_root(), original.splitlines(), []
-    last_good = original  # the newest text already written (and committed) — never older
     for r in results:
         name = r["name"]
         spans = entry_spans(lines)  # line numbers move as blocks grow or shrink
@@ -327,26 +326,25 @@ def cmd_record(payload: dict, argv: list[str]) -> int:
         lines = splice(lines, spans[name], block)
         text = "\n".join(lines) + ("\n" if original.endswith("\n") else "")
         if names_in(text) != before:
-            # Roll back to the last good write, not to `original`: earlier results in this
-            # batch are already committed, and restoring the pre-batch file would leave
-            # the tree silently reverting them.
-            path.write_text(last_good)
-            kept = sum(1 for d in done if d[2] == "committed")
-            die(
-                f"{name}: write changed the entry set — rolled back to the previous "
-                f"write; {kept} earlier result(s) in this batch stay committed"
-            )
+            # Nothing is committed until the whole batch is written, so a refusal
+            # restores the pre-batch file and the tree is exactly as it was.
+            path.write_text(original)
+            die(f"{name}: write changed the entry set — batch rolled back, nothing written")
         path.write_text(text)
-        last_good = text
-        done.append((name, r["status"], git_commit(root, path)))
+        done.append((name, r["status"]))
+
+    # One commit per call, not per result: the batch is the unit the caller chose to be
+    # willing to lose, and a sweep of ~200 verifications must not leave ~200 bookkeeping
+    # commits in the history (observed: 335 of 358 commits in two days were these).
+    state = git_commit(root, path)
 
     if "--json" in argv:
-        print(json.dumps({"recorded": [dict(zip(("name", "status", "git"), d)) for d in done]}, indent=2))
+        print(json.dumps({"recorded": [dict(zip(("name", "status"), d)) for d in done], "git": state}, indent=2))
     else:
-        for name, status, state in done:
-            print(f"{name}: {status} @ {commit} · {state}")
-        print(f"{len(done)} recorded · {sum(1 for d in done if d[2] == 'committed')} committed")
-    return 1 if any(d[2].startswith("NOT COMMITTED") for d in done) else 0
+        for name, status in done:
+            print(f"{name}: {status} @ {commit}")
+        print(f"{len(done)} recorded · {state}")
+    return 1 if state.startswith("NOT COMMITTED") else 0
 
 
 # ------------------------------------------------------------------------------- cli

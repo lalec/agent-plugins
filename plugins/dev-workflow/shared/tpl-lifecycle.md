@@ -1752,9 +1752,9 @@ JSON
 ```
 
 It edits only the `last:` block of each named entry — the file is hand-shaped, so nothing else is
-reformatted — then commits each one, scoped to `custom-tests.yaml` alone so in-flight work in the
-tree is never swept into a bookkeeping commit, retrying if a parallel child is holding the index
-lock. It **refuses and writes nothing** on a name that is not in the file, a `blocked` or `fail`
+reformatted — then commits **once per call**, scoped to `custom-tests.yaml` alone so in-flight work
+in the tree is never swept into a bookkeeping commit, retrying if a parallel child is holding the
+index lock. It **refuses and writes nothing** on a name that is not in the file, a `blocked` or `fail`
 with no reason, a multi-line reason, or any write that would change the entry set. A refusal is a
 real finding: it usually means the name drifted, not that the outcome was wrong.
 
@@ -1767,8 +1767,10 @@ That would put bookkeeping commits on `VERIFIED` edges, and the carry-forward di
 the wrong end.
 
 **Commit as you go, not once at the end.** After each verification — or each chunk of them —
-`record` commits `custom-tests.yaml` with `test: record verification outcomes`, one commit per
-entry. This is the rule that sets the batch size: a chunk is what you are willing to lose. An agent
+`record` commits `custom-tests.yaml` with `test: record verification outcomes`, **one commit per call**
+— so pass a chunk of results per call, never one. This is the rule that sets the batch size: a chunk
+is what you are willing to lose, and it is also what keeps the history readable: a ~200-verification sweep recorded one at a time left
+335 bookkeeping commits beside 23 real ones in two days; recorded in chunks of ≤10 it leaves ~20. An agent
 killed mid-sweep (a usage limit, a watchdog) loses only what it had not yet committed; batching every
 write to the end loses the whole run's record while the tallies in the transcript survive to
 contradict it.

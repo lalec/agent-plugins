@@ -9,6 +9,7 @@ Replace these placeholders before writing the files:
 - `<PATH_MAP_ENTRIES>` → generated entries from § How to generate governed-paths.conf
 - `<SKILL_SELF_OWNERSHIP_ENTRIES>` → one `'^\.claude/skills/<PREFIX>-<name>/:<PREFIX>-<name>'` entry per installed skill (lifecycle + domain), so each skill edits its own SKILL.md and `references/` with itself loaded — without these, a domain skill's own reference updates get blocked for lacking `<PREFIX>-skill`
 - `<REF_WATCH>` → optional ERE alternation of reference-worthy source files (API route/handler dirs, schema/model files, auth middleware) derived from the category map. Used by `ref-sync-check.sh` to decide whether a modify-only commit warrants a reference-sync warning. `''` when nothing clearly reference-worthy is identifiable — structural changes (add/delete/rename) in governed roots always warn regardless
+- `<DEPENDENCY_MANIFESTS>` → optional ERE alternation of the project's dependency manifests, matched by **filename, not layout** — `requirements*.txt`, `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `Gemfile` and their lock files, whichever of them this project actually has. Used by `ref-sync-check.sh` to warn when a dependency lands without its advisories being assessed. `''` when the project has none (the check is then silently skipped)
 - `<LINT_CMD>` → project lint command (e.g. `pnpm exec biome check .` or `npm run lint`)
 - `<TYPECHECK_CMD>` → project typecheck command (e.g. `pnpm exec tsc --noEmit` or `npm run typecheck`)
 
@@ -44,15 +45,21 @@ The single source of truth for path→skill ownership. Both `skill-guard.sh` and
 # REF_WATCH: optional ERE of reference-worthy source files (route/handler dirs, schema/model
 # files, auth middleware). ref-sync-check.sh warns on modify-only commits ONLY when these match;
 # add/delete/rename in GOVERNED_ROOTS always warns. '' = structural-only warnings.
+#
+# DEPENDENCY_MANIFESTS: optional ERE of this project's dependency manifests, matched by filename
+# rather than layout. ref-sync-check.sh warns when one changes without vex.yaml being assessed.
+# '' = no manifests, check skipped.
 
 GOVERNED_ROOTS='<GOVERNED_ROOTS>'
 DEPLOY_PATHS='<DEPLOY_PATHS>'
 REF_WATCH='<REF_WATCH>'
+DEPENDENCY_MANIFESTS='<DEPENDENCY_MANIFESTS>'
 
 PATH_MAP=(
   '^docs/roadmap\.md$:EXEMPT'
   '^docs/project-log\.md$:EXEMPT'
   '^\.claude/skills/<PREFIX>-test/references/custom-tests\.yaml$:EXEMPT'
+  '^\.claude/skills/<PREFIX>-review/references/vex\.yaml$:EXEMPT'
   '^\.claude/graph/edges\.jsonl$:EXEMPT'
   '^\.claude/pilot/:EXEMPT'
   '^\.claude/graph/:<PREFIX>-graph'
@@ -81,15 +88,19 @@ For each confirmed skill→path mapping, add one `'PATTERN:SKILL'` entry to `PAT
 
 Each category contributes the actual paths (or root-level files) it occupies in this project. If no categories of a given group are present, the corresponding variable is `''`.
 
+`DEPENDENCY_MANIFESTS` comes from a **filename scan**, not the category map: list the manifest and lock filenames this repo actually contains, anchored `(^|/)…$` so a monorepo's per-package copies match too. `''` when the project has none.
+
 **Example** (myapp: Backend=`api/`, Frontend=`app/`, IaC=`infra/`, CI/CD=`.github/workflows/`, Deployment=`scripts/deploy.sh` + `fly.toml`):
 ```bash
 GOVERNED_ROOTS='^(api/|app/)'
 DEPLOY_PATHS='^(infra/|\.github/workflows/|scripts/deploy\.sh$|fly\.toml$)'
 REF_WATCH='^(api/routes/|api/models/|api/auth/)'
+DEPENDENCY_MANIFESTS='(^|/)(package\.json|package-lock\.json|pnpm-lock\.yaml|requirements[^/]*\.txt|pyproject\.toml|uv\.lock)$'
 
 PATH_MAP=(
   '^docs/project-log\.md$:EXEMPT'
   '^\.claude/skills/myapp-test/references/custom-tests\.yaml$:EXEMPT'
+  '^\.claude/skills/myapp-review/references/vex\.yaml$:EXEMPT'
   '^\.claude/graph/edges\.jsonl$:EXEMPT'
   '^\.claude/pilot/:EXEMPT'
   '^\.claude/graph/:myapp-graph'
@@ -114,6 +125,7 @@ Rules:
 - `docs/project-log.md` is always `EXEMPT` (written by `<PREFIX>-log` without skill loading)
 - `.claude/pilot/` is always `EXEMPT` — `/pilot` writes its run markers there at the top level and a headless shift writes its state from a shell; the only tracked file in it, `shift.sh`, is a verbatim plugin copy that no skill authors
 - `<PREFIX>-test/references/custom-tests.yaml` is always `EXEMPT` — the `/code`/`/fix` Step 1.5 persist step writes it at the top level and carries the schema itself; gating it forces a full skill load per pipeline run for a 10-line append
+- `<PREFIX>-review/references/vex.yaml` is always `EXEMPT` — the security pass writes a status from inside `<PREFIX>-qa` and `/audit` writes one at the top level, and `<PREFIX>-review` is a read-only reference skill that owns no write path of its own
 - **Every installed `<PREFIX>-*` skill gets a self-ownership entry** (`'^\.claude/skills/<PREFIX>-<name>/:<PREFIX>-<name>'`) before the `.claude/skills/` catch-all — a skill maintains its own SKILL.md and `references/` with itself loaded. The `<PREFIX>-skill` catch-all after them still owns cross-skill structure (new skill dirs, renames)
 - `.claude/skills/` (catch-all), `.claude/hooks/`, `.claude/agents/`, and `CLAUDE.md` are owned by `<PREFIX>-skill`
 - The rest of `.claude/` is `OPEN` (no guard needed for other config)
@@ -121,6 +133,7 @@ Rules:
 - Domain skill entries go in between, ordered more-specific first
 - `DEPLOY_PATHS` is independent of `PATH_MAP` ownership. A file can appear in `DEPLOY_PATHS` (for drift watching) *and* be owned by a non-deploy skill in `PATH_MAP` — a deploy-mechanism file that lives in the backend domain is correctly listed under both. Every path from IaC/CI/CD/Build/Deployment categories goes into `DEPLOY_PATHS` regardless of which skill owns it.
 - `REF_WATCH` narrows the reference-sync warning to commits that plausibly change what reference files describe (contracts, schemas, auth) — without it every copy tweak in a governed root warned, and the warning was learned to be ignorable (15 ignored warnings in one audited session).
+- `DEPENDENCY_MANIFESTS` is matched by **filename anywhere in the tree**, not by a top-level path, because a monorepo carries one per package and a layout-shaped pattern misses all but the root. Include the lock files only if this project's routine updates do not churn them — a warning that fires on every lockfile bump is learned as ignorable exactly like the one above, and the fix is to narrow this variable, never to blunt the message.
 
 ---
 
@@ -339,10 +352,11 @@ The same bare-shell constraint applies to any tool a hook shells out to (typeche
 
 ## § ref-sync-check.sh
 
-Warns after `git commit` when paths watched in `governed-paths.conf` changed without corresponding reference file updates. Two independent checks:
+Warns after `git commit` when paths watched in `governed-paths.conf` changed without corresponding reference file updates. Three independent checks:
 
 1. **Source drift** — warns only on commits that plausibly change what references describe: files **added/deleted/renamed** in `GOVERNED_ROOTS`, or modified files matching `REF_WATCH` (contracts, schemas, auth). Modify-only cosmetic commits (copy tweaks, style nudges) stay silent — an alarm that fires on every commit gets learned as ignorable and loses all signal.
 2. **Deploy drift** — `DEPLOY_PATHS` changed without `deploy-config.yaml` being touched → the deploy profile is now stale.
+3. **Dependency drift** — `DEPENDENCY_MANIFESTS` changed without `vex.yaml` being touched → a package landed whose advisories nobody has assessed. Warn, never block: a gate here fires on lockfile churn and gets overridden reflexively inside a week, which is worse than no hook. The value is the reminder at the moment the package lands.
 
 Sources `governed-paths.conf` — **no path patterns hardcoded in this script**. If a variable is empty, the corresponding check is silently skipped. Warn-only — always exits 0.
 
@@ -383,6 +397,15 @@ if [ -n "$DEPLOY_PATHS" ] && echo "$CHANGED" | grep -qE "$DEPLOY_PATHS"; then
   if ! echo "$CHANGED" | grep -qE '^\.claude/skills/.*/references/deploy-config\.yaml$'; then
     echo "" >&2
     echo "⚠ Deploy Profile: deploy-mechanism paths (\$DEPLOY_PATHS) changed but deploy-config.yaml was not updated — invoke the deploy-owning skill to reconcile" >&2
+    echo "" >&2
+  fi
+fi
+
+# Check 3 — dependency drift
+if [ -n "${DEPENDENCY_MANIFESTS:-}" ] && echo "$CHANGED" | grep -qE "$DEPENDENCY_MANIFESTS"; then
+  if ! echo "$CHANGED" | grep -qE '^\.claude/skills/.*/references/vex\.yaml$'; then
+    echo "" >&2
+    echo "⚠ Advisory triage: dependency manifests changed but vex.yaml was not updated — run /audit; rank by what the new package parses or fetches, not by severity" >&2
     echo "" >&2
   fi
 fi

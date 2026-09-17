@@ -5,7 +5,7 @@ Copied verbatim into a project at `.claude/graph/graph.py` by dev-workflow insta
 No <PREFIX> substitution: skill dirs are glob-discovered, so this file is byte-identical
 across every project.
 
-The index is DERIVED and DISPOSABLE. git and the five source artifacts stay canonical;
+The index is DERIVED and DISPOSABLE. git and the six source artifacts stay canonical;
 `build` with no args discards edges.jsonl and reprojects from scratch. Every read site
 must fall back to its pre-graph behaviour if this script is absent or exits non-zero.
 
@@ -21,6 +21,8 @@ must fall back to its pre-graph behaviour if this script is absent or exits non-
     graph.py open-deferrals [--with-fail] [<path>...]   deferred or blocked, not passing since
     graph.py open-gates              every parking no later decision answered, with its
                                      condition and age in days
+    graph.py open-advisories [<path>...]      advisories assessed exploitable and not yet
+                                              fixed, plus the count still unassessed
 
 Add --json to any query for machine-readable output.
 """
@@ -81,6 +83,7 @@ class Sources:
         self.roadmap = root / "docs" / "roadmap.md"
         self.conf = root / ".claude" / "hooks" / "governed-paths.conf"
         self.tests = one(root, ".claude/skills/*-test/references/custom-tests.yaml")
+        self.vex = one(root, ".claude/skills/*-review/references/vex.yaml")
         self.deploy = one(root, ".claude/skills/*-deploy/references/deploy-config.yaml")
         self.out = root / ".claude" / "graph" / "edges.jsonl"
 
@@ -441,18 +444,21 @@ def _quote_open(v: str) -> bool:
     return v.startswith("'") and "'" not in v[1:].replace("''", "")
 
 
-def parse_custom_tests(text: str) -> list[dict]:
-    """Minimal reader for the fixed, machine-written custom-tests.yaml shape.
-
-    Handles `paths:` as a block list or an inline flow list, the optional `last:` block,
-    and a single-quoted scalar that spans lines. Deliberately not a general YAML parser —
-    the schema is fixed.
+def parse_block_yaml(
+    text: str, item_key: str, list_keys: tuple[str, ...] = (), nested_keys: tuple[str, ...] = ()
+) -> list[dict]:
+    """Minimal reader for the fixed, machine-written store shapes (`custom-tests.yaml`,
+    `vex.yaml`). Items begin at `- <item_key>:`; `list_keys` accept a block list or an
+    inline flow list; `nested_keys` accept an indented sub-block. Deliberately not a
+    general YAML parser — both schemas are fixed, and one reader for both is what keeps
+    them from drifting apart.
 
     The multi-line case matters: a hand-shaped `reason:` routinely wraps, and reading only
     its first physical line handed `open-deferrals` a truncated reason — while a wrapped
     line that happened to contain a `:` was parsed as a new key. The continuation lines
     are joined with single spaces until the closing quote arrives.
     """
+    head = f"- {item_key}:"
     tests: list[dict] = []
     cur: dict | None = None
     key: str | None = None
@@ -470,31 +476,31 @@ def parse_custom_tests(text: str) -> list[dict]:
             continue
         stripped = raw.strip()
         indent = len(raw) - len(raw.lstrip())
-        if stripped.startswith("- name:"):
-            cur = {"name": _scalar(stripped[7:]), "paths": [], "last": {}}
+        if stripped.startswith(head):
+            cur = {item_key: _scalar(stripped[len(head):])}
+            cur.update({lk: [] for lk in list_keys})
+            cur.update({nk: {} for nk in nested_keys})
             tests.append(cur)
             key = None
             continue
         if cur is None:
             continue
-        if stripped.startswith("- ") and key == "paths":
-            cur["paths"].append(_scalar(stripped[2:]))
+        if stripped.startswith("- ") and key in list_keys:
+            cur[key].append(_scalar(stripped[2:]))
             continue
         if ":" not in stripped:
             continue
         k, _, v = stripped.partition(":")
         k, v = k.strip(), v.strip()
-        if k == "paths":
-            key = "paths"
+        if k in list_keys:
+            key = k
             if v.startswith("["):
-                cur["paths"] = [
-                    _scalar(p) for p in v.strip("[]").split(",") if p.strip()
-                ]
+                cur[k] = [_scalar(p) for p in v.strip("[]").split(",") if p.strip()]
             continue
-        if k == "last":
-            key = "last"
+        if k in nested_keys:
+            key = k
             continue
-        target = cur["last"] if key == "last" and indent >= 6 else cur
+        target = cur[key] if key in nested_keys and indent >= 6 else cur
         if target is cur:
             key = None
         if _quote_open(v):
@@ -502,6 +508,14 @@ def parse_custom_tests(text: str) -> list[dict]:
         else:
             target[k] = _scalar(v)
     return tests
+
+
+def parse_custom_tests(text: str) -> list[dict]:
+    return parse_block_yaml(text, "name", list_keys=("paths",), nested_keys=("last",))
+
+
+def parse_vex(text: str) -> list[dict]:
+    return parse_block_yaml(text, "id", nested_keys=("compensating_control",))
 
 
 def strip_comment(line: str) -> str:
@@ -632,6 +646,7 @@ def project(src: Sources) -> list[dict]:
     entries = parse_log(read(src.log))
 
     tests = parse_custom_tests(read(src.tests))
+    vex = parse_vex(read(src.vex))
 
     for e in entries:
         sha, f = e["sha"], e["fields"]
@@ -787,6 +802,42 @@ def project(src: Sources) -> list[dict]:
                     # whether the block is transient or structural — the reason names the
                     # trigger that would close it, which is what makes the row actionable.
                     reason=last.get("reason", ""),
+                )
+            )
+
+    for v in vex:
+        adv = v.get("id", "")
+        status = v.get("status", "")
+        if not adv or not status:
+            continue
+        # One statement per advisory, edited in place — unlike a gate, whose parkings
+        # accumulate in an append-only log. So the current status is the answer and there
+        # is nothing to reconcile against a newer record.
+        if v.get("commit"):
+            edges.append(
+                edge(
+                    "ASSESSED",
+                    f"commit:{v['commit'][:7]}",
+                    f"adv:{adv}",
+                    f"vex.yaml#{adv}",
+                    status=status,
+                    # The justification is what makes a `not_affected` auditable: without it
+                    # the row is indistinguishable from an advisory nobody looked at.
+                    justification=v.get("justification", ""),
+                    ts=v.get("ts", ""),
+                )
+            )
+        if v.get("sink"):
+            edges.append(
+                edge(
+                    "AFFECTS",
+                    f"adv:{adv}",
+                    f"path:{v['sink']}",
+                    f"vex.yaml#{adv}.sink",
+                    status=status,
+                    package=v.get("package", ""),
+                    addressed=v.get("addressed", ""),
+                    mitigated=(v.get("compensating_control") or {}).get("control", ""),
                 )
             )
 
@@ -1062,6 +1113,50 @@ def open_verifications(
     return list(rows.values())
 
 
+def open_advisories(edges: list[dict], changed: list[str] | None = None) -> dict:
+    """Advisories assessed `affected` and not yet `fixed`, plus how many nobody has judged.
+
+    Unlike a gate, a VEX statement is one record per advisory edited in place, so the
+    current status *is* the answer — there is no append-only history to reconcile and
+    nothing to close a row but a later edit of the row itself.
+
+    The `under_investigation` count is returned beside the rows rather than as rows,
+    because an unassessed advisory is not yet work: it is a reason to run the pass. A
+    reader that cannot tell "nothing exploitable" from "nothing looked at" has the same
+    blind spot the severity-count ranking had."""
+    rows, unassessed = [], 0
+    for e in by_kind(edges, "AFFECTS"):
+        props = e.get("props") or {}
+        if props.get("status", "") != "affected":
+            continue
+        path = node_id(e["to"])
+        if changed and not path_hits(path, changed):
+            continue
+        rows.append(
+            {
+                "advisory": node_id(e["from"]),
+                "package": props.get("package", ""),
+                "sink": path,
+                "addressed": props.get("addressed", ""),
+                "mitigated": props.get("mitigated", ""),
+                "src": e["src"],
+            }
+        )
+    # Counted from ASSESSED, never AFFECTS: an unassessed advisory usually has no `sink:`
+    # yet — nobody has traced it — so AFFECTS would miss most of them and double-count the
+    # rest. Every statement carries a `commit:`, so ASSESSED sees all of them.
+    for e in by_kind(edges, "ASSESSED"):
+        if (e.get("props") or {}).get("status") == "under_investigation":
+            unassessed += 1
+    return {"advisories": rows, "unassessed": unassessed}
+
+
+def advisory_line(r: dict) -> str:
+    where = f" → {r['addressed']}" if r["addressed"] else " — unfiled"
+    mit = f" · behind {r['mitigated']}" if r["mitigated"] else ""
+    return f"{r['advisory']} ({r['package']}) — {r['sink']}{mit}{where}"
+
+
 def clip(text: str, n: int = 160) -> str:
     """One line's worth. The full reason stays in --json and in custom-tests.yaml."""
     text = " ".join(text.split())
@@ -1311,6 +1406,9 @@ def main(argv: list[str]) -> int:
             ],
             "recent_deliveries": deliveries(edges, rest)[:5],
             "open_deferrals": open_verifications(edges, rest),
+            # Advisories assessed exploitable on exactly these paths: dev is about to edit
+            # the sink, which is the one moment the finding is cheap to act on.
+            "open_advisories": open_advisories(edges, rest)["advisories"],
             # Named ids first, then path-affine items: the pm step decides `Addresses:`
             # from exactly this set, and the qa step sees what the task claims to close.
             "roadmap": [
@@ -1347,6 +1445,7 @@ def main(argv: list[str]) -> int:
                 for d in report["recent_deliveries"]
             ]
             + [f"open: {open_line(d)}" for d in report["open_deferrals"]]
+            + [f"advisory: {advisory_line(a)}" for a in report["open_advisories"]]
             + [
                 f"roadmap: {i['id']} [{i['status']}] {clip(i['title'], 90)}"
                 for i in report["roadmap"]
@@ -1425,6 +1524,16 @@ def main(argv: list[str]) -> int:
     elif cmd == "open-gates":
         gates = open_gates(edges)
         emit({"gates": gates}, as_json, [gate_line(g) for g in gates])
+
+    elif cmd == "open-advisories":
+        out = open_advisories(edges, rest or None)
+        lines = [advisory_line(r) for r in out["advisories"]]
+        if out["unassessed"]:
+            n = out["unassessed"]
+            lines.append(
+                f"({n} advisor{'y' if n == 1 else 'ies'} still unassessed — run /audit)"
+            )
+        emit(out, as_json, lines)
 
     elif cmd == "open-deferrals":
         with_fail = "--with-fail" in rest

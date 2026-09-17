@@ -1231,6 +1231,69 @@ Run when the user says done, or asks to push or deploy. (The `close-out-gate` ho
 
 ---
 
+## § /audit — audit.md (Claude Code)
+
+```markdown
+---
+description: Assess the project's dependency advisories — give each one a VEX status, block only on the exploitable ones, and never re-decide a settled one. `--deep` runs the built-in /security-review over the commits no deep pass has covered.
+pilot-lane:
+  routing: A task that assesses dependency advisories, or runs the deep security pass over commits no pass has covered — evidence gathering against the audit tool and the repo, never code work. Fixing an advisory is a `pipeline` task, not this lane.
+  close-out: 'vex.yaml statements + a roadmap item per `affected` one'
+  spend: none
+  apply: >-
+    Re-run the audit read-only and abort on any drift from the id set the statuses were decided
+    against. Write each status to `<PREFIX>-review/references/vex.yaml`, then file every `affected`
+    one as a roadmap item carrying its path and action, and commit both together. Preflight
+    (non-mutating): the audit command exits, `vex.yaml` parses, `docs/roadmap.md` is writable.
+  reversal: statements and roadmap items land in one commit — `git revert <sha>` replays it.
+whats-up-store:
+  reads: python3 .claude/graph/graph.py open-advisories — the exploitable rows and the unassessed count — plus the newest commit touching a DEPENDENCY_MANIFESTS path from governed-paths.conf against vex.yaml's newest `ts`
+  healthy: zero unassessed, every `affected` row carries an `addressed:` id, and no manifest commit is newer than the newest recorded status — all three, since a file nobody has run the pass over reports zero exploitable rows exactly like a clean one
+  when-bad: degraded
+---
+
+# Audit
+
+**Usage:** `/audit` — assess the advisories this project has not assessed. `/audit --deep` — run the built-in `/security-review` over the commits no deep pass has covered.
+
+An advisory count is not risk. This lane turns the audit tool's output into one VEX status per advisory and files only what is exploitable here. The triage rule, the five justifications and the compensating-control rule live in `<PREFIX>-review/references/security-review.md § Triage` — **read it and do not restate it**; this file is the driver, not a second copy of the rule.
+
+## Step 0 — What is already decided
+
+**Flag parse (first):** `--deep` in `$ARGUMENTS` runs Step 3 instead of Steps 1–2. Anything else in `$ARGUMENTS` filters the candidate set to advisory ids or package names matching it case-insensitively; nothing matching → say so and assess the unfiltered set, because a typo'd filter must never read as "nothing to assess".
+
+1. Read `<PREFIX>-review/references/vex.yaml`. Absent → this is the first run; create it.
+2. Run the project's audit command (`npm audit` / `pnpm audit` / `pip-audit` / `cargo audit` / `osv-scanner` — whichever this project's ecosystem ships). No audit tool → record that in `vex.yaml` as the reason the tree is unassessed and stop; do not report the tree clean.
+3. **Diff the id sets.** A candidate is an id the file does not carry, or one whose `package` version has moved. Everything else is carried forward untouched — its status was decided against the version still installed, and re-deciding it is the cost this lane exists to avoid.
+4. Report the split before working: `<N> carried · <M> to assess`.
+
+## Step 1 — Assess, at most 10 per run
+
+Rank the candidates by **what the package parses or fetches** — a parser reading user-uploaded bytes outranks a build tool with more advisories and a higher score — and take the top 10. The rest keep `status: under_investigation`, which is what makes the store say the work is unfinished rather than silently dropping it.
+
+The cap is the lane's own bound and it is why this lane is free to dispatch (`spend: none`): an unattended run can take it without a grant, and a backlog of 80 advisories costs ten per run rather than one very expensive turn.
+
+For each, follow `security-review.md § Triage` and write the statement. `affected` needs the path and an action; `not_affected` needs one of the five justifications; a control that can be turned off is a `compensating_control` on an `affected` statement, never a justification.
+
+## Step 2 — File what is exploitable
+
+Each `affected` statement gets a `docs/roadmap.md` item in the format `<PREFIX>-dev` step 1.5 uses, carrying its path and action, and its `**Id:**` goes back into the statement's `addressed:`. Lower the item's priority one step when a verified `compensating_control` covers the path — the control reduces risk without removing the vulnerability, which is a priority input and never a status.
+
+Commit the statements and the items together, then reproject: `python3 .claude/graph/graph.py build`.
+
+## Step 3 — `--deep` only
+
+Set the base ref first — `git remote set-head origin <default-branch>` — or the built-in command dies with `fatal: ambiguous argument 'origin/HEAD...'`. Then use the `security-review` skill. Its scope is the branch's pending changes, so it is owed before a branch's first push and before a prod deploy that ships a new external input surface; it is not owed on a calendar. Record the reviewed sha in `vex.yaml` as a `deep_reviewed:` top-level key so the next run can tell a covered branch from an uncovered one.
+
+## Done
+
+Report per `code.md § Done` — the five blocks, the closing line, the same closed status words. `<N> assessed, <M> still unassessed` is a Status row; each `affected` one filed is an Emerged row naming its roadmap id; an `affected` one you could not trace to a sink stays Open, because nobody else will pick it up.
+
+This lane runs no `<PREFIX>-dev`, so scope it uncovers has no writer but this one — file it per `code.md § Done` block 4 and cite the id.
+```
+
+---
+
 ## § /revert — revert.md (Claude Code)
 
 ```markdown

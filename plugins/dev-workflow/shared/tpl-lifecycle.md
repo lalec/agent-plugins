@@ -119,7 +119,7 @@ license: MIT
 
 # <PREFIX>-review
 
-Three distinct practices: receiving feedback, requesting reviews, verification gates. Static reference content — load the right reference for the situation. No `## Reference Sync` (this skill ships its references; the project does not author them).
+Three distinct practices: receiving feedback, requesting reviews, verification gates. Static reference content — load the right reference for the situation. No `## Reference Sync` (this skill ships its references; the project does not author them). The one exception is `references/vex.yaml`, which is project state rather than shipped content — keep it current per the checklist below.
 
 **Core principle:** Technical correctness over social comfort. Verify before implementing. Evidence before claims.
 
@@ -135,6 +135,12 @@ SITUATION?
 ├─ Reviewing for defect classes   → references/security-review.md
 │  (deps, secrets, injection,
 │  authz/IDOR, headers, dead code)
+├─ Triaging dependency            → references/security-review.md § Triage
+│  advisories (which of these
+│  actually matter?)
+├─ About to push a branch for     → references/security-review.md § Escalate
+│  the first time, or ship a new
+│  input surface to prod
 ├─ Reviewing a UI change (does it → <PREFIX>-design/references/ux-patterns.md
 │  match how this app already
 │  does this?)
@@ -146,9 +152,18 @@ SITUATION?
 - `references/code-review-reception.md` — feedback reception protocol (read → understand → verify → evaluate → respond → implement)
 - `references/requesting-code-review.md` — code-reviewer subagent dispatch protocol
 - `references/issuing-findings.md` — evidence requirements for review findings (no blocking finding without file:line)
-- `references/security-review.md` — fast per-task security pass: deps/supply-chain, secrets, injection sinks, access-control (IDOR), insecure defaults + headers, dead surface; recon→verify triage; escalate to `/security-review` for deep changes
+- `references/security-review.md` — fast per-task security pass: deps/supply-chain, secrets, injection sinks, access-control (IDOR), insecure defaults + headers, dead surface; recon→verify triage; VEX status per advisory (§ Triage); the two moments the deep `/security-review` is owed (§ Escalate)
+- `references/vex.yaml` — the VEX status held for every advisory this project has assessed, so a settled one is never re-decided at the same package version. Project state, not shipped content: written by this pass and by `/audit`
 - `<PREFIX>-design/references/ux-patterns.md` — how this app already does a thing: a UI change that stands up a second pattern beside an existing one, or a visual value absent from `design-tokens.md`, is a finding (single source of truth — owned by `<PREFIX>-design`)
 - `<PREFIX>-debug/references/verification.md` — completion verification gates (single source of truth — owned by `<PREFIX>-debug`)
+
+## Update `references/vex.yaml` when:
+
+- [ ] The audit tool reports an advisory id this file does not carry — add it, `under_investigation` at minimum
+- [ ] A carried id's package version moved — the old status was decided against the old version; re-assess
+- [ ] An advisory was assessed this invocation — write its `status`, and the `path` + `action` or the `justification`
+- [ ] An `affected` one was remediated — set `fixed` with the commit; never delete the statement
+- [ ] A compensating control was added, removed, or stopped covering the path it was recorded against
 ```
 
 Include the `ux-patterns.md` read-map branch **and** its `## References` entry only when `<PREFIX>-design` is part of this install; omit both lines otherwise (a branch pointing at a file no backend-only project has is a dead route).
@@ -514,10 +529,43 @@ Deterministic first (grep + the project's audit tool), then reason. For every ca
 
 A verified finding blocks; an unverified one is `Suspected: <claim> — verifying`, advisory only. Use the `issuing-findings.md` Finding/Evidence/Severity format — no blocking finding without a fresh `file:line` read in this session.
 
+## Triage — VEX status, not severity
+
+A scanner match is not a verdict. Three layers sit between them: the **match** (your installed version falls in the advisory's affected range), **reachability** (the vulnerable symbol sits in a call path from your code), and **exploitability** (attacker-controlled input can traverse that path). Reachability is evidence; exploitability is the verdict. Rank the audit output by **what the package parses or fetches**, never by advisory count or CVSS — a parser reading user-uploaded bytes outranks a build tool with more advisories and a higher score.
+
+Every advisory gets one VEX status, recorded in `vex.yaml`:
+
+| Status | Means | Requires |
+|---|---|---|
+| `affected` | exploitable here — **blocks** | the path `<untrusted source> → <file:line> → <vulnerable API>`, and an action |
+| `not_affected` | not exploitable here | one justification from the five below |
+| `fixed` | remediated | the commit |
+| `under_investigation` | seen, not yet decided | nothing — this is the untriaged state |
+
+The five justifications **are** the triage questions, in cost order. First "no" wins:
+
+| Ask | No → justification |
+|---|---|
+| Is the component shipped at all? | `component_not_present` |
+| Is the vulnerable code in the build? | `vulnerable_code_not_present` |
+| Does any call path reach it? | `vulnerable_code_not_in_execute_path` |
+| Can an attacker control input on that path? | `vulnerable_code_cannot_be_controlled_by_adversary` |
+| Is a control in front of it that cannot be turned off? | `inline_mitigations_already_exist` |
+
+Anything surviving all five is `affected`. A path you cannot write down is not a finding — record the status and keep moving. "Low severity" and "we'll get to it" are not justifications.
+
+**The fifth justification is strict.** It means protection that cannot be subverted by the attacker and cannot be configured or disabled by the user, and it cites the control's `file:line`. Bearer-only auth qualifies — there is no ambient credential to steal and no setting that creates one. Left loose this is the one unverifiable justification, and it swallows the other four.
+
+**A control that can be turned off is a compensating control, not a justification.** A WAF, DDoS protection, a rate limit, a network policy, an auth gateway: real risk reduction, living outside the repo, going stale silently. The status stays `affected` and the control lowers the priority of the item filed for it — it never closes anything. Record three things or it is a claim rather than a control: what the control is, evidence it is active **on this path** (the rule matched *this route*, and where that was observed), and the known bypass class.
+
+**A status held at the same package version is not re-decided** — carry it forward. That is what makes this pass cheap enough to run every task and again on a schedule; a version bump re-opens it.
+
+The same three questions decide a **misconfiguration**, which carries no advisory and so no VEX status: it is a finding only when the precondition it depends on exists in this project. Permissive CORS needs an ambient credential to abuse; with bearer-only auth there is none, so it is hardening, not a block.
+
 ## Checklist (skip rows that don't apply to this project)
 
 ### A. Dependencies & supply chain
-- Run the project's audit on the whole tree — `npm audit` / `pnpm audit` / `pip-audit` / `cargo audit` / `osv-scanner` (recognition aids, not a whitelist). **Block** on high/critical, or any vuln the task introduced/touched; note unrelated lower-severity debt without blocking (same policy as pre-existing test failures).
+- Run the project's audit on the whole tree — `npm audit` / `pnpm audit` / `pip-audit` / `cargo audit` / `osv-scanner` (recognition aids, not a whitelist). Give every hit a VEX status per § Triage: **block** on `affected`, record the rest in `vex.yaml` without blocking (same policy as pre-existing test failures). An id already carried at the same package version is not re-decided. No audit tool for this ecosystem → record that in `vex.yaml` as the reason the tree is unassessed, rather than reporting it clean.
 - Every newly-added dependency: confirm the package **actually exists** on its registry and the name is not a typosquat or model hallucination (slopsquatting).
 - Flag unused / redundant dependencies — each is attack surface.
 
@@ -541,9 +589,53 @@ A verified finding blocks; an unverified one is `Suspected: <claim> — verifyin
 
 ## Escalate
 For complex authentication, cryptography, or multi-file logic changes, hand off to the built-in `/security-review` (diff-aware deep reasoning across ~25 vulnerability classes) rather than reasoning it through here.
+
+Two moments owe that deep pass outright, because "periodically" means never:
+- before a branch's **first push** to a remote;
+- before a **prod deploy that ships a new external input surface** — a new endpoint, fetcher, parser, or upload path.
+
+Its scope is the branch's pending changes, so its unit is a branch diff and not a calendar — run it when the branch carries commits no deep pass has covered. It resolves the diff against `origin/HEAD` and fails with `fatal: ambiguous argument 'origin/HEAD...'` on a repo that has never fetched that ref; `git remote set-head origin <default-branch>` fixes it.
 ````
 
 (Verification gates content lives in `<PREFIX>-debug/references/verification.md` — `<PREFIX>-review` references it instead of carrying its own copy.)
+
+`references/vex.yaml` — created empty at install, written by the security pass and by `/audit`:
+
+````yaml
+# vex.yaml — one VEX statement per advisory this project has assessed.
+# Vocabulary is OpenVEX/CSAF so the file exports; the shape is this workflow's
+# (single-quoted free text, absent entry = never assessed).
+#
+# The key is id + package + VERSION. A carried status is only honest at the version it was
+# decided against, so a bump re-opens the statement instead of inheriting the old answer —
+# the same rule custom-tests.yaml applies to a pass carried across an untouched diff.
+#
+# Protocol, justifications and the compensating-control rule: <PREFIX>-review/references/security-review.md § Triage
+
+statements:
+  - id: <GHSA/CVE/OSV id>
+    package: <name>@<installed version>
+    status: affected | not_affected | fixed | under_investigation
+    justification: <one of the five>     # REQUIRED on not_affected; inline_mitigations needs a file:line
+    path: '<untrusted source> → <file:line> → <vulnerable API>'   # REQUIRED on affected
+    sink: <repo path>                    # the file that path lands in — what joins this to the code
+    action: '<what to do about it>'      # REQUIRED on affected
+    addressed: <roadmap **Id:**>         # set once an affected one is filed
+    commit: <sha7>                       # REQUIRED, every status — the code commit this status
+                                         #   was decided against; on under_investigation, the one
+                                         #   it was first seen at. Without it the statement is
+                                         #   invisible to the graph and its age is unknowable
+    compensating_control:                # optional, affected only — lowers priority, never status
+      control: <waf | ddos | rate-limit | network-policy | auth-gateway | ...>
+      active_on_path: '<evidence it covers THIS route, and where that was observed>'
+      bypass: '<the known bypass class — why this is not a justification>'
+    first_seen: YYYY-MM-DD
+    ts: YYYY-MM-DDTHH:MM:SSZ
+````
+
+`path`, `action`, `reason`-shaped strings and every `compensating_control` field are **single-quoted** (double any internal `'`) for the same reason `custom-tests.yaml` quotes `assert`: they routinely carry colons, arrows and braces, which break unquoted *and* double-quoted YAML.
+
+A statement is **never deleted** — an advisory that stops appearing in the audit output is `fixed` with the commit that removed it, because the record of what was decided and why is the whole point of the file. Deleting one returns the pass to re-deciding it from scratch the next time the id reappears.
 
 ---
 
@@ -2222,6 +2314,7 @@ to a record a human can open. An edge without `src` is a bug in the projector.
 | Component | `comp:<name>` | `deploy-config.yaml` |
 | Env | `env:<comp>/<env>` | `deploy-config.yaml` |
 | Gate | `gate:<gate-name>` | delivery-log `**Decisions:**` |
+| Advisory | `adv:<id>` | `vex.yaml` `id` (GHSA / CVE / OSV) |
 
 Ids are exact natural keys that already exist, so there is **no entity-resolution step** and no
 model call anywhere in the projector — projection is pure parsing.
@@ -2242,6 +2335,8 @@ model call anywhere in the projector — projection is pure parsing.
 | `SUPERSEDES` | commit → commit | — | `git log --grep=^Revert` |
 | `COVERS` | verif → path | — | `custom-tests.yaml` `paths:` |
 | `VERIFIED` | commit → verif | `status`, `ts`, `reason` | `custom-tests.yaml` `last:` |
+| `ASSESSED` | commit → adv | `status`, `justification`, `ts` | `vex.yaml` statement |
+| `AFFECTS` | adv → path | `status`, `package`, `addressed`, `mitigated` | `vex.yaml` `sink:` |
 | `OWNED_BY` | path-pattern → skill | — | `governed-paths.conf` `PATH_MAP` |
 | `HAS_ENV` | comp → env | `url`, `kind` | `deploy-config.yaml` |
 
@@ -2252,6 +2347,14 @@ of four on a real install — and hiding is the wrong direction, because a claim
 when it is open is reachable from nowhere. Each row also carries `condition` (what the parking said
 would answer it, taken from the text after a **spaced** dash in the provenance — `human-gated`'s own
 hyphen is not a boundary) and `age_days`.
+
+**A VEX statement is edited in place, so it needs no reconcile.** `vex.yaml` holds one record
+per advisory and the pass overwrites its `status`, unlike the delivery log, which is append-only and
+therefore needs `open-gates` to close a parking with a later decision. So the current status *is* the
+answer: `open-advisories` filters, it does not reconcile. `under_investigation` is counted rather
+than listed, because an advisory nobody has judged is a reason to run the pass, not a row of work —
+and the count is taken from `ASSESSED`, never `AFFECTS`, since an untraced advisory has no `sink:`
+to emit an `AFFECTS` edge from.
 
 **`DECIDED` and `ADDRESSES` share the task key on purpose.** A gate and the roadmap items its entry
 addresses are only joinable if both edges leave the same node, which is what lets `open-gates` say

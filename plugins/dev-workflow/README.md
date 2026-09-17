@@ -22,6 +22,7 @@ A multi-agent delivery workflow for Claude Code. It runs your plan through a tea
 | `/code`, `/fix` | Drive the full pipeline (dev → qa → pm) from one line — one gate that *states* what done means and what will prove it, auto-retest after fixes, then close out with a push and a report you can read in one screen. Add `--prod` to ship after sign-off, `--no-push` to keep it local, `--regression full` to force the broad suite. |
 | `/pilot` | The autonomous multi-task lane — feed it a goal (a roadmap batch, or "improve X until Y"), confirm the mission plan once, and it works task after task unattended: each routed to the full pipeline, the tweak lane, or a lane you defined yourself, with one batched close-out and a full mission report at the end. Point it at your open decisions instead with `/pilot --gates` and it re-measures each one before saying anything: the ones whose proposal has since died it closes itself, the ones waiting on something that hasn't happened yet it leaves alone and tells you what would move them, and the rest come back as a single sitting with a recommendation per row — so nothing that writes is ever decided without you, and nothing you already answered is asked again. Run it with nothing after it and it works the **standing mission** — whatever `/whats-up` would tell you needs doing, in rank order, asking nothing up front and only the high or critical questions at the end — which is what a session left on `/loop 30m /pilot --max-tasks 1`, or a scheduled headless shift, keeps doing while you're away. |
 | `/tweak` | The sanctioned lightweight lane for iterative rounds — pixel nudges, copy, small hotfixes — verified inline (screenshots/curl), with one batched close-out enforced at push time. |
+| `/audit` | Turns your dependency scanner's output into a decision instead of a list. Every advisory gets one status — exploitable here, or not, with the reason why not from a fixed set — and only the exploitable ones block or become work, so a parser reading files strangers upload outranks a build tool with more advisories and a higher score. Each answer is kept, so the next run only looks at what is new: a project with eighty settled advisories costs a grep, not eighty judgement calls. A WAF or a rate limit in front of a flaw lowers its priority and never closes it, because those can be turned off and the flaw is still there. `--deep` hands the branch to Claude Code's own `/security-review`. |
 | `/revert` | Sanctioned rollback: `git revert` (never reset), scoped re-verification, and a logged reversal. |
 | `/tidy` | Resolve leftover WIP — sweeps the dirty tree, stashes, worktrees and stale branches, probes git history to establish what each item actually *is* (superseded ≠ accidental), then routes every one to commit / deliver / discard / ignore. |
 | `/design` | Generate 2–3 HTML variants, open them in the browser, route the winner to `/code`. Each one is held to how your app already does things — the existing pattern is looked up before a new one is proposed, and icons come from your icon set or a generation skill rather than being drawn by hand *(if a design skill is present)*. |
@@ -132,6 +133,17 @@ When a session left open isn't reliable enough — the Mac sleeps, the terminal 
 ```
 Top-level, inline-verified iteration — no subagent ceremony. The close-out (review + log + docs + ref-sync) is batched at exit; the `close-out-gate` hook blocks `git push` until it runs.
 
+### Decide which vulnerabilities matter
+```
+/audit
+/audit --deep
+```
+Your scanner tells you how many advisories you have; this tells you which ones an attacker can reach. Each one gets a single status, and `not exploitable` has to say *why* — the component isn't shipped, the vulnerable code isn't in the build, nothing calls it, nothing an attacker controls reaches it, or a control in front of it can't be turned off. Only what survives all five blocks or becomes a roadmap item. One real repo had eighty-two backend advisories and four that mattered; the four were the ones reading files strangers upload.
+
+Answers are kept and never re-decided until the package version moves, so the second run on the same project looks at what is new and nothing else. That is what makes it cheap enough to leave running: a commit touching your dependency manifest gets a warning, `/whats-up` shows you what's still unassessed, and the unattended run picks it up on its own.
+
+A WAF, a rate limit or a network policy in front of a flaw lowers its priority and never closes it — those can be bypassed or switched off, and it records what would bypass this one. `--deep` sets up the base ref and hands the branch to Claude Code's own `/security-review`, which is worth doing before a branch's first push and before shipping a new endpoint, fetcher, parser or upload path.
+
 ### Roll something back
 ```
 /revert <commit or description of what to undo>
@@ -227,7 +239,7 @@ Then one last line, and it's the one you act on: `none — nothing open, safe to
 | `package-edit-guard.sh` | Edit | Adding packages to `package.json` directly without `myapp-skill` |
 | `pre-handoff-check.sh` | Skill + Task/Agent | Invoking or spawning `myapp-qa` with uncommitted changes, lint errors, or type errors |
 | `close-out-gate.sh` | Bash | `git push` while commits since the last delivery-log entry touch governed/deploy paths (`CLOSEOUT_OVERRIDE=1` escape hatch) |
-| `ref-sync-check.sh` | Bash (post) | Warns after commit on reference-worthy drift — structural changes or `REF_WATCH` matches — without reference updates, or deploy-mechanism drift without `deploy-config.yaml` updates. Path patterns sourced from `governed-paths.conf`. |
+| `ref-sync-check.sh` | Bash (post) | Warns after commit on reference-worthy drift — structural changes or `REF_WATCH` matches — without reference updates, deploy-mechanism drift without `deploy-config.yaml` updates, or a dependency landing without its advisories assessed. Path patterns sourced from `governed-paths.conf`. |
 | `skill-mark.sh` | Skill (post) | Records loaded skills to a session-scoped marker (used by all guards, and by `myapp-log` to fill the delivery log's skills line) |
 | `post-commit.sh` | Bash (post) | Reminds to run `myapp-log` after every commit |
 

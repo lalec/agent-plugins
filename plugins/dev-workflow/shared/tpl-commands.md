@@ -636,7 +636,9 @@ After the single Step 1 gate, the run is unattended until close-out:
 ## Step 1 — Mission plan + single gate
 
 **Decompose.** Build the task list from whichever source applies:
-- **Pre-selected items** (`--items <id>[,<id>…]`, how `/roadmap` hands over a set): the ids **are** the selection, already ranked — take them in the given order and read each item's body in `docs/roadmap.md` for its description. Skip selection and ranking only; everything below still applies to each item, including the per-task derivation and the split rule. An id that matches no roadmap item is reported at the gate and dropped — never silently guessed at; an id whose item is no longer open (`done`, or closed by a later entry) is skipped and reported the same way, which is what lets a fixed-interval loop over `--items` take one id per firing and run out rather than repeat the first. **An id other items name as their `**Parent:**` is an umbrella** (what `/blueprint` writes): it expands in place to its open children in `**Depends on:**` order and is never run itself — its body is the plan's context and decisions, so paste its `**Decisions made here so the executor does not:**` block into every child task's dev prompt under `Plan decisions:`, where a subagent reads it from the cached prefix instead of re-deriving a choice the planner already made. A child whose `**Depends on:**` names a sibling that failed in this run is skipped and reported, never started on top of it.
+- **Pre-selected items** (`--items <id>[,<id>…]`, how `/roadmap` hands over a set): the ids **are** the selection, already ranked — take them in the given order and read each item's body in `docs/roadmap.md` for its description. Skip selection and ranking only; everything below still applies to each item, including the per-task derivation and the split rule. An id that matches no roadmap item is reported at the gate and dropped — never silently guessed at; an id whose item is no longer open (`done`, or closed by a later entry) is skipped and reported the same way, which is what lets a fixed-interval loop over `--items` take one id per firing and run out rather than repeat the first. **An id other items name as their `**Parent:**` is an umbrella** (what `/blueprint` writes): it expands in place to its open children in `**Depends on:**` order and is never run itself — its body is the plan's context and decisions. A child whose `**Depends on:**` names a sibling that failed in this run is skipped and reported, never started on top of it.
+
+  **The decisions block follows the child, not the address.** Any task whose item carries a `**Parent:**` reads that parent once and pastes its `**Decisions made here so the executor does not:**` block into the dev prompt under `Plan decisions:` — whether the mission was given the umbrella, the child list, or one child by name. A subagent then reads it from the cached prefix instead of re-deriving a choice the planner already made, and the plan's own executor rule (deviate-and-record when attended, `blocked — decision <n> contradicted` when not) travels with it. Keying the paste to the umbrella address instead left one child of eight dispatched with no decisions at all on a real mission, because the plan's `**Run:**` line named the children.
 - **A store of open claims** (`--gates` today): the flag names a store, the store's query returns the claims, and each returned claim is one task. Nothing else about the mission changes. A **claim** is a record plus the condition that would resolve it — a parked verdict, and later a deferral or a stalled item; they decay the same way, so they decompose the same way and this bullet takes each new store as another row, never as a second mechanism.
 
   | Flag | Store | Query | Fallback when the query cannot run |
@@ -1108,11 +1110,21 @@ Read-only. Every project rule of the form "read X before proposing Y" applies he
 
 State in one block what the record says: prior art, reverted levers, gates on the area, memory that applies. A plan that contradicts any of it is not written.
 
-## Step 2 — Verify every landing site in the code
+## Step 2 — Prove the change, not the landing site
 
 Every `file:line` the plan will cite is grepped now and exists; a reference that cannot be verified is not written. For each site, name the **existing mechanism to reuse** before proposing a new one — a config key, a helper, a naming convention the code already honours — and say so in the child's `**What:**` ("reuse X; do not build a second override"). A second mechanism beside a working one is the failure this step exists to catch, and it is invisible to an executor that never read the code.
 
 Where the edit is known, record the literal `before → after` in the child. Where it is not, record the invariant the edit must keep.
+
+**That the site exists is not that the change is right.** A prescribed value is a claim about code the executor will treat as authoritative, so each one is probed here, read-only, before it is written. Three probes, each with a fallback; the counts they return go in the child's `**What:**` as evidence, not as prose:
+
+| Probe | Run | Fallback |
+|---|---|---|
+| **Reachable** — the cited site is on the path production actually takes, and everything the change keys on is supplied | Name the trigger and the entry command it invokes (a scheduler's flags, a route, a CLI subcommand), then walk from there to the site. Grep every caller of the function, flag or argument the change branches on, and name the ones that do not pass it and what they do instead | Read the entry point and say which callers you could not enumerate |
+| **Unique** — the thing being changed exists once | Grep the literal, pattern or constant being replaced across the tree. Name every copy the child must also edit, or write "1 copy" | Grep the narrowest distinctive substring and say so |
+| **Sound on the real corpus** — the prescribed value survives the values the project already holds | Execute the literal against them: a regex or key format against the stored strings the record names, a threshold against the counts the record names. A set the change must enumerate is **derived by reading the registry that holds it**, never listed from memory | State the corpus you could not reach, and make the child's first verification the one that runs the literal against it |
+
+A probe that contradicts the plan changes the plan, here, before anything is written — not the executor's problem later. State each probe's result in one line in the umbrella's `**Context:**`; a decision whose probe was skipped says so in its own reason, so the executor knows which values were proven and which were reasoned.
 
 ## Step 3 — Make every decision the executor would otherwise face
 
@@ -1122,7 +1134,10 @@ Two kinds:
 - **Yours** — anything the record and the code settle. Decide, write the reason.
 - **The user's** — money, product tradeoffs, anything that binds a person. Carry these to the Step 6 gate with a recommended value each; after the answer they are written as decided, in the same block, with `(user)` after the value.
 
-The umbrella states the **executor rule** verbatim: *an executor that finds a decision missing reports `blocked — decision missing: <what>` in its handoff and never guesses.* `/pilot` marks such a task failed and it lands in Open, which is where a missing decision belongs.
+The umbrella states the **executor rule** verbatim, both halves:
+
+- *An executor that finds a decision **missing** reports `blocked — decision missing: <what>` in its handoff and never guesses.* `/pilot` marks such a task failed and it lands in Open, which is where a missing decision belongs.
+- *An executor whose own read of the code **contradicts** a decision never implements it as written.* A plan is authoritative about intent and fallible about code, and the executor is the first reader with the file open. **Attended** — implement what the code supports, report `deviated — decision <n>: <what the code showed>` in the handoff, and file an `**Updated:**` line on the child naming the evidence. **Unattended** — report `blocked — decision <n> contradicted: <evidence>` and stop; nobody is present to review a substitute, and a prescribed literal executed on trust is how a plan ships a change its own author would have refused. Same `unattended` property the run already decided once.
 
 ## Step 4 — Emit one umbrella + N children
 
@@ -1132,7 +1147,7 @@ Match the metadata convention `docs/roadmap.md` already uses — list items, bar
 - `**Origin:**` — the ask, quoted, and where it was made
 - `**Context:**` — why this shape: what the record said (Step 1) and the mechanisms reused (Step 2)
 - `**Decisions made here so the executor does not:**` — Step 3's numbered list, ending with the executor rule
-- `**Run:**` — `/pilot --items <child ids in dependency order> --no-push`, naming which children are parallel-safe; then *this umbrella closes when `<last child id>` closes* — `<PREFIX>-pm` flips it with the last child, never by hand
+- `**Run:**` — `/pilot --items <this umbrella's id>[,<any existing item riding the mission>] --no-push`, naming which children are parallel-safe; then *this umbrella closes when `<last child id>` closes* — `<PREFIX>-pm` flips it with the last child, never by hand. **The umbrella id, never the child list:** it expands to the children still open in dependency order, so one id survives a resumed or looped run and skips what already closed, where a pasted child list re-offers them
 - `**Verification (umbrella):**` — the whole-plan check and the **stop rule**: the measurement that, going the wrong way, halts the plan and files an `**Updated:**` line here
 - `**Out of scope:**` — including every reverted lever Step 1 found, by name
 
@@ -1140,7 +1155,7 @@ Match the metadata convention `docs/roadmap.md` already uses — list items, bar
 - `**Parent:**` the umbrella id · `**Depends on:**` sibling ids, or `nothing` · `**Lane:**` from the registry `.claude/commands/pilot.md § Lane registry` discovers — `pipeline` | `tweak` | any `pilot-lane:` command, by filename · `**Size:**` `small` (one Sonnet subagent, unattended) | `medium` (`/pilot` dispatches it on Opus)
 - `**What:**` — WHERE (the verified `file:line`, or the new path) + HOW (the literal `before → after` where known; the mechanism reused) + WHY
 - `**Acceptance statement:**` — the end state in the user's terms, where they land, exactly as `/code` Step 0.5 defines it
-- `**Verifications:**` — 1–3 as `{assert, type: UX | Integration | E2E}` with **concrete expected values** — counts the record already knows, exit codes, a known-bad input that must be flagged — and the end state among them, mandatory as in `/code` Step 0.5
+- `**Verifications:**` — 1–3 as `{assert, type: UX | Integration | E2E}` with **concrete expected values** — counts the record already knows, exit codes, a known-bad input that must be flagged — and the end state among them, mandatory as in `/code` Step 0.5. A verification whose number **feeds a later decision** asserts the discriminator too: which rule produced each count, recorded alongside it. A share that is the union of two rules cannot be split afterwards, and where the evidence is one run nobody can re-take, the field has to exist before the run — the plan is the last place that can require it
 - `**Done when:**` — the verifications, plus any record the child must leave (an `**Updated:**` line, a docs sentence)
 
 **Split rule.** A child is **one lane's task, small enough for one unattended run** — one review unit, at most ~5 files of one change, no mid-task decision. Anything larger splits; anything `/pilot` would tag `[large]` is two children. Stop at `max_items`: if the plan needs more, keep the umbrella and the first `max_items` children and list the remainder in the umbrella's `**Out of scope:**` as `next blueprint: <what they would be>` — never a child that is secretly three.
@@ -1151,6 +1166,7 @@ Against the draft, before any write:
 - **Ids** — unique in the file, lowercase kebab as the roadmap's format line requires, every child carrying the umbrella's abbreviation.
 - **Dependencies** — every `**Depends on:**` resolves to an id in the file (a sibling, the umbrella, or an existing item) with no cycle; the `**Run:**` order respects them.
 - **Landing sites** — re-grep every `file:line` any child cites; one that fails is repaired or removed, never left.
+- **Probes** — every prescribed literal, enumerated set and branch argument in the draft carries a Step 2 result, or a stated reason it could not be probed plus the verification that covers it. An unprobed value with neither is the one thing this lane cannot write.
 - **Dry-decompose** each child the way `.claude/commands/pilot.md § Step 1` would: derive its lane, acceptance statement and verifications from the child's body alone. A child that derivation cannot read is not written — rewrite it until it is.
 - **Decisions** — every choice a child's `**What:**` depends on appears in the umbrella's block; a child that says "pick a threshold" is a child with a missing decision.
 
@@ -1161,7 +1177,7 @@ Then write the draft to a scratch copy of the roadmap and run `python3 .claude/g
 One `AskUserQuestion` — the only interaction of the run:
 
 1. **Confirm**:
-   - question: "Write this plan? <umbrella title> — <N> items: <numbered list: id · lane · size · depends on> · Decisions taken: <the numbered block, one line each> · Prior art: <id or none> · Reverted levers refused: <names or none>"
+   - question: "Write this plan? <umbrella title> — <N> items: <numbered list: id · lane · size · depends on> · Decisions taken: <the numbered block, one line each> · Probed: <what Step 2 ran against the code and what it changed, or none> · Prior art: <id or none> · Reverted levers refused: <names or none>"
    - header: "Confirm"
    - options:
      - label: "Write it (Recommended)" — description: "Append the umbrella and children to docs/roadmap.md and commit"
@@ -1186,9 +1202,9 @@ Report per `code.md § Done` — the same five blocks (Verdict · Learned · Sta
 **This run's rows.**
 
 - **Verdict** — written and committed, or parked on the decisions it names.
-- **Learned** — what the record changed about the ask: prior art that already covers part of it, a lever the log shows reverted, a landing site that did not exist. Usually the reason this lane was worth running.
-- **Status** — the record read (`done`, with the prior-art id or "none"), landing sites (`proven`, N refs grepped), items written (`done`, umbrella + N), the commit (`done`, sha), the graph build (`done`, or `not done — no python3`), the model this session ran on.
-- **Open** — one row for the plan: it needs a person to launch it. `Next` is the umbrella's `**Run:**` line verbatim — `/pilot --items <ids> --no-push`; the why cell names the alternative for a run someone wants to sit in on, `/code <first child id>`. A gate this run parked outranks it.
+- **Learned** — what the record and the code changed about the ask: prior art that already covers part of it, a lever the log shows reverted, a landing site that did not exist, a prescribed value the corpus refused. Usually the reason this lane was worth running.
+- **Status** — the record read (`done`, with the prior-art id or "none"), landing sites (`proven`, N refs grepped), prescribed values (`proven`, N probed / M reasoned — the reasoned ones named), items written (`done`, umbrella + N), the commit (`done`, sha), the graph build (`done`, or `not done — no python3`), the model this session ran on.
+- **Open** — one row for the plan: it needs a person to launch it. `Next` is the umbrella's `**Run:**` line verbatim — `/pilot --items <umbrella-id> --no-push`; the why cell names the alternative for a run someone wants to sit in on, `/code <first child id>`. A gate this run parked outranks it.
 - **Emerged** — `None` as a rule: the items are what was asked for, so they are Status rows, not scope that appeared.
 - The closing line derives from Open as `code.md § Done` states — normally the `/pilot --items … --no-push` line, which is the whole point of the run.
 ```

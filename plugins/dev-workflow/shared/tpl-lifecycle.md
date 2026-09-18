@@ -565,7 +565,10 @@ The same three questions decide a **misconfiguration**, which carries no advisor
 ## Checklist (skip rows that don't apply to this project)
 
 ### A. Dependencies & supply chain
-- Run the project's audit on the whole tree — `npm audit` / `pnpm audit` / `pip-audit` / `cargo audit` / `osv-scanner` (recognition aids, not a whitelist). Give every hit a VEX status per § Triage: **block** on `affected`, record the rest in `vex.yaml` without blocking (same policy as pre-existing test failures). An id already carried at the same package version is not re-decided. No audit tool for this ecosystem → record that in `vex.yaml` as the reason the tree is unassessed, rather than reporting it clean.
+- Run the project's audit on the whole tree — `npm audit` / `pnpm audit` / `pip-audit` / `cargo audit` / `osv-scanner` (recognition aids, not a whitelist). An id already carried in `vex.yaml` at the same package version is **not re-decided** — read it and move on. No audit tool for this ecosystem → record that in `vex.yaml` as the reason the tree is unassessed, rather than reporting it clean.
+- **Assess only what this task brought in**: an advisory on a dependency this task added or bumped. Give it a VEX status per § Triage and **block** on `affected`.
+- **A pre-existing backlog is not this task's to assess.** Ids the audit reports that `vex.yaml` has never seen and this task did not introduce are recorded `under_investigation` and left — one line each, no tracing. Say how many in the review output and name `/audit` as what works them. Assessing a tree's backlog inline is minutes of tracing per advisory against a task that did not cause any of them, and it is the one thing that makes running this pass every task too expensive to keep doing — which is how a security pass stops running at all. `/audit` exists for exactly this: it ranks the backlog by what each package parses or fetches and takes ten per run.
+- Same policy as pre-existing test failures, and for the same reason: unrelated debt is recorded, never blocking.
 - Every newly-added dependency: confirm the package **actually exists** on its registry and the name is not a typosquat or model hallucination (slopsquatting).
 - Flag unused / redundant dependencies — each is attack surface.
 

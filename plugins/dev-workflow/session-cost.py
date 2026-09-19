@@ -238,9 +238,17 @@ def main():
 
     total = sum(st["cost"] for _, _, _, st in rows)
     nested = [(k, d, x, st) for k, d, x, st in rows if d >= 2]
+    tok = {k: sum(st[k] for _, _, _, st in rows) for k in ("n", "out", "read", "w1h", "w5")}
     print(
         f"{'TOTAL':<20}{'':>2} {'':<16}{'':>5}{'':>9}{'':>12}{'':>10}{'':>10}"
         f"{total:>8.2f}"
+    )
+    # Tokens, not dollars, are what a Claude session's usage limit is measured in — so this is
+    # the figure to carry into a gate quote.
+    grand = tok["out"] + tok["read"] + tok["w1h"] + tok["w5"]
+    print(
+        f"{'  tokens':<20}{'':>2} {grand / 1e6:,.0f}M  ({tok['read'] / grand * 100:.0f}% cache read)"
+        f"  across {tok['n']:,} requests"
     )
     if nested:
         n_cost = sum(st["cost"] for _, _, _, st in nested)

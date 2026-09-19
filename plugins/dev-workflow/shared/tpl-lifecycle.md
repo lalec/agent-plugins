@@ -1922,6 +1922,17 @@ finish in roughly 60 turns; a child still working past that returns what it has 
 never started, and the caller re-dispatches the remainder. **When in doubt, split further** — more
 children is the cheaper direction, bounded only by what the harness will run at once.
 
+**One condition on that, and only at the wall.** Read `~/.claude/usage-snapshot.json` at the moment of
+splitting. When the tighter window has less left than this batch would plausibly use, **do not open
+it**: record the remaining verifications as `blocked` with the reset time as their `reason` and let
+the task close. Absent or stale snapshot, or a figure that says there is room, changes nothing — the
+rule above stands. This is about the wall, never about cost: narrowing a batch to save money makes
+the mission cost *more* for the same crash. What it prevents is the shape of the crash. Children that
+die together each deliver their death to the caller's session as a separate turn, every one of those
+turns is refused in its own right, and Claude Code re-arms its own wait at most twice in a row before
+giving up for that window — one real mission turned a single limit into five refusals in 27 seconds
+and then sat idle for 2h19m after the reset.
+
 **Keep verbose output out of the context.** Redirect a full suite run to a file and read back the
 tail or a grep, rather than letting the whole dump land in the transcript and be re-read on every
 subsequent turn. This is the largest per-child lever, and it applies whether or not anything was

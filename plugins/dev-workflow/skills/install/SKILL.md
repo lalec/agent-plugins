@@ -29,6 +29,7 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 - `.claude/graph/graph.py` — delivery-graph projector + query engine (copied verbatim from `../../shared/graph.py`); `edges.jsonl` is generated and gitignored
 - `.claude/skills/<PREFIX>-test/scripts/run-checks.py` — batched execution of resolved Integration commands and `last:` recording for every type (copied verbatim from `../../shared/run-checks.py`); returns observations, never verdicts
 - `.claude/pilot/shift.sh` — headless-shift runner for the standing mission (copied verbatim from `../../shared/shift.sh`); the rest of `.claude/pilot/` is run markers and is gitignored. Scheduling it is opt-in (Phase 3 Step 4)
+- `~/.claude/usage-snapshot.sh` — **outside the repo, opt-in** (Phase 3 Step 5): wraps the status line so a run can read the account's remaining allowance. Account-scoped, so one machine needs it once
 - `.claude/settings.json` — wires all hooks
 - `CLAUDE.md` workflow sections
 
@@ -38,6 +39,7 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 - `../../shared/graph.py` — the delivery-graph projector, copied verbatim to `.claude/graph/graph.py`
 - `../../shared/run-checks.py` — the verification runner/recorder, copied verbatim to `.claude/skills/<PREFIX>-test/scripts/run-checks.py`
 - `../../shared/shift.sh` — the headless-shift runner, copied verbatim to `.claude/pilot/shift.sh`
+- `../../shared/usage-snapshot.sh` — the status-line allowance tee, copied verbatim to `~/.claude/usage-snapshot.sh` (opt-in, Phase 3 Step 5)
 - `../../shared/tpl-skill-guard.md` — all hook templates + governed-paths.conf + settings.json
 - `../../shared/tpl-domain-skill.md` — domain skill stub + project file sections
 - `../../shared/tpl-commands.md` — slash command templates
@@ -530,6 +532,25 @@ Use `tpl-skill-guard.md § settings.json`. If the file does not exist, create it
 
 `.claude/pilot/shift.sh` is already copied and staged (Phase 2). Ask once, with `AskUserQuestion`: "Schedule headless shifts on this machine? — a launchd job runs `/pilot --max-tasks N` every interval with a dollar cap, orchestrator on Opus, subagents on Sonnet; you answer what it parks at check-in." Options: `Yes — every 30 min, 3 tasks, $15 cap (Recommended)` / `Not now`; the automatic "Other" takes an interval, task cap, budget and a Discord/Slack webhook URL for `PILOT_NOTIFY_URL`. On yes, run `bash .claude/pilot/shift.sh install [--interval S] [--max-tasks N] [--budget USD] [--notify URL]` and show its output; on no, print that same command so the user can run it later. Never install without asking — it writes to `~/Library/LaunchAgents`, outside the repo — and never run this step from inside a shift or any non-interactive session. Remind the user that a shift asks nothing (the standing mission has no gate, and a question timeout is not relied on — it does not fire in practice) and that the interactive loop form (`/loop 30m /pilot --max-tasks 1`, fixed interval) needs no install at all.
 
+**Step 5 — Let a run see its remaining allowance (opt-in, writes outside the repo)**
+
+Claude Code publishes the account's live allowance — percent of the 5-hour window used, percent of the week, and when each resets — to exactly **one** place: the status-line command's stdin. No hook receives it and no endpoint serves it, so a run cannot know how much is left unless something copies the figures out. Without this, `/pilot` reports `allowance: unknown` forever and its per-task stop never fires; the mission then starts work it cannot finish and dies mid-task, which is what happened on a real 10-item run (6h43m idle after the limit had already lifted).
+
+Check first: read `~/.claude/settings.json`. If its `statusLine.command` already contains `usage-snapshot.sh`, this is done — say so and skip.
+
+Otherwise ask once, with `AskUserQuestion`: "Let runs read your remaining Claude allowance? — copies the figures your status line already receives to a file `/pilot` reads before starting work. Your status-line script is not edited; one settings line wraps it, and deleting that line undoes it." Options: `Yes — wire it (Recommended)` / `No — print it and I'll do it myself`.
+
+On yes:
+1. Copy `../../shared/usage-snapshot.sh` **verbatim** to `~/.claude/usage-snapshot.sh` (no substitution — it is account-scoped, not project-scoped, and stays byte-identical everywhere).
+2. Edit `~/.claude/settings.json`: take the existing `statusLine.command` string, if any, and set the command to `bash ~/.claude/usage-snapshot.sh <the old command>`; leave `type` as it was; set `refreshInterval` to `60` if absent. When there is no `statusLine` at all, write the wrapper with no wrapped command — it is then a pure tee and prints nothing.
+3. Read the file back and show the resulting `statusLine` block.
+
+On no, print the copy command and the exact settings block so the user can paste it.
+
+**`refreshInterval` is not optional.** The status line is event-driven and goes quiet exactly while a mission runs, because the main session sits still waiting on background subagents. Without the timer the file freezes at whatever it said when the mission began, and every figure the run reports afterwards is a stale claim presented as a fresh one.
+
+Never write this without asking — it is the second of only two things in this install that touch anything outside the repo. Never run the step from inside a shift or any non-interactive session. It is machine-scoped, so a second project's install finds it already wired and skips.
+
 ---
 
 ## Phase 4 — Wire CLAUDE.md
@@ -619,6 +640,7 @@ Walk the checklist before declaring done:
 - [ ] `<PREFIX>-test/references/custom-tests.md § Execution` pins `last.commit` **once** at the start of the run (not `rev-parse HEAD` per verification) and commits outcomes **as they go**, so a killed agent loses one record rather than the run's
 - [ ] `.claude/skills/<PREFIX>-test/scripts/run-checks.py` exists, is **byte-identical** to the plugin's `shared/run-checks.py`, and is tracked by git; `custom-tests.md § Execution` routes the Integration set through `run-checks.py run` in chunks of ≤10 and records **every** type through `run-checks.py record`. The runner must return observations only — if any instruction anywhere lets it emit a `pass`, that is the finding, because a scripted verdict discharges a vacuous check permanently
 - [ ] `<PREFIX>-log`'s `**UAT-deferred:**` format requires a spaced dash and the reason each verification could not run; `graph.py` emits `reason` on the `DEFERRED` edge and `open-deferrals` renders it
+- [ ] The allowance step ran: either `~/.claude/settings.json`'s `statusLine.command` contains `usage-snapshot.sh` with `refreshInterval` set and `~/.claude/usage-snapshot.sh` is byte-identical to the plugin's, or the user declined and the settings block was printed. `pilot.md` contains `usage-snapshot.json` in its Step 0 read, its Step 2 stop and its `whats-up-store:` reads
 - [ ] `.claude/pilot/shift.sh` exists, is **byte-identical** to the plugin's `shared/shift.sh`, and is tracked by git; `git check-ignore -v .claude/pilot/state.json` names a rule and `git check-ignore .claude/pilot/shift.sh` exits 1 (the negation holds); `governed-paths.conf` `PATH_MAP` has `'^\.claude/pilot/:EXEMPT'` before the `.claude/` catch-all
 - [ ] `pilot.md` carries the standing mission: `(no goal, no flag)` and `--deferrals` rows in the Decompose store table, `Standing-mission gate`, `One run at a time`, a `Models` scorecard row, `last-run.json`, `Next shift`, `runnable rows left` and `PILOT_NOTIFY_URL`, and a `whats-up-store:` frontmatter block with a `live:` line; `whats-up.md`'s store schema documents `live:` and its closing line names `/pilot` with no arguments as the batch for runnable rows
 - [ ] `code.md`, `fix.md` and `pilot.md` pass a `Graph blast:` block to both the qa and pm prompts (`code.md`/`fix.md` contain `Pre-ground qa and pm`); `custom-tests.md § Prior-selection` and `§ Regression scope` and `<PREFIX>-pm.md` step 1.5 each read the pack when present and query otherwise; `graph.py blast` accepts `--ids`

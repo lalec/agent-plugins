@@ -237,8 +237,13 @@ run_once() {
   local out="$DIR/$tag.json" err="$DIR/$tag.stderr"
   local code=0
   write_state "started=$(now_iso)" "status=running"
+  # Hold off idle sleep for the length of the run. A Mac that sleeps mid-shift suspends the run
+  # until something wakes it, and the shift's own wall-clock budget keeps ticking; `caffeinate -i`
+  # blocks idle sleep only while this child lives, so a finished shift never leaves the machine awake.
+  # Guarded because the tool is macOS-only, even though launchd already is.
+  local wrap=(); command -v caffeinate >/dev/null 2>&1 && wrap=(caffeinate -i --)
   set +e
-  "$@" >"$out" 2>"$err"
+  "${wrap[@]}" "$@" >"$out" 2>"$err"
   code=$?
   set -e
   # The limit message can arrive on stderr; fold it in so the parser sees it.

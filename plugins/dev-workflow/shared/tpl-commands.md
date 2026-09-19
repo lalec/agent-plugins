@@ -1280,7 +1280,8 @@ pilot-lane:
   spend: none
   apply: >-
     Re-run the audit read-only and abort on any drift from the id set the statuses were decided
-    against. Write each status to `<PREFIX>-review/references/vex.yaml`, then file every `affected`
+    against. Write every candidate to `<PREFIX>-review/references/vex.yaml` — the assessed ones with
+    their status, the rest `under_investigation` — then file every `affected`
     one as a roadmap item carrying its path and action, and commit both together. Preflight
     (non-mutating): the audit command exits, `vex.yaml` parses, `docs/roadmap.md` is writable.
   reversal: statements and roadmap items land in one commit — `git revert <sha>` replays it.
@@ -1301,15 +1302,22 @@ An advisory count is not risk. This lane turns the audit tool's output into one 
 **Flag parse (first):** `--deep` in `$ARGUMENTS` runs Step 3 instead of Steps 1–2. Anything else in `$ARGUMENTS` filters the candidate set to advisory ids or package names matching it case-insensitively; nothing matching → say so and assess the unfiltered set, because a typo'd filter must never read as "nothing to assess".
 
 1. Read `<PREFIX>-review/references/vex.yaml`. Absent → this is the first run; create it.
-2. Run the project's audit command (`npm audit` / `pnpm audit` / `pip-audit` / `cargo audit` / `osv-scanner` — whichever this project's ecosystem ships). No audit tool → record that in `vex.yaml` as the reason the tree is unassessed and stop; do not report the tree clean.
+2. Run the project's audit command (`npm audit` / `pnpm audit` / `pip-audit` / `cargo audit` / `osv-scanner` — whichever this project's ecosystem ships). Where the ecosystem ships more than one, **prefer the one that emits severity**, since Step 1's floor reads it — `pip-audit`, for one, emits ids and fix versions and no severity at all. No audit tool → record that in `vex.yaml` as the reason the tree is unassessed and stop; do not report the tree clean.
 3. **Diff the id sets.** A candidate is an id the file does not carry, or one whose `package` version has moved. Everything else is carried forward untouched — its status was decided against the version still installed, and re-deciding it is the cost this lane exists to avoid.
-4. Report the split before working: `<N> carried · <M> to assess`.
+4. **Record every candidate before deciding any of them** — one `under_investigation` statement each, carrying only `id`, `package`, `commit` and `first_seen`. No tracing, no judgement; this is bookkeeping and it is cheap. A candidate that is never written is invisible to `open-advisories`, so a run that assesses ten of a hundred leaves the store answering `(none)` and `/whats-up` reading the tree as clean. "The rest keep `under_investigation`" is only true once the rest are on the file.
+5. Report the split before working: `<N> carried · <M> to assess, in <P> packages`.
 
-## Step 1 — Assess, at most 10 per run
+## Step 1 — Assess, at most 5 packages per run
 
-Rank the candidates by **what the package parses or fetches** — a parser reading user-uploaded bytes outranks a build tool with more advisories and a higher score — and take the top 10. The rest keep `status: under_investigation`, which is what makes the store say the work is unfinished rather than silently dropping it.
+Rank the **packages** per `security-review.md § Triage` and take the top 5. The unit is the package because the cap is, and advisory count is an input to neither.
 
-The cap is the lane's own bound and it is why this lane is free to dispatch (`spend: none`): an unattended run can take it without a grant, and a backlog of 80 advisories costs ten per run rather than one very expensive turn.
+Then assess **every** advisory in each package taken. They share the sink and usually the same fix, so a package is one act of tracing and its advisories cost a line each. Bounding the rows instead of the packages spends a whole run inside one noisy dependency and never reaches the rest of the route — thirteen near-identical decoder advisories, one version bump, and the multipart parser that reads the same upload bytes one hop earlier left undecided. Take fewer than 5 when a package turns out to carry a large set; the bound is the size of the run, not the number.
+
+**The floor applies here.** § Triage's severity floor is what admits a critical whose package ranked below the cut — the cap is the only thing it exists to override. It needs a scanner that emits severity: none in the output → enrich from the OSV API, and if it stays unavailable say so in the report rather than reporting the floor clear.
+
+Everything not taken keeps the `under_investigation` statement Step 0 wrote, which is what makes the store say the work is unfinished rather than silently dropping it.
+
+The cap is the lane's own bound and it is why this lane is free to dispatch (`spend: none`): an unattended run can take it without a grant, and a backlog of 80 advisories costs five packages per run rather than one very expensive turn.
 
 For each, follow `security-review.md § Triage` and write the statement. `affected` needs the path and an action; `not_affected` needs one of the five justifications; a control that can be turned off is a `compensating_control` on an `affected` statement, never a justification.
 
@@ -1325,7 +1333,7 @@ Set the base ref first — `git remote set-head origin <default-branch>` — or 
 
 ## Done
 
-Report per `code.md § Done` — the five blocks, the closing line, the same closed status words. `<N> assessed, <M> still unassessed` is a Status row; each `affected` one filed is an Emerged row naming its roadmap id; an `affected` one you could not trace to a sink stays Open, because nobody else will pick it up.
+Report per `code.md § Done` — the five blocks, the closing line, the same closed status words. `<N> assessed, <M> still unassessed` is a Status row and **names the packages the unassessed ones sit in**, since a bare count tells the next run nothing about what it is ranking; each `affected` one filed is an Emerged row naming its roadmap id; an `affected` one you could not trace to a sink stays Open, because nobody else will pick it up.
 
 This lane runs no `<PREFIX>-dev`, so scope it uncovers has no writer but this one — file it per `code.md § Done` block 4 and cite the id.
 ```

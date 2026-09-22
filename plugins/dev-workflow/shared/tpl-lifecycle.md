@@ -80,7 +80,7 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
 
 - **Title** — short, plain English. Not the raw commit message — rephrase for a human skimming the log.
 - **Body** — 1–3 sentences. Add context beyond the title: *why* it was needed, *what problem* it solves, any non-obvious decisions.
-- **Tests** — be honest. "manual smoke" is a real test. Common values: `lint + type check (clean)`, `manual smoke in browser`, `E2E: <scenario>`, `none`. If a gate decision was auto-selected on a timeout, say so here — never record it as user-confirmed. Same for a scope the pipeline derived rather than asked: when QA's handoff reports `regression=<value> (derived: <reason>)`, carry that reason here, so the log says *why* the run was as broad as it was.
+- **Tests** — be honest. "manual smoke" is a real test. Common values: `lint + type check (clean)`, `manual smoke in browser`, `E2E: <scenario>`, `none`. If a gate decision was auto-selected on a timeout, say so here — never record it as user-confirmed. Same for a scope the pipeline derived rather than asked: when QA's handoff reports `regression=<value> (derived: <reason>)`, carry that reason here, so the log says *why* the run was as broad as it was. Carry its `priors: N walked of M selected (cap C)` verbatim too when it has one — three numbers, no rewriting: that triple is the only durable record of how wide a regression actually went, and it is what lets a later reader see a cap being exceeded run after run rather than once.
 - **Skills** — only skills confirmed present in the marker union from Process step 3, separated by ` · `. Use `—` if none found; never reconstruct from memory. This field is the source of the delivery graph's `USED` edges, and it is the **only** record that a no-file-trace skill like `<PREFIX>-review` or `<PREFIX>-debug` ran — git cannot recover it, so an inaccurate list here is unrecoverable later.
 - **Deployed** — one line per component deployed this session, taken verbatim from the deploy-owning skill's report (e.g. `backend → test · https://test-api.example.com`). Omit the line entirely when no deploy happened.
 - **Addresses** — the `**Id:**` of each `docs/roadmap.md` item this task advances or closes, comma-separated (e.g. `verification-email-on-signup, stripe-receipt-sender`). This is the durable roadmap↔delivery link: without it the connection survives only as a status flip that nothing can trace back. Use the ids the pm step confirmed; omit the line when the task addresses no tracked item, and say so in the pm handoff rather than guessing an id.
@@ -2037,8 +2037,23 @@ browser step by step), an Integration check **~2–3** through the batched runne
 **~120 tool calls** and size the set from that mix — roughly 6 UX/E2E checks, or 40 Integration ones,
 or any combination that adds up. State the budget and the mix in the tier summary.
 
-A run that cannot fit the ranked set into its budget is telling you something true: report it as a
-line, because a corpus where one file anchors 46 checks needs finer `paths:`, not a bigger budget.
+**Honouring the budget costs nothing, which is the whole reason it works.** Everything past it is
+recorded `blocked` with its reason and re-raised at the next `/code`, `/fix` or `/pilot` Step 0 — so
+stopping at the cap defers work, it never abandons it. An agent that overruns a cap does it because
+stopping *feels* like leaving something unproven; here it does not, and the ranked order means what
+you did walk was the part most likely to be at risk.
+
+**Report `priors: N walked of M selected (cap C)` on the `Tests:` line**, all three numbers, every
+time priors were in scope — including when N = M. That line is the only place this reaches the
+delivery log, and a cap nobody records is a cap nobody keeps: the sibling rule bounding a fan-out
+child's turns had no such field and was exceeded threefold on a real run with nothing noticing, while
+the model split, which does have one, has held since it shipped. Nothing here gates and nothing asks
+a person — an overrun is legible after the fact, which is the strongest mechanism available and
+enough, because the incentive to overrun is already gone.
+
+A run that cannot fit the ranked set into its budget is telling you something true: say so in the
+same line, because a corpus where one file anchors 46 checks needs finer `paths:`, not a bigger
+budget.
 
 ## Carrying a prior forward
 

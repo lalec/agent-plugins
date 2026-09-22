@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Claude Code status line: cwd  model  context%  [git-branch]
+# Claude Code status line: cwd  model  context%  [5h%  7d%]  [git-branch]
 # Requires: jq  (brew install jq)
 
 input=$(cat)
@@ -20,6 +20,16 @@ else
   ctx_part="ctx -"
 fi
 
+# Plan usage: percent of the rolling 5-hour and 7-day allowance spent. Subscription sessions only,
+# and only after the first API response — and a session commonly reports one window and not the
+# other, so each is shown independently. One jq call for both — this runs on every render — and jq
+# labels and joins them itself, because splitting two values out of one line in bash puts the wrong
+# label on the figure the moment the absent window is the first one.
+limits_part=$(echo "$input" | jq -r '
+  [ (.rate_limits.five_hour.used_percentage | select(. != null) | "5h \(round)%"),
+    (.rate_limits.seven_day.used_percentage  | select(. != null) | "7d \(round)%") ]
+  | join(" ")')
+
 # Git branch (skip optional locks to avoid hangs)
 git_branch=""
 if git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
@@ -28,5 +38,6 @@ if git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
 fi
 
 parts=("$short_cwd" "$model" "$ctx_part")
+[ -n "$limits_part" ] && parts+=("$limits_part")
 [ -n "$git_branch" ] && parts+=("$git_branch")
 printf '%s' "${parts[*]}"

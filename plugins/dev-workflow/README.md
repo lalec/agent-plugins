@@ -44,7 +44,7 @@ A multi-agent delivery workflow for Claude Code. It runs your plan through a tea
 - [`agent-browser`](https://github.com/vercel-labs/agent-browser) plugin installed — used by `<PREFIX>-test` for E2E browser automation
 - [`skill-creator`](https://github.com/anthropics/skills/tree/main/skills/skill-creator) skill installed — used by `<PREFIX>-skill` to author and update skills
 - [`ui-ux-pro-max`](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) skill installed — used by `<PREFIX>-design` for design intelligence (styles, palettes, font pairings, design-system generation) *(conditional: only if a design skill is installed; can be replaced with any design skill — update the reference in `<PREFIX>-design/SKILL.md` after install)*
-- `visual-assets` skill installed, with `GEMINI_API_KEY` exported — used by `<PREFIX>-design` to generate icons and artwork at the exact size a platform needs, so a new icon sits in the same family as the ones beside it *(conditional: only if a design skill is installed; can be replaced with any image-generation skill — update the reference in `<PREFIX>-design/SKILL.md` after install)*
+- [`visual-assets`](https://github.com/lalec/agent-skills/tree/main/visual-assets) skill installed — used by `<PREFIX>-design` to generate icons and artwork at the exact size a platform needs, so a new icon sits in the same family as the ones beside it *(conditional: only if a design skill is installed; can be replaced with any image-generation skill — update the reference in `<PREFIX>-design/SKILL.md` after install)*
 
 ---
 

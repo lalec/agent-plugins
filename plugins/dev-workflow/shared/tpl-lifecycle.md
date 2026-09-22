@@ -1924,8 +1924,9 @@ finish in roughly 60 turns; a child still working past that returns what it has 
 never started, and the caller re-dispatches the remainder. **When in doubt, split further** — more
 children is the cheaper direction, bounded only by what the harness will run at once.
 
-**One condition on that, and only at the wall.** Read `~/.claude/usage-snapshot.json` at the moment of
-splitting. When the tighter window has less left than this batch would plausibly use, **do not open
+**One condition on that, and only at the wall.** Run `bash ~/.claude/usage-snapshot.sh --read` at the
+moment of splitting — that script owns the arithmetic; never read its files directly, because a shared
+raw read on a machine with several open sessions returns whichever session wrote last. When the tighter window has less left than this batch would plausibly use, **do not open
 it**: record the remaining verifications as `blocked` with the reset time as their `reason` and let
 the task close. Absent or stale snapshot, or a figure that says there is room, changes nothing — the
 rule above stands. This is about the wall, never about cost: narrowing a batch to save money makes

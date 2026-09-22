@@ -17,6 +17,12 @@ call times out at 120 s by default, and one hung target run sequentially at 120 
 used to take every other observation in the chunk down with it. Output stays in manifest
 order whatever finished first.
 
+A command is a command: an Integration curl and a UX/E2E entry's recorded `replay:`
+browser sequence both arrive here as `{name, cmd}` and both batch. Give a replay chunk a
+longer `--timeout` and keep it small — a browser walk takes far longer than a curl, and the
+timeout has to cover the slowest entry in its chunk. A replay **drives and captures**; the
+caller still reads the screenshot it saved and judges, per the invariant below.
+
 THE INVARIANT THIS FILE EXISTS TO HOLD: **`run` never emits a verdict.** It reports an
 exit code, a duration and the head of the output; the caller decides `pass | fail |
 blocked`. A verification `pass` means the assertion was *exercised and held*, and a

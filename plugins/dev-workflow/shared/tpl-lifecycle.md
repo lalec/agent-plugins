@@ -1731,6 +1731,10 @@ tests:
     assert: '<one sentence: what must be true>'
     type: UX | Integration | E2E     # UX=frontend · Integration=backend (api/data) · E2E=full journey
     paths: ["<changed path/glob>"]   # from dev's `Files changed:` (minus .claude/**); drives prior-selection
+    replay: '<one shell command>'    # UX/E2E only, optional: the discovered sequence, re-runnable
+                                     # through run-checks.py. It drives and captures; the agent still
+                                     # reads the screenshot and judges. Stale replay → walk it by hand
+                                     # and rewrite. Omit when the walk needs a mid-sequence judgement.
     last:                            # written by this skill after every run it executes
       status: pass | fail | blocked  #   the outcome recorded in the Evidence trace
       reason: '<why>'                #   REQUIRED on blocked (and on fail): what failed to occur,
@@ -1771,13 +1775,16 @@ during the run"), never a restatement of the assert. Single-quoted, same reason 
 
 | type | how to run | pass criterion |
 |---|---|---|
-| UX | `agent-browser` to the resolved url; check the UI | predicate holds **and** a screenshot of the live UI was saved |
+| UX | `agent-browser` to the resolved url; check the UI — **via the entry's `replay:` when it has one**, see below | predicate holds **and** a screenshot of the live UI was saved |
 | Integration | curl/wget the resolved endpoint **or** run the data-store query — whichever the assert names — **batched, see below** | HTTP 2xx and body satisfies, or result row(s) satisfy, the verification |
-| E2E | `agent-browser`: perform the UI action, then confirm the backend effect | UI predicate holds **and** a screenshot was saved **and** the backend effect is confirmed |
+| E2E | `agent-browser`: perform the UI action, then confirm the backend effect — **via the entry's `replay:` when it has one**, see below | UI predicate holds **and** a screenshot was saved **and** the backend effect is confirmed |
 
-**Batching the Integration set.** Resolve each entry's target as above, then hand them to the runner
-in chunks of **≤10** rather than taking a turn per verification — every intermediate response body
-otherwise lands in the transcript and is re-read on every turn after it:
+**Batching.** Resolve each entry's target as above, then hand them to the runner in chunks of **≤10**
+rather than taking a turn per verification — every intermediate response body otherwise lands in the
+transcript and is re-read on every turn after it. Every Integration entry goes through this, and so
+does any UX or E2E entry carrying a usable `replay:` (below): to the runner they are all just a name
+and a command. Keep a replay chunk separate and small — a browser sequence takes far longer than a
+curl, and `--timeout` has to cover the slowest one in its chunk:
 
 ```bash
 python3 .claude/skills/<PREFIX>-test/scripts/run-checks.py run <<'JSON'
@@ -1803,8 +1810,29 @@ commit-as-you-go rule below only survives a killed agent if outcomes land as the
 Check **freshness once per target, before the chunk**, not per entry: one stale target invalidates
 every row in the chunk, each reported `stale target — non-evidence`, not just the row that noticed.
 
-UX and E2E are not batched. Their observation is a screenshot that has to be looked at, and their
-steps are discovered as the page responds — neither fits a manifest of commands fixed in advance.
+**UX and E2E: discover once, then replay through the runner.** The judgement never batches — the
+observation is a screenshot that has to be looked at, and the first walk genuinely discovers its steps
+as the page responds. But **the steps, once discovered, are worth keeping**: re-deriving them costs
+~15–20 tool calls per entry, every run, forever, and that is the single largest line in a regression
+sweep (one retest of 38 browser-driven priors cost $25.23 across four children of 186, 186, 139 and
+127 calls).
+
+So after a UX or E2E entry passes, write the sequence that walked it into the entry as `replay:` — a
+single shell command, `&&`-chained `agent-browser` calls or a small script under the test skill's
+`scripts/`, that navigates, acts, and **saves the screenshot to a stated path**. On the next run:
+
+- an entry with a usable `replay:` goes into the `run-checks.py run` manifest like any Integration
+  entry — one call for the whole sequence instead of twenty;
+- the agent then **reads the saved screenshot and judges**. The script drives; it never decides. A
+  script that printed `PASS` would permanently discharge a check whose assertion nobody looked at,
+  which is the vacuous-pass rule one level down;
+- `replay:` that errors, or whose screenshot is missing or shows a different page, is **stale** —
+  discard it, walk the entry interactively, and rewrite it. A replay is a cache of the steps, never
+  evidence in itself;
+- an entry whose walk needed a judgement call mid-sequence (choosing which row to click from what the
+  page happened to show) has no stable sequence: leave `replay:` off and say so. Not every check can
+  have one, and a wrong replay is worse than none.
+
 Their **outcomes** are recorded exactly like everything else.
 
 **Screenshot rule (UX and E2E):** every UX and E2E entry must take a screenshot of the actual UI at
@@ -1918,11 +1946,24 @@ the `assert`, or is it vacuous) is the same rule on every row. That is the fan-o
 judgment that decided what to fan out stays on the caller's model. Name the model on the handoff's
 `Fanned out:` field so the saving is measurable rather than assumed.
 
-**Bound the turns in a child, not the number of children.** Cost grows with the square of a child's
-turn count, so one child taking 160 turns costs far more than two taking 80. Size each slice to
-finish in roughly 60 turns; a child still working past that returns what it has plus the entries it
-never started, and the caller re-dispatches the remainder. **When in doubt, split further** — more
-children is the cheaper direction, bounded only by what the harness will run at once.
+**Bound the total tool calls, and size each slice by the *type* of check in it.** Cost is close to
+**linear in tool calls** — measured at $0.032–0.047 per turn across children from 41 to 186 turns, a
+1.15× spread over a 4.5× range. The quadratic growth term is real but weak at this scale, which means
+**re-slicing the same work saves almost nothing and adds a prefix per child**: splitting a 186-turn
+child into three would have recovered ~15% of it and paid two extra briefs. The earlier guidance here
+("cost grows with the square"; "when in doubt split further") over-read a single measurement — the
+lever is how many calls the work takes, not how they are distributed.
+
+So size slices by what the checks cost, not by dividing the count evenly. Measured per verification:
+a **UX or E2E check ≈ 15–20 tool calls** (each browser step is its own round trip), an **Integration
+check ≈ 2–3** through the batched runner. A real run split 38 browser-driven priors four ways by
+count and produced children of 186, 186, 139 and 127 calls against a stated bound of ~60 — $25.23 for
+one retest — because the split ignored that every entry in those slices was the expensive kind.
+
+Give each child **~120 tool calls of work**: roughly 6 UX/E2E entries, or 40 Integration ones, or a
+mix that adds up. A child still working past its slice returns what it has plus the entries it never
+started, and the caller re-dispatches the remainder. Split further only to fit that budget — never as
+a saving in itself.
 
 **One condition on that, and only at the wall.** Run `bash ~/.claude/usage-snapshot.sh --read` at the
 moment of splitting — that script owns the arithmetic; never read its files directly, because a shared
@@ -1965,6 +2006,39 @@ unchanged, only where the answer comes from. No block, or a block for different 
 
 The rule it implements: include a prior verification when its stored `paths:` set intersects the
 changed-paths list passed by the caller. This task's own verifications always run.
+
+### `smart` has a second stage — rank, walk a budget, record the rest
+
+Intersection alone is not a scope. On a **hub file** it selects nearly everything: one install's three
+busiest files pull in 52, 49 and 46 priors out of 316, and every mission lands on one of them. So
+`smart` silently equalled `full` exactly where it mattered — and because no rule said what to do next,
+real runs improvised the one thing the rules forbid, dropping 38 and 60 priors by judgement with no
+record that anything was left unproven.
+
+Order the intersected set, walk it against a budget, and **record what you did not reach**:
+
+1. **Rank by how much the intersection actually says.** A path that pulls in 46 priors is weak
+   evidence that any one of them is at risk; a path that pulls in 2 is strong. Count the priors each
+   of your intersecting paths appears in — the `paths:` fields in `custom-tests.yaml` are the whole
+   input — and rank each prior by its **most specific** matching path, most specific first. A prior
+   whose only link to this change is a hub file ranks last.
+2. **Then by unproven-ness**: a `fail` or `blocked` prior outranks a passing one at the same
+   specificity, and this task's own verifications and the end-state check come before everything.
+3. **Walk in that order** until the set is done or the budget is spent (below).
+4. **Everything unwalked is recorded `blocked`** with `reason: not reached — <N> priors ranked below
+   the budget on <path>, ranked by specificity`. That is the difference between a scope and a silent
+   drop: a `blocked` entry is re-raised by `open-deferrals` at the next `/code`, `/fix` or `/pilot`
+   Step 0, so nothing disappears. **Never report an unwalked prior as passing, and never omit it.**
+
+**The budget.** Cost is close to **linear in tool calls**, measured at ~$0.035 per turn across
+children from 41 to 186 turns — so the bound that matters is the total number of calls, not how they
+are divided. Measured per verification: a UX or E2E check costs **~15–20 tool calls** (it drives a
+browser step by step), an Integration check **~2–3** through the batched runner. Budget a walk at
+**~120 tool calls** and size the set from that mix — roughly 6 UX/E2E checks, or 40 Integration ones,
+or any combination that adds up. State the budget and the mix in the tier summary.
+
+A run that cannot fit the ranked set into its budget is telling you something true: report it as a
+line, because a corpus where one file anchors 46 checks needs finer `paths:`, not a bigger budget.
 
 ## Carrying a prior forward
 
@@ -2021,11 +2095,25 @@ python3 .claude/graph/graph.py blast <changed paths…>
 A `Graph blast:` block in the dispatch prompt for these same paths **is** this call's output — read
 the owners and verification statuses from it and do not re-run the query.
 
-Escalate to `full` when either holds, else `smart`:
-- the changed paths are owned by **more than one skill** — a change that crosses ownership
-  boundaries can break something no single domain's checks cover;
-- any prior verification covering those paths has `last.status` of `fail` or `blocked` — the area
-  already has an unproven invariant, so this is the run that should re-prove it.
+**`auto` never resolves to `full`.** It resolves to `smart`, and the two risk signals below **add
+named priors** to the selected set rather than switching it to the whole corpus. `full` is reachable
+only by a person typing `--regression full`, because only a person can accept its price.
+
+This is not a loosening — it is the fix for a measured failure that has now happened twice. Both
+triggers are near-permanent in a mature project: one install has 20 fail/blocked entries spanning 34
+paths, and one of those paths is the file nearly every mission touches, so *any* change there
+escalated the whole 316-entry corpus. A ten-line change on another install resolved to `full` the
+same way, and its own scorecard had to report *"resolved to full by the agent, not by you"*. The
+signal is real; treating it as "walk everything" is what was wrong.
+
+| Signal | What it adds |
+|---|---|
+| The changed paths are owned by **more than one skill** — a change crossing ownership boundaries can break what no single domain's checks cover | Every prior owned by each of the other skills **whose own `paths` intersect the diff**. Name the skills |
+| Any prior covering those paths has `last.status` of `fail` or `blocked` — the area already holds an unproven invariant | Those specific priors, by name, plus any sharing a path with them. They were already never-carried, so this mostly makes the reason explicit |
+
+Report the result as `smart +<N> (<which signal>)`. If the additions plus the base selection reach
+the whole corpus anyway, say so — that is a project telling you its verifications are anchored too
+coarsely, and it is a finding, not a scope.
 
 **Fallback ladder**, in order, because the graph is an accelerator and never a gate:
 1. `graph.py blast` as above;
@@ -2033,9 +2121,8 @@ Escalate to `full` when either holds, else `smart`:
    `<CONFIG_DIR>/hooks/governed-paths.conf`, and apply the same two-part test;
 3. neither available → `smart`, saying the derivation was unavailable.
 
-**Never default to `full` when the signal is missing.** A missing accelerator would then silently
-multiply the cost of every task, and the reason would read as evidence when it is the absence of
-evidence.
+**Never widen when the signal is missing.** A missing accelerator would otherwise silently multiply
+the cost of every task, and the reason would read as evidence when it is the absence of evidence.
 
 Report the resolved value **and a one-clause reason** ("touches two owning skills"; "prior check
 `<name>` is blocked") back to the caller. Unreported, an escalation looks like the caller's own

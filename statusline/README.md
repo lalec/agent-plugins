@@ -3,10 +3,10 @@
 A minimal Claude Code [status line](https://code.claude.com/docs/en/statusline) showing the current directory, model, context usage, how much of your plan allowance is spent, and the git branch:
 
 ```
-~/py-projects/agent-plugins Opus 4.8 (1M context) 43% ctx 5h 55% 7d 100% main
+~/py-projects/agent-plugins Opus 4.8 (1M context) 43% ctx 55% session (1h51m) 100% weekly (2d6h) main
 ```
 
-`5h` and `7d` are the share of your rolling 5-hour and weekly allowance used — the numbers `/usage` shows as bars, which is where the session actually stops. They appear on a Claude subscription after the first reply, and a session often reports one window and not the other, so each shows only when Claude Code sends it.
+`session` and `weekly` are the share of your rolling 5-hour and weekly allowance used, with the time left until each resets — the numbers `/usage` shows as bars, and the ones that actually stop you working. They appear on a Claude subscription after the first reply, and a session often reports one window and not the other, so each shows only when Claude Code sends it.
 
 Claude Code does not let plugins set the main status line, so it is installed as a personal setting:
 

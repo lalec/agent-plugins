@@ -935,12 +935,23 @@ def by_kind(edges: list[dict], kind: str) -> list[dict]:
     return [e for e in edges if e["e"] == kind]
 
 
+# A verification whose latest record is one of these is closed. `retired` is the ladder's
+# `superseded`/`expired`/`moot` written onto a check: its baseline or its subject is gone, so
+# no run can ever produce the `pass` that would otherwise be the only way out. Without it a
+# dead check stays open forever, re-raised by every deferral run with nothing left to walk.
+CLOSED = ("pass", "retired")
+
+
 def covering(edges: list[dict], changed: list[str]) -> list[str]:
+    """Prior-selection. A retired check is not a prior — walking it proves nothing — and a
+    later `record` of any other status puts it back, so exclusion here is never permanent."""
+    stat = last_status(edges)
     return sorted(
         {
             node_id(e["from"])
             for e in by_kind(edges, "COVERS")
             if path_hits(node_id(e["to"]), changed)
+            and stat.get(node_id(e["from"]), {}).get("status") != "retired"
         }
     )
 
@@ -1065,8 +1076,9 @@ def open_verifications(
     `blocked` belongs here because the vacuous-pass rule makes it the honest outcome when
     an assertion never got exercised, and only some of those are also written up as a log
     deferral — the rest were invisible to every standing query. Both states close the same
-    way: a later `pass` and nothing else, which is why chronology is `last_status` (newest
-    VERIFIED edge wins) for both. A **never-run** verification is deliberately not open
+    way: a later `pass` — or a later `retired`, when what the check measured no longer exists —
+    and nothing else, which is why chronology is `last_status` (newest VERIFIED edge wins) for
+    both. A **never-run** verification is deliberately not open
     work — it has no recorded outcome to act on, and surfacing every one would bury the
     entries that do.
 
@@ -1080,7 +1092,7 @@ def open_verifications(
     rows: dict[str, dict] = {}
 
     def row(name: str) -> dict | None:
-        if stat.get(name, {}).get("status") == "pass":
+        if stat.get(name, {}).get("status") in CLOSED:
             return None
         if changed and not path_hits_verif(edges, name, changed):
             return None

@@ -1736,8 +1736,9 @@ tests:
                                      # reads the screenshot and judges. Stale replay → walk it by hand
                                      # and rewrite. Omit when the walk needs a mid-sequence judgement.
     last:                            # written by this skill after every run it executes
-      status: pass | fail | blocked  #   the outcome recorded in the Evidence trace
-      reason: '<why>'                #   REQUIRED on blocked (and on fail): what failed to occur,
+      status: pass | fail | blocked | retired  # the outcome recorded in the Evidence trace;
+                                     #   retired = closed without a walk, see below
+      reason: '<why>'                #   REQUIRED on blocked, fail and retired: what failed to occur,
                                      #   or what would close it. Also required on a pass reached
                                      #   through a substituted path: name the substitution and
                                      #   what blocked the real entry. Omit on a plain pass
@@ -1764,6 +1765,14 @@ Step 0 and rendered by `graph.py open-deferrals`, so a blocked entry without one
 with no way to act on it — the reader learns a check is unproven and nothing about what would prove
 it. Name the trigger that would close it ("no non-prod env for the worker"; "no refresh was due
 during the run"), never a restatement of the assert. Single-quoted, same reason as `assert`.
+
+`retired` closes a check that can never be walked again — its baseline code is gone, its subject was
+removed, or a newer check owns the same assertion. It is the `superseded` / `expired` / `moot` verdict
+of `/pilot`'s ladder written onto a verification, because `pass` is otherwise the only way out of
+`open-deferrals` and recording a pass for a walk that never happened is the vacuous pass this file
+forbids. Its `reason` names what removed the subject, never "not worth running". A retired check is
+not a prior: selection skips it in every scope and nothing carries it. It is never deleted — the log
+entry that deferred it still cites the name — and any later `record` of another status revives it.
 
 ## Execution (per verification, every run)
 
@@ -1872,15 +1881,15 @@ batched:
 ```bash
 python3 .claude/skills/<PREFIX>-test/scripts/run-checks.py record <<'JSON'
 {"commit": "<the run's pinned sha>",
- "results": [{"name": "<verification>", "status": "pass|fail|blocked", "reason": "<one line>"}]}
+ "results": [{"name": "<verification>", "status": "pass|fail|blocked|retired", "reason": "<one line>"}]}
 JSON
 ```
 
 It edits only the `last:` block of each named entry — the file is hand-shaped, so nothing else is
 reformatted — then commits **once per call**, scoped to `custom-tests.yaml` alone so in-flight work
 in the tree is never swept into a bookkeeping commit, retrying if a parallel child is holding the
-index lock. It **refuses and writes nothing** on a name that is not in the file, a `blocked` or `fail`
-with no reason, a multi-line reason, or any write that would change the entry set. A refusal is a
+index lock. It **refuses and writes nothing** on a name that is not in the file, a `blocked`, `fail`
+or `retired` with no reason, a multi-line reason, or any write that would change the entry set. A refusal is a
 real finding: it usually means the name drifted, not that the outcome was wrong.
 
 **Resolve `commit` once, at the start of the run** — `git rev-parse --short HEAD` before the first
@@ -2073,6 +2082,7 @@ code. Carry the verdict forward and record the commit range as its evidence.
 
 - the **end-state** verification of the current task (non-negotiable in every scope and every
   retest — see above);
+- a prior whose `last.status` is `retired` is neither — it is out of scope, not carried and not walked;
 - any prior whose `last.status` is `blocked` or `fail` — an unproven invariant is exactly what a
   re-run exists for;
 - any prior with no `last:` block at all (never run), or whose `last.commit` is missing or not an
@@ -2494,8 +2504,9 @@ structured one is authoritative and the other is treated as commentary.
 
 A verification becomes **open work** by either of two routes: a `DEFERRED` edge (the delivery log
 formally deferred it), or a latest `VERIFIED` edge with `status: blocked` (a run recorded it as
-unproven). A later `pass` is the only thing that closes either route, so a verification whose latest
-`VERIFIED` edge is a `pass` is dropped whichever route it came in by. A bare `fail` is **not** a
+unproven). A later `pass` closes either route, and so does a later `retired` — the subject is gone, so
+no pass can ever arrive — so a verification whose latest `VERIFIED` edge is either is dropped whichever
+route it came in by. A bare `fail` is **not** a
 route in — a failing verification blocks its own task and is fixed or escalated there, never carried
 as standing open work. Both routes produce one row —
 `open-deferrals` reports it once, carrying `deferred_at`/`accepted_by` for the first and
@@ -2507,7 +2518,7 @@ onto the `VERIFIED` edge precisely so the row renders the trigger that would clo
 
 A missing `last:` block means "never run" — never a pass, but also **not open work**: there is no
 recorded outcome to act on, and surfacing every never-run entry would bury the ones that have one. A
-`pass` is the only thing that closes either route, which is why a vacuous observation must be
+`pass` is the only *walked* outcome that closes either route, which is why a vacuous observation must be
 recorded as `blocked` (see `<PREFIX>-test` § Record the outcome): a pass on a check that never
 exercised its assertion removes it from this query for good.
 

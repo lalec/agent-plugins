@@ -46,8 +46,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
-STATUSES = ("pass", "fail", "blocked")
-NEEDS_REASON = ("fail", "blocked")
+# `retired` is not a run outcome — `run` still never emits one. It closes a check whose
+# baseline or subject is gone, so nothing can walk it again; the reason names what removed it.
+STATUSES = ("pass", "fail", "blocked", "retired")
+NEEDS_REASON = ("fail", "blocked", "retired")
 COMMIT_MSG = "test: record verification outcomes"
 LOCK_TRIES, LOCK_BACKOFF = 5, 0.4
 

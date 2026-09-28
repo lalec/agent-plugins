@@ -95,6 +95,8 @@ It opens by telling you what state the repo is already in: work sitting uncommit
 
 Then one gate, and it tells you rather than asks: here is what *done* means, here are the checks that will prove it, ship after sign-off or hold? Type into the free-text field to correct the goal, swap a check, or say you'll verify it live — otherwise silence is agreement.
 
+When a check needs the app running, the run starts it on `localhost` only — never on every network interface, so your dev server, its test user and any login bypass aren't reachable from the café Wi-Fi — and stops it once the delivery log is written, so nothing is left listening after the run. Ask during the run to test on your phone and it serves to your network for that run only; ask to keep it up and it stays.
+
 ### Fix a bug
 ```
 /fix <describe the bug or regression>

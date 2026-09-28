@@ -150,7 +150,7 @@ Run only if verifications with type `UX` or `E2E` were captured. For each affect
 - Env has `invoke:` (invoke-env) → skip it. A run-to-completion job holds no process and answers at no address, so there is nothing to start and nothing to probe — probing it reports a component down that was never up. Continue to the component's **next** non-prod env, and fall through to the row below only when none is left.
 - No non-prod env → continue; <PREFIX>-test reports those verifications blocked and Step 2 handles it.
 
-Leave any server you started running — note it under Done.
+**Loopback only**: start it bound to `localhost` per the deploy-config schema's loopback rule, and once it answers confirm the listener is not on every interface — `lsof -nP -iTCP:<port> -sTCP:LISTEN` shows `127.0.0.1` or `[::1]`, never `*`; a `*` listener is stopped at once and restarted on loopback, or reported if it cannot be. Note the process group and port of every server you start or restart: the pm step stops them.
 
 ## Step 2 — Review & Test (<PREFIX>-qa)
 
@@ -197,6 +197,8 @@ Task:
 
     **QA-evidence:**
     <paste the full ## Handoff block returned by <PREFIX>-qa, verbatim>
+
+**Then stop the verification stack.** Once pm has returned, stop every serve-env the ensure-stack step started or restarted — kill its process group and confirm its port is free. Nothing after pm needs it: the prod deploy and the prod walk run against prod, and a dev server left up keeps a seeded test user and any auth bypass reachable for as long as nobody remembers it. A server that was already running and only reused is left as found. The one exception is the user asking, in this run, to keep it up to look at it themselves — then it stays, and the Status row says so with its url.
 
 ## Step 4 — Deploy to prod (only if `ship_mode: prod`)
 
@@ -247,7 +249,7 @@ Five blocks, in this order, then one closing line, and nothing else. No preamble
 | What | Status | Evidence |
 |---|---|---|
 
-Rows: the acceptance statement itself, each verification that ran, the deploy, the push, the delivery log, docs, reference sync, plus the facts the run produced that need no action — a serve-env left running, a value the pipeline resolved for you. Rows that are not in a good state come first. The deploy / push / log / docs / ref-sync rows are the Step 5 scorecard facts — each one checked against reality there, never echoed from a handoff.
+Rows: the acceptance statement itself, each verification that ran, the deploy, the push, the delivery log, docs, reference sync, plus the facts the run produced that need no action — a serve-env stopped after pm, a value the pipeline resolved for you. Rows that are not in a good state come first. The deploy / push / log / docs / ref-sync rows are the Step 5 scorecard facts — each one checked against reality there, never echoed from a handoff.
 
 Every row takes one word from this closed set. Nothing else may be dressed up as a status:
 
@@ -328,7 +330,7 @@ One row each for: a parked gate, a gate decided on a **timeout** (labelled as au
 
 Rows this command produces that the test above places for you:
 
-- **A serve-env started at Step 1.7** — a **Status** row, `done`, stating the **observed end state**: left running with its url, or stopped with the ports confirmed free, depending on what this project's close-out actually does. Either is `done` and neither is forward work — Step 1.7 restarts a stale server and reuses a live one, so nothing is owed here. Report what you see; do not assert one of the two because the template mentions it.
+- **A serve-env started at Step 1.7** — a **Status** row, `done`, stating the **observed end state**: stopped with its port confirmed free, or still running with its url because you asked to keep it. Neither is forward work — Step 1.7 starts it again when the next run needs it. Report what you see, not what this step says should have happened.
 - **Parallel children qa dispatched** — its handoff `Fanned out:` count — is a **Status** row, `done`, with what they covered as the evidence. Nothing is owed; it is reported because it is a real cost the run has no other way of showing. Any priors carried rather than re-walked ride on the same row as qa's `Tests:` line reports them.
 - **A value the pipeline resolved** — the regression scope when Step 0.5 carried `auto` — is a **Status** row carrying the reason from qa's `Tests:` line. Use the `Decisions:` provenance to place these: `agent` and `pilot-auto` are Status, **`timeout` is Open**, because that is the only case where the user was asked and did not answer.
 - **A `prod-walk:` carried out of Step 2 that Step 5 never ran** (the run held at UAT) is an **Emerged** row: it stays filed as `last: blocked`, and the row names what discharges it — `/code --prod`. It must never vanish just because the deploy step was skipped.
@@ -501,7 +503,7 @@ Run only if verifications with type `UX` or `E2E` were captured. For each affect
 - Env has `invoke:` (invoke-env) → skip it. A run-to-completion job holds no process and answers at no address, so there is nothing to start and nothing to probe — probing it reports a component down that was never up. Continue to the component's **next** non-prod env, and fall through to the row below only when none is left.
 - No non-prod env → continue; <PREFIX>-test reports those verifications blocked and Step 3 handles it.
 
-Leave any server you started running — note it under Done.
+**Loopback only**: start it bound to `localhost` per the deploy-config schema's loopback rule, and once it answers confirm the listener is not on every interface — `lsof -nP -iTCP:<port> -sTCP:LISTEN` shows `127.0.0.1` or `[::1]`, never `*`; a `*` listener is stopped at once and restarted on loopback, or reported if it cannot be. Note the process group and port of every server you start or restart: the pm step stops them.
 
 ## Step 3 — Review & Test (<PREFIX>-qa)
 
@@ -551,6 +553,8 @@ Task:
 
     **QA-evidence:**
     <paste the full ## Handoff block returned by <PREFIX>-qa, verbatim>
+
+**Then stop the verification stack.** Once pm has returned, stop every serve-env the ensure-stack step started or restarted — kill its process group and confirm its port is free. Nothing after pm needs it: the prod deploy and the prod walk run against prod, and a dev server left up keeps a seeded test user and any auth bypass reachable for as long as nobody remembers it. A server that was already running and only reused is left as found. The one exception is the user asking, in this run, to keep it up to look at it themselves — then it stays, and the Status row says so with its url.
 
 ## Step 5 — Deploy to prod (only if `ship_mode: prod`)
 
@@ -771,6 +775,7 @@ Record each task's measured cost **as that task finishes** — not at close-out 
      Carry `UAT-deferred: <names> (auto-accepted — pilot run, not user-confirmed)` into the pm prompt and the mission report for the branches that were genuinely deferred, then continue to 5.
    - `blocked` with code-fix `Notes:` → re-spawn `<PREFIX>-dev` with the fix, then `<PREFIX>-qa` `mode=retest`. At most **2 fix cycles per task**; still blocked → mark the task **failed** with qa's notes. If the failure leaves the tree broken (smoke fails), `git revert` the task's commits before moving on. If later tasks depend on this one, stop the loop and go to Step 3.
 5. Spawn `<PREFIX>-pm` with the feature commit, any UAT-deferred line, the changed paths, the same `Graph blast:` pack, and the verbatim QA-evidence block (`/code` Step 3 prompt shape). Its `Decisions:` line carries the mission gate's answers plus anything decided inside the loop — every autonomous branch is labelled `(pilot-auto)`, never `(user)`; an auto-accepted deferral is `defer=accept (pilot-auto)`. The mission gate's own Ship answer keeps its true origin (`user` or `timeout`).
+6. Stop the verification stack exactly as `/code` Step 3 does, once pm has returned — the next task restarts it on its own commits anyway, so nothing is lost and no server outlives the task that needed it.
 
 **(b) Tweak lane** — top-level inline work under the `/tweak` lane rules: load the owning domain skill first, verify every change inline with shown evidence, commit in small named steps. Task exit: use the `<PREFIX>-review` skill on the task's diff (fix non-source nits directly; a source finding needing review depth → reclassify the task to the pipeline lane and run (a)), then one `<PREFIX>-log` entry for the task. **Scope guard:** if the work grows into schema/API/auth/migrations, reclassify to the pipeline lane before continuing.
 
@@ -853,7 +858,7 @@ Report per `code.md § Done` — the same five blocks (Verdict · Learned · Sta
 - **Status** — one row per task first (`task · status · evidence`, where evidence is the feature commit and the log-entry title), then the mission-level rows: prod deploy, push, roadmap statuses flipped, prod walk, reference sync, and one row per granted unit as `<spent>/<grant>`. A task whose end state was walked is `proven`; a task that shipped with a check nobody could run is `not proven`, never `done`.
 - **Open** — every verdict still parked after (a0), one row each, carrying the evidence needed to answer it and where that evidence lives; these are the reason the user is reading this at all, so they are never folded into the task rows and never shown as decided. A verdict the run **closed on its own** is a Status row, not this — `done`, with the measurement that decided it as evidence — and so is a `waiting` one, carrying its trigger, because nobody is being asked anything. Work the user **approved** at (a0) is `proven` in Status when this run applied it, and Open when the preflight blocked it: `Next` is the filed id's command, and the row names the blocker. Then: each failed or unreached task with enough state to resume, each lane that stopped on an exhausted budget, and each gate this run decided on a `timeout`. For an `--items` mission the resume row's `Next` is `/pilot --items <id>,<id>` — the ids are permanent, so that line is exact and copy-pasteable. A **goal-shaped or plain-batch** mission has no such handle, so file the remaining goal as a roadmap item per `code.md § Done` block 4 and make its id the resume row's `Next`; a goal restated only in this report dies with the session.
 - **Emerged** — ranked, each with its priority and recommendation per `code.md § Done` block 5; each deferral **with its route** (walked at prod in (a2), or still open on a named out-of-band trigger — "deferred" must never cover both facts), the roadmap ids each task's `<PREFIX>-dev` reported on its `Roadmap:` field, scope the mission filed itself, and follow-ups a failed task created. Every row names its home, per `code.md § Done`. On the standing mission add **`Next shift:`** — the top `max_tasks` runnable rows the next standing run would take, by rank, each with its id. It is the veto point: one word at a check-in changes an item's status or priority before a run nobody watches starts it.
-- Serve-envs the mission left running are **Status** rows with their urls, not Open ones.
+- A serve-env still up at close-out — only when you asked to keep it — is a **Status** row with its url, not an Open one.
 - The closing line carries "in a fresh session" — a completed pilot has consumed most of this one. A standing mission's closing line also states `runnable rows left: <N>` — **everything the next standing run could take**: the Open rows a run can execute *plus* the Emerged roadmap backlog it may start, since the standing mission appends that backlog by rank. Counting only the Open rows reads as "done" while a hundred items wait (the first real loop reported 14 with 97 behind them). A loop that fires this command paces itself on that number alone: at 0, the longest idle it allows; above 0, the **shortest** delay it allows — the next task is already known, so an idle gap between tasks is throughput lost, not caution (the first real loop idled 25 minutes between 20-minute tasks). Rows the next tick will take are `Next shift` rows, never Open ones: nothing about them needs a person. On a fixed-interval loop the number is information only — the interval fires either way, which is the property that carries it across a usage-limit reset.
 ```
 
@@ -1275,6 +1280,7 @@ Run when the user says done, or asks to push or deploy. (The `close-out-gate` ho
 1.5. **Walk the end state, once** — name the journey this burst was for and trace it end to end against the running stack, with shown evidence. Each tweak was verified inline where it landed; none of them proves the journey still arrives, and a burst of individually-correct nudges is exactly how a path breaks between its steps. If it does not arrive, that is a `/fix`, not a close-out note. (No `custom-tests.yaml` entry is captured here — this lane persists nothing; the walk is evidence in the log entry.)
 2. **Log** — one `<PREFIX>-log` entry covering the whole burst (name the commits it spans).
 3. **Docs + references** — use `<PREFIX>-docs` to check staleness; use `<PREFIX>-skill` for reference sync scoped to the affected skills.
+3.5. **Stop the servers this burst started** — as `/code` Step 3 stops its verification stack, with the same exception.
 4. **Push + scorecard** — same close-out as `/code` Step 5: push policy via the `<PREFIX>-deploy` skill § Push policy (a push that fires prod CI is an irreversible gate — ask, park on timeout), then the verified scorecard (committed / pushed / logged / docs / ref-sync, each evidence-checked).
 5. **Report** — per `code.md § Done`: the same five blocks (Verdict · Learned · Status · Open · Emerged), the closing line, the same closed status words. The burst is one Status row per tweak plus the close-out rows; the end-state walk from step 1.5 is the row that carries `proven` or `not proven` for the journey as a whole. This lane runs no `<PREFIX>-dev`, so scope the burst uncovered has no writer but this one — file it per `code.md § Done` block 4 and cite the id, or leave it Open with the command that picks it up.
 ```

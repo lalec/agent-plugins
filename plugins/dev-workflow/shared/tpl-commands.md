@@ -305,6 +305,8 @@ One row each for: a parked gate, a gate decided on a **timeout** (labelled as au
 | two or more, **all parked gates** | `Next: /pilot --gates` — the gate names are permanent handles, exactly as ids are, and that mission re-measures each one before proposing anything |
 | two or more, **any without an id** | `Next: /pilot <goal naming the set>` — e.g. `/pilot close the 5 parked gates and 2 failing checks in Open` |
 
+**Whatever the line says, it also names the command for what this run filed.** Append ` · filed: <command>` for the roadmap items this run's Emerged block filed with `queue` — `/fix <id>` (`/code <id>` for a feature) for one, `/pilot --items <id>,…` ranked per `roadmap.md § Rank` for two or more. Filed work does not make the session unsafe to close, which is why it stays out of Open, but a report that files an exploitable flaw and ends `nothing open` leaves the reader to look the command up. Only this run's filings, never the standing backlog — that is `/roadmap`'s — and a `fold into`/`hold until`/`keep`/`discard` row adds nothing. Nothing filed → no suffix.
+
 **Two or more always proposes a batch.** `--items` takes permanent ids and would drop an unfiled row silently, which is why the id-carrying case is separate — but the answer to a mixed set is the **goal form**, which names the whole set, not one command that leaves the reader to re-derive the rest a row at a time. A report that knows about seven open things and offers one of them has made the reader the batching mechanism.
 
 **A batch may include decisions, and this is what `/pilot`'s single up-front gate is for.** Its Confirm question *is* the plan of record, so a run that recommended a disposition per row hands the user one sitting to accept or override them all through the automatic "Other" — the mistake is offering five gates one at a time when answering five is one decision session. A decision the run could **not** recommend still stays out of the count: proposing a mission around a question nobody has answered would park it on the first task.
@@ -1285,7 +1287,7 @@ Run when the user says done, or asks to push or deploy. (The `close-out-gate` ho
 ---
 description: Assess the project's dependency advisories — give each one a VEX status, block only on the exploitable ones, and never re-decide a settled one. `--deep` runs the built-in /security-review over the commits no deep pass has covered.
 pilot-lane:
-  routing: A task that assesses dependency advisories, or runs the deep security pass over commits no pass has covered — evidence gathering against the audit tool and the repo, never code work. Fixing an advisory is a `pipeline` task, not this lane.
+  routing: A task that assesses dependency advisories, or runs the deep security pass over commits no pass has covered — evidence gathering against the audit tool and the repo, never code work. Fixing an advisory is a `pipeline` task, not this lane. A task invokes it as `/audit --max-packages 5`, so one mission task never spends a window on a large backlog.
   close-out: 'vex.yaml statements + a roadmap item per `affected` one'
   spend: none
   apply: >-
@@ -1303,13 +1305,13 @@ whats-up-store:
 
 # Audit
 
-**Usage:** `/audit` — assess the advisories this project has not assessed. `/audit --deep` — run the built-in `/security-review` over the commits no deep pass has covered.
+**Usage:** `/audit` — assess every advisory this project has not assessed, in one run. `/audit --max-packages N` — stop after N packages. `/audit --deep` — run the built-in `/security-review` over the commits no deep pass has covered.
 
 An advisory count is not risk. This lane turns the audit tool's output into one VEX status per advisory and files only what is exploitable here. The triage rule, the five justifications and the compensating-control rule live in `<PREFIX>-review/references/security-review.md § Triage` — **read it and do not restate it**; this file is the driver, not a second copy of the rule.
 
 ## Step 0 — What is already decided
 
-**Flag parse (first):** `--deep` in `$ARGUMENTS` runs Step 3 instead of Steps 1–2. Anything else in `$ARGUMENTS` filters the candidate set to advisory ids or package names matching it case-insensitively; nothing matching → say so and assess the unfiltered set, because a typo'd filter must never read as "nothing to assess".
+**Flag parse (first):** `--deep` in `$ARGUMENTS` runs Step 3 instead of Steps 1–2. `--max-packages N` bounds Step 1 to the top N packages. Anything else in `$ARGUMENTS` filters the candidate set to advisory ids or package names matching it case-insensitively; nothing matching → say so and assess the unfiltered set, because a typo'd filter must never read as "nothing to assess".
 
 1. Read `<PREFIX>-review/references/vex.yaml`. Absent → this is the first run; create it.
 2. Run the project's audit command — `vex.yaml`'s `audit_command:` when it names one, otherwise whichever of `npm audit` / `pnpm audit` / `pip-audit` / `cargo audit` / `osv-scanner` this project's ecosystem ships, and write that choice back as `audit_command:` so no later run re-picks it. Where the ecosystem ships more than one, **prefer the one that emits severity**, since Step 1's floor reads it — `pip-audit`, for one, emits ids and fix versions and no severity at all. No audit tool → record that in `vex.yaml` as the reason the tree is unassessed and stop; do not report the tree clean.
@@ -1317,17 +1319,19 @@ An advisory count is not risk. This lane turns the audit tool's output into one 
 4. **Record every candidate before deciding any of them** — one `under_investigation` statement each, carrying only `id`, `package`, `commit` and `first_seen`. No tracing, no judgement; this is bookkeeping and it is cheap. A candidate that is never written is invisible to `open-advisories`, so a run that assesses ten of a hundred leaves the store answering `(none)` and `/whats-up` reading the tree as clean. "The rest keep `under_investigation`" is only true once the rest are on the file.
 5. Report the split before working: `<N> carried · <M> to assess, in <P> packages`.
 
-## Step 1 — Assess, at most 5 packages per run
+## Step 1 — Assess every package, 5 at a time
 
-Rank the **packages** per `security-review.md § Triage` and take the top 5. The unit is the package because the cap is, and advisory count is an input to neither.
+Rank the **packages** per `security-review.md § Triage` and work them from the top in batches of 5 until none is left, or until `--max-packages` is reached. The unit is the package because the batch is, and advisory count is an input to neither. A person who types `/audit` wants the backlog decided; making them re-run it once per five packages turns one decision into a chore they stop doing.
 
-Then assess **every** advisory in each package taken. They share the sink and usually the same fix, so a package is one act of tracing and its advisories cost a line each. Bounding the rows instead of the packages spends a whole run inside one noisy dependency and never reaches the rest of the route — thirteen near-identical decoder advisories, one version bump, and the multipart parser that reads the same upload bytes one hop earlier left undecided. Take fewer than 5 when a package turns out to carry a large set; the bound is the size of the run, not the number.
+Then assess **every** advisory in each package taken. They share the sink and usually the same fix, so a package is one act of tracing and its advisories cost a line each. Bounding the rows instead of the packages spends a whole run inside one noisy dependency and never reaches the rest of the route — thirteen near-identical decoder advisories, one version bump, and the multipart parser that reads the same upload bytes one hop earlier left undecided. Put fewer than 5 in a batch when a package turns out to carry a large set; the bound is the size of the batch, not the number.
 
-**The floor applies here.** § Triage's severity floor is what admits a critical whose package ranked below the cut — the cap is the only thing it exists to override. It needs a scanner that emits severity: none in the output → enrich from the OSV API, and if it stays unavailable say so in the report rather than reporting the floor clear.
+**Close each batch before starting the next**: write its statements and run Step 2 for it, so a run that dies loses one batch and never the ones already decided. Then run `bash ~/.claude/usage-snapshot.sh --read` and start the next batch only while `left > cost`, `cost` being the rise across the batch just finished — the rule `/pilot` Step 2 states, cited not restated; an `unknown` reading decides nothing and the run proceeds.
 
-Everything not taken keeps the `under_investigation` statement Step 0 wrote, which is what makes the store say the work is unfinished rather than silently dropping it.
+**The floor applies when the run is bounded.** § Triage's severity floor is what admits a critical whose package ranked below the cut — under `--max-packages`, or when the allowance stopped the run, the cut is the only thing it exists to override. It needs a scanner that emits severity: none in the output → enrich from the OSV API, and if it stays unavailable say so in the report rather than reporting the floor clear.
 
-The cap is the lane's own bound and it is why this lane is free to dispatch (`spend: none`): an unattended run can take it without a grant, and a backlog of 80 advisories costs five packages per run rather than one very expensive turn.
+Everything not reached keeps the `under_investigation` statement Step 0 wrote, which is what makes the store say the work is unfinished rather than silently dropping it.
+
+`/pilot` dispatches this lane with `--max-packages 5` (its `routing:` says so): one mission task stays one bounded piece of work, so an unattended run can take it without a grant (`spend: none`), and the standing mission reaches the rest on later tasks.
 
 For each, follow `security-review.md § Triage` and write the statement. `affected` needs the path and an action; `not_affected` needs one of the five justifications; a control that can be turned off is a `compensating_control` on an `affected` statement, never a justification.
 
@@ -1335,7 +1339,7 @@ For each, follow `security-review.md § Triage` and write the statement. `affect
 
 Each `affected` statement gets a `docs/roadmap.md` item in the format `<PREFIX>-dev` step 1.5 uses, carrying its path and action, and its `**Id:**` goes back into the statement's `addressed:`. Lower the item's priority one step when a verified `compensating_control` covers the path — the control reduces risk without removing the vulnerability, which is a priority input and never a status.
 
-Commit the statements and the items together, then reproject: `python3 .claude/graph/graph.py build`.
+Commit the batch's statements and items together, then reproject: `python3 .claude/graph/graph.py build`.
 
 ## Step 3 — `--deep` only
 
@@ -1343,7 +1347,7 @@ Set the base ref first — `git remote set-head origin <default-branch>` — or 
 
 ## Done
 
-Report per `code.md § Done` — the five blocks, the closing line, the same closed status words. `<N> assessed, <M> still unassessed` is a Status row and **names the packages the unassessed ones sit in**, since a bare count tells the next run nothing about what it is ranking; each `affected` one filed is an Emerged row naming its roadmap id; an `affected` one you could not trace to a sink stays Open, because nobody else will pick it up.
+Report per `code.md § Done` — the five blocks, the closing line, the same closed status words. `<N> assessed` is a Status row. Anything still unassessed — `--max-packages` or the allowance stopped the run — is an Open row with `Next: /audit`, **naming the packages it sits in** and what stopped the run, since a bare count tells the next run nothing about what it is ranking. Each `affected` one filed is an Emerged row naming its roadmap id, and the closing line carries its fix command; an `affected` one you could not trace to a sink stays Open, because nobody else will pick it up.
 
 This lane runs no `<PREFIX>-dev`, so scope it uncovers has no writer but this one — file it per `code.md § Done` block 4 and cite the id.
 ```

@@ -567,7 +567,7 @@ The same three questions decide a **misconfiguration**, which carries no advisor
 ## Checklist (skip rows that don't apply to this project)
 
 ### A. Dependencies & supply chain
-- Run the project's audit on the whole tree — `npm audit` / `pnpm audit` / `pip-audit` / `cargo audit` / `osv-scanner` (recognition aids, not a whitelist). An id already carried in `vex.yaml` at the same package version is **not re-decided** — read it and move on. No audit tool for this ecosystem → record that in `vex.yaml` as the reason the tree is unassessed, rather than reporting it clean.
+- Run the project's audit on the whole tree — `vex.yaml`'s `audit_command:`, else `npm audit` / `pnpm audit` / `pip-audit` / `cargo audit` / `osv-scanner` (recognition aids, not a whitelist). An id already carried in `vex.yaml` at the same package version is **not re-decided** — read it and move on. No audit tool for this ecosystem → record that in `vex.yaml` as the reason the tree is unassessed, rather than reporting it clean.
 - **Assess only what this task brought in**: an advisory on a dependency this task added or bumped. Give it a VEX status per § Triage and **block** on `affected`.
 - **A pre-existing backlog is not this task's to assess.** Ids the audit reports that `vex.yaml` has never seen and this task did not introduce are recorded `under_investigation` and left — one line each, no tracing. Say how many in the review output and name `/audit` as what works them. Assessing a tree's backlog inline is minutes of tracing per advisory against a task that did not cause any of them, and it is the one thing that makes running this pass every task too expensive to keep doing — which is how a security pass stops running at all. `/audit` exists for exactly this: it ranks the backlog by what each package parses or fetches and takes the top few packages per run, whole.
 - Same policy as pre-existing test failures, and for the same reason: unrelated debt is recorded, never blocking.
@@ -616,6 +616,9 @@ Its scope is the branch's pending changes, so its unit is a branch diff and not 
 # the same rule custom-tests.yaml applies to a pass carried across an untouched diff.
 #
 # Protocol, justifications and the compensating-control rule: <PREFIX>-review/references/security-review.md § Triage
+#
+# audit_command: the one command /audit and the per-task security pass run. Absent → /audit picks
+# the ecosystem's default and writes it here.
 
 statements:
   - id: <GHSA/CVE/OSV id>

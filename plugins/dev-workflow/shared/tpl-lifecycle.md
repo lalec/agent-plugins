@@ -1370,7 +1370,7 @@ This skill is created in addition to the frontend domain skill whenever the proj
 ```markdown
 ---
 name: <PREFIX>-design
-description: Visual authority for <PROJECT>. MUST be invoked before any color, gradient, font, spacing, or CSS custom property decision — including declaring `--color-*`, `--font-*`, `--space-*` variables, picking hex values, or modifying typography — before adding or changing any UI surface or interaction pattern, and before any icon is added or replaced. Owns the <PROJECT> design system: palette, tokens, typography, surface system, interaction patterns, iconography.
+description: Visual authority for <PROJECT>. MUST be invoked before any color, gradient, font, spacing, or CSS custom property decision — including declaring `--color-*`, `--font-*`, `--space-*` variables, picking hex values, or modifying typography — before adding or changing any UI surface or interaction pattern, and before any icon is added or replaced. Owns the <PROJECT> design system — palette, tokens, typography, surface system, interaction patterns, iconography.
 ---
 
 # <PREFIX>-design

@@ -10,12 +10,13 @@ Replace these placeholders before writing the files:
 - `<SKILL_SELF_OWNERSHIP_ENTRIES>` → one `'^\.claude/skills/<PREFIX>-<name>/:<PREFIX>-<name>'` entry per installed skill (lifecycle + domain), so each skill edits its own SKILL.md and `references/` with itself loaded — without these, a domain skill's own reference updates get blocked for lacking `<PREFIX>-skill`
 - `<REF_WATCH>` → optional ERE alternation of reference-worthy source files (API route/handler dirs, schema/model files, auth middleware) derived from the category map. Used by `ref-sync-check.sh` to decide whether a modify-only commit warrants a reference-sync warning. `''` when nothing clearly reference-worthy is identifiable — structural changes (add/delete/rename) in governed roots always warn regardless
 - `<DEPENDENCY_MANIFESTS>` → optional ERE alternation of the project's dependency manifests, matched by **filename, not layout** — `requirements*.txt`, `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `Gemfile` and their lock files, whichever of them this project actually has. Used by `ref-sync-check.sh` to warn when a dependency lands without its advisories being assessed. `''` when the project has none (the check is then silently skipped)
+- `<COPY_PATHS>` → optional ERE of the directories holding this project's **user-facing** source — the Frontend category's paths, only when a `<PREFIX>-design` skill is installed. Used by `ref-sync-check.sh` to warn when a commit adds an em dash to a user-readable string. `''` when there is no design skill (the check is then silently skipped)
 - `<LINT_CMD>` → project lint command (e.g. `pnpm exec biome check .` or `npm run lint`)
 - `<TYPECHECK_CMD>` → project typecheck command (e.g. `pnpm exec tsc --noEmit` or `npm run typecheck`)
 
 **Hook conduct rules (apply to every script below):**
 - *Gates* (skill-guard, path-coverage, dependency-guard, package-edit-guard, pre-handoff, close-out-gate) exit 2 with an actionable message on violation, 0 otherwise.
-- *Recorders* (ref-sync-check, skill-mark, post-commit) must **always exit 0** — a recorder that exits non-zero makes successful commands surface as errors and burns a reasoning turn.
+- *Recorders* (ref-sync-check, skill-mark, post-commit) must **always exit 0** — a recorder that exits non-zero makes successful commands surface as errors and burns a reasoning turn. A recorder with something to tell the model prints it as `hookSpecificOutput.additionalContext` JSON on stdout. Stderr from a hook that exits 0 goes to the debug log only, so a warning written there reaches neither the model nor the user.
 
 ---
 
@@ -49,11 +50,15 @@ The single source of truth for path→skill ownership. Both `skill-guard.sh` and
 # DEPENDENCY_MANIFESTS: optional ERE of this project's dependency manifests, matched by filename
 # rather than layout. ref-sync-check.sh warns when one changes without vex.yaml being assessed.
 # '' = no manifests, check skipped.
+#
+# COPY_PATHS: optional ERE of user-facing source (the Frontend category, when <PREFIX>-design exists).
+# ref-sync-check.sh warns when a commit adds an em dash on a non-comment line there. '' = skipped.
 
 GOVERNED_ROOTS='<GOVERNED_ROOTS>'
 DEPLOY_PATHS='<DEPLOY_PATHS>'
 REF_WATCH='<REF_WATCH>'
 DEPENDENCY_MANIFESTS='<DEPENDENCY_MANIFESTS>'
+COPY_PATHS='<COPY_PATHS>'
 
 PATH_MAP=(
   '^docs/roadmap\.md$:EXEMPT'
@@ -90,12 +95,15 @@ Each category contributes the actual paths (or root-level files) it occupies in 
 
 `DEPENDENCY_MANIFESTS` comes from a **filename scan**, not the category map: list the manifest and lock filenames this repo actually contains, anchored `(^|/)…$` so a monorepo's per-package copies match too. `''` when the project has none.
 
+`COPY_PATHS` is the Frontend category's paths, and only when `<PREFIX>-design` is installed — the same condition that ships `voice.md`, whose rule the check points at. `''` otherwise.
+
 **Example** (myapp: Backend=`api/`, Frontend=`app/`, IaC=`infra/`, CI/CD=`.github/workflows/`, Deployment=`scripts/deploy.sh` + `fly.toml`):
 ```bash
 GOVERNED_ROOTS='^(api/|app/)'
 DEPLOY_PATHS='^(infra/|\.github/workflows/|scripts/deploy\.sh$|fly\.toml$)'
 REF_WATCH='^(api/routes/|api/models/|api/auth/)'
 DEPENDENCY_MANIFESTS='(^|/)(package\.json|package-lock\.json|pnpm-lock\.yaml|requirements[^/]*\.txt|pyproject\.toml|uv\.lock)$'
+COPY_PATHS='^app/'
 
 PATH_MAP=(
   '^docs/project-log\.md$:EXEMPT'
@@ -133,6 +141,7 @@ Rules:
 - Domain skill entries go in between, ordered more-specific first
 - `DEPLOY_PATHS` is independent of `PATH_MAP` ownership. A file can appear in `DEPLOY_PATHS` (for drift watching) *and* be owned by a non-deploy skill in `PATH_MAP` — a deploy-mechanism file that lives in the backend domain is correctly listed under both. Every path from IaC/CI/CD/Build/Deployment categories goes into `DEPLOY_PATHS` regardless of which skill owns it.
 - `REF_WATCH` narrows the reference-sync warning to commits that plausibly change what reference files describe (contracts, schemas, auth) — without it every copy tweak in a governed root warned, and the warning was learned to be ignorable (15 ignored warnings in one audited session).
+- `COPY_PATHS` checks **added lines only**, so a project with hundreds of em dashes already in its copy is never blocked or nagged about them — only a commit that writes a new one, or edits a line that still carries an old one, warns. Comment lines are skipped because em dashes in code comments are common and harmless; a check that fired on them would be learned as ignorable.
 - `DEPENDENCY_MANIFESTS` is matched by **filename anywhere in the tree**, not by a top-level path, because a monorepo carries one per package and a layout-shaped pattern misses all but the root. Include the lock files only if this project's routine updates do not churn them — a warning that fires on every lockfile bump is learned as ignorable exactly like the one above, and the fix is to narrow this variable, never to blunt the message.
 
 ---
@@ -352,13 +361,14 @@ The same bare-shell constraint applies to any tool a hook shells out to (typeche
 
 ## § ref-sync-check.sh
 
-Warns after `git commit` when paths watched in `governed-paths.conf` changed without corresponding reference file updates. Three independent checks:
+Warns after `git commit` when paths watched in `governed-paths.conf` changed without corresponding reference file updates, or when user-facing copy broke a mechanical voice rule. Four independent checks:
 
 1. **Source drift** — warns only on commits that plausibly change what references describe: files **added/deleted/renamed** in `GOVERNED_ROOTS`, or modified files matching `REF_WATCH` (contracts, schemas, auth). Modify-only cosmetic commits (copy tweaks, style nudges) stay silent — an alarm that fires on every commit gets learned as ignorable and loses all signal.
 2. **Deploy drift** — `DEPLOY_PATHS` changed without `deploy-config.yaml` being touched → the deploy profile is now stale.
 3. **Dependency drift** — `DEPENDENCY_MANIFESTS` changed without `vex.yaml` being touched → a package landed whose advisories nobody has assessed. Warn, never block: a gate here fires on lockfile churn and gets overridden reflexively inside a week, which is worse than no hook. The value is the reminder at the moment the package lands.
+4. **Copy** — a line **added** under `COPY_PATHS` carries an em dash and is not a comment → a user-readable string breaks `voice.md` rule 3. Warn, never block: a gate would fire on the first edit to a line that already had one, in a project that has hundreds. The rest of `voice.md` is judgment, checked at review, not here.
 
-Sources `governed-paths.conf` — **no path patterns hardcoded in this script**. If a variable is empty, the corresponding check is silently skipped. Warn-only — always exits 0.
+Sources `governed-paths.conf` — **no path patterns hardcoded in this script**. If a variable is empty, the corresponding check is silently skipped. Warn-only — always exits 0, and every warning goes out as one `additionalContext` block so the model actually reads it.
 
 ```bash
 #!/bin/bash
@@ -378,6 +388,9 @@ source "$(dirname "$0")/governed-paths.conf"
 CHANGED=$(git diff HEAD~1 --name-only 2>/dev/null) || exit 0
 [ -z "$CHANGED" ] && exit 0
 
+WARNINGS=""
+warn() { WARNINGS="${WARNINGS}⚠ $1"$'\n'; }
+
 # Check 1 — source drift: structural changes (A/D/R) in governed roots, or REF_WATCH matches
 if [ -n "$GOVERNED_ROOTS" ]; then
   STRUCTURAL=$(git diff HEAD~1 --name-status 2>/dev/null | awk '$1 ~ /^(A|D|R)/ {print $NF}' | grep -E "$GOVERNED_ROOTS")
@@ -385,9 +398,7 @@ if [ -n "$GOVERNED_ROOTS" ]; then
   [ -n "${REF_WATCH:-}" ] && WATCHED=$(echo "$CHANGED" | grep -E "$REF_WATCH")
   if [ -n "$STRUCTURAL" ] || [ -n "$WATCHED" ]; then
     if ! echo "$CHANGED" | grep -qE '^\.claude/skills/.*/references/'; then
-      echo "" >&2
-      echo "⚠ Reference Sync: reference-worthy source changed (structural or watched paths) but no reference files updated — verify Reference Sync is complete" >&2
-      echo "" >&2
+      warn "Reference Sync: reference-worthy source changed (structural or watched paths) but no reference files updated — verify Reference Sync is complete"
     fi
   fi
 fi
@@ -395,21 +406,32 @@ fi
 # Check 2 — deploy drift
 if [ -n "$DEPLOY_PATHS" ] && echo "$CHANGED" | grep -qE "$DEPLOY_PATHS"; then
   if ! echo "$CHANGED" | grep -qE '^\.claude/skills/.*/references/deploy-config\.yaml$'; then
-    echo "" >&2
-    echo "⚠ Deploy Profile: deploy-mechanism paths (\$DEPLOY_PATHS) changed but deploy-config.yaml was not updated — invoke the deploy-owning skill to reconcile" >&2
-    echo "" >&2
+    warn "Deploy Profile: deploy-mechanism paths (\$DEPLOY_PATHS) changed but deploy-config.yaml was not updated — invoke the deploy-owning skill to reconcile"
   fi
 fi
 
 # Check 3 — dependency drift
 if [ -n "${DEPENDENCY_MANIFESTS:-}" ] && echo "$CHANGED" | grep -qE "$DEPENDENCY_MANIFESTS"; then
   if ! echo "$CHANGED" | grep -qE '^\.claude/skills/.*/references/vex\.yaml$'; then
-    echo "" >&2
-    echo "⚠ Advisory triage: dependency manifests changed but vex.yaml was not updated — run /audit; rank by what the new package parses or fetches, not by severity" >&2
-    echo "" >&2
+    warn "Advisory triage: dependency manifests changed but vex.yaml was not updated — run /audit; rank by what the new package parses or fetches, not by severity"
   fi
 fi
 
+# Check 4 — copy: em dashes on added, non-comment lines in user-facing source
+if [ -n "${COPY_PATHS:-}" ]; then
+  COPY_FILES=()
+  while IFS= read -r f; do COPY_FILES+=("$f"); done < <(echo "$CHANGED" | grep -E "$COPY_PATHS")
+  if [ ${#COPY_FILES[@]} -gt 0 ]; then
+    HITS=$(git diff HEAD~1 -U0 -- "${COPY_FILES[@]}" 2>/dev/null \
+      | grep -E '^\+[^+]' | grep '—' \
+      | grep -cvE '^\+[[:space:]]*(//|#|\*|/\*|<!--|\{/\*)')
+    if [ "${HITS:-0}" -gt 0 ]; then
+      warn "Voice: $HITS added line(s) in user-facing source carry an em dash. Rewrite them per <PREFIX>-design/references/voice.md rule 3 (comment lines are already skipped)"
+    fi
+  fi
+fi
+
+[ -n "$WARNINGS" ] && jq -n --arg m "$WARNINGS" '{hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: $m}}'
 exit 0
 ```
 
@@ -492,9 +514,7 @@ if echo "$COMMAND" | grep -qE "\-\-dry-run|--help|-h[^a-z]"; then
   exit 0
 fi
 
-echo "" >&2
-echo "📋 Commit complete — run <PREFIX>-log to append an entry to docs/project-log.md" >&2
-echo "" >&2
+jq -n '{hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: "📋 Commit complete — run <PREFIX>-log to append an entry to docs/project-log.md"}}'
 
 exit 0
 ```

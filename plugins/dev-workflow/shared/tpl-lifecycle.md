@@ -142,8 +142,9 @@ SITUATION?
 │  the first time, or ship a new
 │  input surface to prod
 ├─ Reviewing a UI change (does it → <PREFIX>-design/references/ux-patterns.md
-│  match how this app already
-│  does this?)
+│  match how this app already      + <PREFIX>-design/references/voice.md
+│  does this, and does its copy
+│  follow the voice rules?)
 └─ About to claim success         → <PREFIX>-debug/references/verification.md
 ```
 
@@ -154,7 +155,8 @@ SITUATION?
 - `references/issuing-findings.md` — evidence requirements for review findings (no blocking finding without file:line)
 - `references/security-review.md` — fast per-task security pass: deps/supply-chain, secrets, injection sinks, access-control (IDOR), insecure defaults + headers, dead surface; recon→verify triage; VEX status per advisory (§ Triage); the two moments the deep `/security-review` is owed (§ Escalate)
 - `references/vex.yaml` — the VEX status held for every advisory this project has assessed, so a settled one is never re-decided at the same package version. Project state, not shipped content: written by this pass and by `/audit`
-- `<PREFIX>-design/references/ux-patterns.md` — how this app already does a thing: a UI change that stands up a second pattern beside an existing one, or a visual value absent from `design-tokens.md`, is a finding (single source of truth — owned by `<PREFIX>-design`)
+- `<PREFIX>-design/references/ux-patterns.md` — how this app already does a thing: a UI change that stands up a second pattern beside an existing one, a waiting, choosing or optional-depth state that misses its baseline without a recorded divergence, or a visual value absent from `design-tokens.md`, is a finding (single source of truth — owned by `<PREFIX>-design`)
+- `<PREFIX>-design/references/voice.md` — how this app writes: a user-readable string that breaks a rule or shows a word listed in § Vocabulary is a finding (single source of truth — owned by `<PREFIX>-design`)
 - `<PREFIX>-debug/references/verification.md` — completion verification gates (single source of truth — owned by `<PREFIX>-debug`)
 
 ## Update `references/vex.yaml` when:
@@ -166,7 +168,7 @@ SITUATION?
 - [ ] A compensating control was added, removed, or stopped covering the path it was recorded against
 ```
 
-Include the `ux-patterns.md` read-map branch **and** its `## References` entry only when `<PREFIX>-design` is part of this install; omit both lines otherwise (a branch pointing at a file no backend-only project has is a dead route).
+Include the `ux-patterns.md` + `voice.md` read-map branch **and** their `## References` entries only when `<PREFIX>-design` is part of this install; omit them otherwise (a branch pointing at a file no backend-only project has is a dead route).
 
 **Also create these reference files when installing `<PREFIX>-review`:**
 
@@ -1373,12 +1375,12 @@ This skill is created in addition to the frontend domain skill whenever the proj
 ```markdown
 ---
 name: <PREFIX>-design
-description: Visual authority for <PROJECT>. MUST be invoked before any color, gradient, font, spacing, or CSS custom property decision — including declaring `--color-*`, `--font-*`, `--space-*` variables, picking hex values, or modifying typography — before adding or changing any UI surface or interaction pattern, and before any icon is added or replaced. Owns the <PROJECT> design system — palette, tokens, typography, surface system, interaction patterns, iconography.
+description: Visual authority for <PROJECT>. MUST be invoked before any color, gradient, font, spacing, or CSS custom property decision — including declaring `--color-*`, `--font-*`, `--space-*` variables, picking hex values, or modifying typography — before adding or changing any UI surface or interaction pattern, before writing or changing any user-readable string, and before any icon is added or replaced. Owns the <PROJECT> design system — palette, tokens, typography, surface system, interaction patterns, user-facing copy, iconography.
 ---
 
 # <PREFIX>-design
 
-Visual and interaction authority for all <PROJECT> UI decisions. No other skill is permitted to invent visual values, to invent a second way to do something the app already does, or to author icon artwork.
+Visual and interaction authority for all <PROJECT> UI decisions. No other skill is permitted to invent visual values, to invent a second way to do something the app already does, to write user-facing copy that skips `references/voice.md`, or to author icon artwork.
 
 > **External skills.** Design intelligence: `ui-ux-pro-max`. Asset generation (icons, artwork): `visual-assets`. Replace either name with your preferred skill — everything else refers to them by role, so a swap changes only this note.
 
@@ -1396,6 +1398,7 @@ Other skills (especially `<PREFIX>-frontend`) **must** invoke this skill before:
 - Adjusting spacing, radius, shadow, or other visual scales
 - Adding a new visual surface (card, panel, modal background)
 - Adding or changing a **user-facing surface or interaction pattern** — a dialog, an empty state, a loading state, inline validation, a toast, a nav entry, where the primary action sits
+- Writing or changing any **user-readable string** — a label, an instruction, an error, a status line, legal copy. Read `references/voice.md` first; a copy edit skips the consistency sweep, never the voice rules
 - Adding, replacing, or restyling an **icon**
 
 If a value already exists in `references/design-tokens.md`, reference it. If not, this skill defines it (and adds it to the tokens file) — never the calling skill. The same holds for behavior: if `references/ux-patterns.md` records how this app does something, follow it; if it doesn't, sweep the code, decide, and record the decision there.
@@ -1406,12 +1409,14 @@ If a value already exists in `references/design-tokens.md`, reference it. If not
 - Typography system (font families, weights, sizes)
 - Dark/light surface system
 - Component visual patterns
-- Interaction patterns across the whole app — see `references/ux-patterns.md`
+- Interaction patterns across the whole app, including the baseline waiting, choosing and optional-depth states — see `references/ux-patterns.md`
+- User-facing copy — see `references/voice.md`
 - Iconography — where icons come from and how a missing one is made — see `references/ux-patterns.md § Iconography`
 
 ## References
 - `references/design-tokens.md` — color palette, CSS vars, typography, spacing (immutable constraints — do not override without explicit instruction)
-- `references/ux-patterns.md` — app-wide pattern inventory, the consistency sweep, and the icon rule
+- `references/ux-patterns.md` — app-wide pattern inventory, the consistency sweep, the baseline interaction states, and the icon rule
+- `references/voice.md` — the writing rules every user-readable string meets, this app's internal words and their user-facing replacements, and what the product will not do
 
 ## Reference Sync
 Verify before finishing any <PREFIX>-design invocation:
@@ -1420,6 +1425,7 @@ Verify before finishing any <PREFIX>-design invocation:
 - [ ] No removed tokens or renamed classes still referenced
 - [ ] Every pattern decision made this invocation has a row in `ux-patterns.md § Inventory`, carrying its verdict (match / migrate / diverge) and, for a divergence, its reason
 - [ ] Every icon added or replaced this invocation names its source in `ux-patterns.md § Iconography` — the set entry it came from, or the brief the asset skill was given
+- [ ] Every internal word this invocation kept off a surface has a row in `voice.md § Vocabulary`, and every limit a surface now states has a row in `voice.md § Won't do`
 ```
 
 **Also create these reference files when installing `<PREFIX>-design`:**
@@ -1475,6 +1481,27 @@ the cost for nothing.
 4. **Record it** — the new pattern, the new site, or the divergence — before finishing. The next
    sweep is only as cheap as this write.
 
+## Baseline states
+
+Shipped defaults for the states every app has, whether or not § Inventory has swept them yet. An
+Inventory row may **diverge** from one, with its reason, exactly as the sweep allows; an unrecorded
+difference is a finding. Each ends with the observation that proves it, so a `type: UX` verification
+at a phone viewport can walk it.
+
+1. **A wait under a minute shows motion and says how long.** A label with an ellipsis is not a
+   state: a static "loading…" reads as frozen. *Proven by:* something moves, and the copy names a
+   duration.
+2. **A wait over a minute shows countable progress.** A count of done out of total, an estimate
+   taken from how long this has taken before, placeholders that fill as each result lands, and a
+   stall message once the usual time has passed. Without them the user cannot tell slow from stuck.
+   *Proven by:* the count advances and a placeholder fills before the wait ends.
+3. **A choice with a visual consequence shows the consequence.** A swatch with a one-line mood, or a
+   sample, never a bare label: users cannot picture what a name will produce. *Proven by:* every
+   option renders its preview.
+4. **Optional depth is collapsed by default**, behind one sentence saying what the default already
+   did. Detail some users want should not block the rest. *Proven by:* the step completes with the
+   section closed, and the sentence says what happened without it.
+
 ## Iconography
 
 **Source** — fill in for this project:
@@ -1513,6 +1540,54 @@ Two guards, stated by role so a swapped asset skill inherits them:
 *(With `visual-assets` the brief maps to `--target` / `fit.py --icon-set` for platform sizes and icon
 ladders, `-r` for reference images, `--brand-color` for the token colour, `-o` for the asset
 directory, and `--dry-run` for the preview.)*
+~~~
+
+`references/voice.md`:
+~~~markdown
+# Voice — <PROJECT>
+
+How every user-readable string is written: labels, instructions, errors, status lines, legal copy.
+Read before writing copy; the rules apply to a one-word edit exactly as to a new surface.
+
+## Rules
+
+1. **Use the user's words.** No internal noun, version token or identifier (a run id, a job id) on
+   any surface. An internal name reads as "what does that mean?". § Vocabulary lists this app's.
+2. **Say the outcome, not the mechanism.** What the user gets, not how it is produced. Users who
+   are told the mechanism still cannot say what they will receive.
+3. **No em dashes in any user-readable string, legal copy included.** Readers take them as a sign
+   the text was machine-written and trust the product less. Use a full stop, a comma or a colon.
+4. **Say what the product will not do on the step where the expectation forms**, never on the
+   result. A limit learned at the end reads as a defect. § Won't do lists this app's.
+5. **Put the instruction above the control it explains**, as one imperative sentence. An
+   instruction below the control is found after the mistake.
+6. **A toggle names its effect in both states.** Two labels that each name only a state read as two
+   unrelated buttons.
+7. **Open each step with the plan:** what the user gets, how many, and what varies between them.
+   Without it users assume one result where several are coming.
+8. **Anything the user must read to decide is at least 13px on a phone.** Smaller text before a
+   decision is skipped, and the decision is made blind. The type scale in `design-tokens.md` holds
+   the value.
+
+## Vocabulary
+
+Internal words that must never reach a surface, and what the user sees instead.
+
+| Internal word | User's word |
+|---|---|
+
+<!-- Fill in: one row per pipeline noun, model term, status code or identifier this app's code
+     uses that a user would not. Add the row the moment a surface is written without it. -->
+
+## Won't do
+
+What the product does not do, and the step where a user would first expect it.
+
+| Does not | Stated on |
+|---|---|
+
+<!-- Fill in: one row per limit a user could reasonably assume away, with the surface that says
+     so. The row exists so the limit is stated once, early, and the same way everywhere. -->
 ~~~
 
 ---

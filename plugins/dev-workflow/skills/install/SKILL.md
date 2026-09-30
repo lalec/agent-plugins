@@ -16,14 +16,14 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 - 12 slash commands: `/code` + `/fix` + `/pilot` + `/tweak` + `/audit` + `/revert` + `/tidy` + `/design` (conditional on design skill) + `/whats-up` + `/roadmap` + `/blueprint` + `/wrap`
 - `docs/roadmap.md` stub — source of truth for open items; tracked by `<PREFIX>-dev` (new entries) and `<PREFIX>-pm` (status updates)
 - Domain skills: one per substantive source dir, derived from discovery (not hardcoded)
-- `.claude/hooks/governed-paths.conf` — single source of truth for path→skill ownership (incl. per-skill self-ownership entries), `DEPLOY_PATHS`, and `REF_WATCH`; sourced by skill-guard, path-coverage-check, ref-sync-check, and close-out-gate
+- `.claude/hooks/governed-paths.conf` — single source of truth for path→skill ownership (incl. per-skill self-ownership entries), `DEPLOY_PATHS`, `REF_WATCH`, `DEPENDENCY_MANIFESTS`, and `COPY_PATHS`; sourced by skill-guard, path-coverage-check, ref-sync-check, and close-out-gate
 - `.claude/hooks/skill-guard.sh` — PreToolUse Edit+Write: blocks edits to owned paths without skill loaded (session-scoped markers)
 - `.claude/hooks/path-coverage-check.sh` — PreToolUse Write: blocks new files in governed roots not covered by any pattern
 - `.claude/hooks/dependency-guard.sh` — PreToolUse Bash: blocks `pnpm add` / `pip install` without `<PREFIX>-skill` loaded
 - `.claude/hooks/package-edit-guard.sh` — PreToolUse Edit: blocks direct dependency additions to `package.json` without `<PREFIX>-skill`
 - `.claude/hooks/pre-handoff-check.sh` — PreToolUse Skill + Task/Agent: blocks `<PREFIX>-qa` invocation (skill call or subagent spawn) if uncommitted changes exist, lint fails, or typecheck fails
 - `.claude/hooks/close-out-gate.sh` — PreToolUse Bash: blocks `git push` while commits after the last delivery-log entry touch governed/deploy paths (iterate-lane close-out enforcement; `CLOSEOUT_OVERRIDE=1` escape hatch)
-- `.claude/hooks/ref-sync-check.sh` — PostToolUse Bash: warns after `git commit` on reference-worthy drift (structural changes or `REF_WATCH` matches; modify-only cosmetic commits stay silent) and on deploy-mechanism drift without `deploy-config.yaml` updates
+- `.claude/hooks/ref-sync-check.sh` — PostToolUse Bash: warns after `git commit` on reference-worthy drift (structural changes or `REF_WATCH` matches; modify-only cosmetic commits stay silent) on deploy-mechanism drift without `deploy-config.yaml` updates, on dependency drift without `vex.yaml`, and on an em dash added to user-facing copy (`COPY_PATHS`); warnings reach the model as `additionalContext`
 - `.claude/hooks/skill-mark.sh` — PostToolUse Skill: records invoked skills to a session-scoped marker
 - `.claude/hooks/post-commit.sh` — PostToolUse Bash: reminds to run `<PREFIX>-log` after every commit
 - `.claude/graph/graph.py` — delivery-graph projector + query engine (copied verbatim from `../../shared/graph.py`); `edges.jsonl` is generated and gitignored
@@ -202,7 +202,7 @@ Create these files (skip if already present, offer to overwrite if stale):
 .claude/skills/<PREFIX>-graph/SKILL.md        ← from tpl-lifecycle.md § tosk-graph; also create references/graph-schema.md
 .claude/graph/graph.py                        ← copy ../../shared/graph.py VERBATIM — no substitution (it glob-discovers skill dirs), so it stays byte-identical across projects and diffs cleanly on upgrade
 .claude/pilot/shift.sh                        ← copy ../../shared/shift.sh VERBATIM — no substitution (it resolves the repo from git), so it stays byte-identical across projects; `git add` it; the rest of `.claude/pilot/` is gitignored
-.claude/skills/<PREFIX>-design/SKILL.md       ← only if a frontend/website domain skill was confirmed in Phase 1c; also create references/design-tokens.md and references/ux-patterns.md stubs
+.claude/skills/<PREFIX>-design/SKILL.md       ← only if a frontend/website domain skill was confirmed in Phase 1c; also create references/design-tokens.md, references/ux-patterns.md and references/voice.md stubs
 .claude/commands/code.md          ← from tpl-commands.md § /code, substitute <PROJECT> and <PREFIX>
 .claude/commands/fix.md           ← from tpl-commands.md § /fix, substitute <PROJECT> and <PREFIX>
 .claude/commands/pilot.md         ← from tpl-commands.md § /pilot, substitute <PROJECT> and <PREFIX>
@@ -217,9 +217,11 @@ Create these files (skip if already present, offer to overwrite if stale):
 .claude/commands/design.md        ← from tpl-commands.md § /design (only if a design domain skill was discovered in Phase 1)
 ```
 
-### Seed `<PREFIX>-design/references/ux-patterns.md`
+### Seed `<PREFIX>-design/references/ux-patterns.md` and `voice.md`
 
-Only when a `<PREFIX>-design` skill was confirmed. Create it from the stub in `../../shared/tpl-lifecycle.md § <PREFIX>-design/SKILL.md`, then fill the two `§ Iconography` fields that are discoverable **now**: the icon set the project already depends on (read the manifest for the dependency and one call site for the import convention — never name a set the project doesn't have), and the directory generated assets belong in (the frontend's existing static/asset dir). An empty field is honest; an invented one sends every future icon to the wrong place. `§ Inventory` stays empty — it fills as `<PREFIX>-design` runs, one row per pattern decision.
+Only when a `<PREFIX>-design` skill was confirmed. Create it from the stub in `../../shared/tpl-lifecycle.md § <PREFIX>-design/SKILL.md`, then fill the two `§ Iconography` fields that are discoverable **now**: the icon set the project already depends on (read the manifest for the dependency and one call site for the import convention — never name a set the project doesn't have), and the directory generated assets belong in (the frontend's existing static/asset dir). An empty field is honest; an invented one sends every future icon to the wrong place. `§ Inventory` stays empty — it fills as `<PREFIX>-design` runs, one row per pattern decision. `§ Baseline states` ships as written.
+
+Create `references/voice.md` from the same section's stub. `§ Rules` ships as written; `§ Vocabulary` and `§ Won't do` stay empty — they fill as `<PREFIX>-design` writes copy, and a guessed row would put a word on the denylist the product actually uses.
 
 ### Populate `deploy-config.yaml`
 
@@ -406,7 +408,7 @@ All hooks wired in `.claude/settings.json`.
 | `package-edit-guard.sh` | PreToolUse Edit | Requires `<PREFIX>-skill` before editing package files directly |
 | `pre-handoff-check.sh` | PreToolUse Skill + Task/Agent | Blocks `<PREFIX>-qa` (skill call or subagent spawn) if uncommitted changes or lint fails |
 | `close-out-gate.sh` | PreToolUse Bash | Blocks `git push` while governed commits lack a delivery-log entry (`CLOSEOUT_OVERRIDE=1` escape) |
-| `ref-sync-check.sh` | PostToolUse Bash | Warns on reference-worthy drift (structural / `REF_WATCH`) and deploy-config drift |
+| `ref-sync-check.sh` | PostToolUse Bash | Warns on reference-worthy drift (structural / `REF_WATCH`), deploy-config drift, dependency drift, and em dashes added to user-facing copy |
 | `skill-mark.sh` | PostToolUse Skill | Records invoked skills to a session-scoped marker |
 | `post-commit.sh` | PostToolUse Bash | Reminds to run `<PREFIX>-log` after every commit |
 
@@ -490,6 +492,7 @@ Create `.claude/hooks/governed-paths.conf` from the template in `tpl-skill-guard
 - `<PATH_MAP_ENTRIES>` → one `'PATTERN:SKILL'` entry per confirmed domain skill **plus** one entry for `<PREFIX>-deploy` covering the IaC/CI/CD/Build/Deployment paths from `CATEGORY_MAP` (omit the `<PREFIX>-deploy` entry only when no such categories were discovered). Standard catch-alls go at the end (see `tpl-skill-guard.md § How to generate governed-paths.conf`).
 - `<SKILL_SELF_OWNERSHIP_ENTRIES>` → one `'^\.claude/skills/<PREFIX>-<name>/:<PREFIX>-<name>'` entry per installed skill (all lifecycle + domain skills from this run), placed before the `.claude/skills/` catch-all.
 - `<REF_WATCH>` → ERE alternation of reference-worthy source paths derived from `CATEGORY_MAP` (Backend route/handler dirs, schema/model files, Auth paths). Set `''` when nothing clearly reference-worthy is identifiable.
+- `<COPY_PATHS>` → the Frontend category's paths from `CATEGORY_MAP` when `<PREFIX>-design` was created; `''` otherwise.
 
 This is the **only** file that should contain path→skill mappings. Do not duplicate patterns in hook scripts.
 
@@ -592,10 +595,11 @@ Walk the checklist before declaring done:
 - [ ] If `<PREFIX>-design` was created: its SKILL.md description starts with "MUST be invoked" (mandatory invocation language — not the legacy permissive "Use when...")
 - [ ] If `<PREFIX>-design` was created: `references/ux-patterns.md` exists with `## Inventory`, `## Consistency sweep`, and `## Iconography`; the sweep names all three verdicts (match / migrate / diverge) and `§ Iconography` forbids hand-authored icon geometry, routes anything the icon set doesn't cover to the asset skill named in SKILL.md, and carries both guards (no interview from a subagent; a missing API key is `blocked`, never a hand-drawn fallback)
 - [ ] If `<PREFIX>-design` was created: its `## When this skill MUST be invoked` list covers **surfaces / interaction patterns and icons**, not only values, and the skill names both external skills by role (design intelligence + asset generation) with the replace-either-name note
-- [ ] If `<PREFIX>-design` was created: the frontend skill's `## Visual Decisions` block carries the interaction-pattern and icon triggers, and `<PREFIX>-review/SKILL.md` has the `ux-patterns.md` branch in its `## Read Map` **and** `## References`. If **no** design skill was created, `<PREFIX>-review` must mention `ux-patterns.md` nowhere — a branch to a file the project has no owner for is a dead route
+- [ ] If `<PREFIX>-design` was created: `references/voice.md` exists with `## Rules` (8 rules), `## Vocabulary` and `## Won't do`; `ux-patterns.md` has `## Baseline states`; the design MUST-invoke list and the frontend `## Visual Decisions` block both name `user-readable string`; `<PREFIX>-review` names `voice.md` in its `## Read Map` **and** `## References`
+- [ ] If `<PREFIX>-design` was created: the frontend skill's `## Visual Decisions` block carries the interaction-pattern and icon triggers, and `<PREFIX>-review/SKILL.md` has the `ux-patterns.md` branch in its `## Read Map` **and** `## References`. If **no** design skill was created, `<PREFIX>-review` must mention `ux-patterns.md` and `voice.md` nowhere, and `COPY_PATHS` is `''` — a branch to a file the project has no owner for is a dead route
 - [ ] No leftover `<DESIGN_DELEGATION>` placeholder in any installed skill (frontend skill has it substituted; non-frontend skills have it removed)
 - [ ] No command file contains stale project or prefix references — all use substituted values
-- [ ] `.claude/hooks/governed-paths.conf` exists and has `GOVERNED_ROOTS` (directory prefixes only, no extension globs) + `DEPLOY_PATHS` (alternation of IaC/CI-CD/Build/Deployment paths, or `''` if none) + `REF_WATCH` (reference-worthy paths, or `''`) + `PATH_MAP` with the `custom-tests.yaml` EXEMPT entry, one self-ownership entry per installed skill (before the `.claude/skills/` catch-all), one entry per domain skill, and standard catch-alls
+- [ ] `.claude/hooks/governed-paths.conf` exists and has `GOVERNED_ROOTS` (directory prefixes only, no extension globs) + `DEPLOY_PATHS` (alternation of IaC/CI-CD/Build/Deployment paths, or `''` if none) + `REF_WATCH` (reference-worthy paths, or `''`) + `COPY_PATHS` (the Frontend paths when `<PREFIX>-design` exists, else `''`) + `PATH_MAP` with the `custom-tests.yaml` EXEMPT entry, one self-ownership entry per installed skill (before the `.claude/skills/` catch-all), one entry per domain skill, and standard catch-alls
 - [ ] `.claude/hooks/skill-guard.sh` is executable and sources `governed-paths.conf` — contains NO hardcoded path patterns; marker derivation includes the transcript-basename agent scope
 - [ ] `.claude/hooks/path-coverage-check.sh` is executable and sources `governed-paths.conf` — contains NO hardcoded path patterns
 - [ ] `.claude/hooks/dependency-guard.sh` is executable and checks for `<PREFIX>-skill` in the session-scoped session marker
@@ -603,9 +607,9 @@ Walk the checklist before declaring done:
 - [ ] `.claude/hooks/pre-handoff-check.sh` is executable, matches **both** `tool_input.skill` and `tool_input.subagent_type` for `<PREFIX>-qa`, checks dirty tree + lint + typecheck
 - [ ] Every domain-skill `## Quality Checklist` command **resolves against the project** — each named `package.json` script exists under `scripts`, each linter/tool is an installed dependency or resolvable path; no rule names a conventional-but-unwired command (e.g. `npm run lint` with no `lint` script). The Quality Checklist lint command and the hook `<LINT_CMD>` **agree**: both name the same verified command, or both are absent
 - [ ] `.claude/hooks/close-out-gate.sh` is executable, fires on `git push`, sources `governed-paths.conf`, and honors `CLOSEOUT_OVERRIDE=1`
-- [ ] `.claude/hooks/ref-sync-check.sh` is executable, sources `governed-paths.conf` — contains NO hardcoded path patterns; source-drift warning fires only on structural (A/D/R) changes or `REF_WATCH` matches; deploy-drift check unchanged
+- [ ] `.claude/hooks/ref-sync-check.sh` is executable, sources `governed-paths.conf` — contains NO hardcoded path patterns; source-drift warning fires only on structural (A/D/R) changes or `REF_WATCH` matches; deploy-drift check unchanged; the copy check counts only added, non-comment lines; every warning is emitted as `hookSpecificOutput.additionalContext` JSON, never stderr
 - [ ] `.claude/hooks/skill-mark.sh` is executable and writes to the session-scoped marker (same derivation as the guards)
-- [ ] `.claude/hooks/post-commit.sh` is executable, references `<PREFIX>-log`, and exits 0 on success paths (recorders never exit non-zero)
+- [ ] `.claude/hooks/post-commit.sh` is executable, references `<PREFIX>-log`, exits 0 on success paths (recorders never exit non-zero), and emits its reminder as `additionalContext` JSON — stderr from an exit-0 hook reaches no one
 - [ ] `.claude/settings.json` exists and wires all 9 hooks across `PreToolUse`/`PostToolUse` + `Edit`/`Write`/`Bash`/`Skill`/`Task|Agent` matchers
 - [ ] `CLAUDE.md` has `## Plan Mode`, `## Agents`, `## Skills`, and `## Roadmap` sections with correct references
 - [ ] `docs/roadmap.md` exists (even as a stub) and its format line documents `**Id:**` as the item's permanent handle

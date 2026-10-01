@@ -1499,8 +1499,12 @@ at a phone viewport can walk it.
    sample, never a bare label: users cannot picture what a name will produce. *Proven by:* every
    option renders its preview.
 4. **Optional depth is collapsed by default**, behind one sentence saying what the default already
-   did. Detail some users want should not block the rest. *Proven by:* the step completes with the
-   section closed, and the sentence says what happened without it.
+   did. Detail some users want should not block the rest. **On a phone that sentence is one line.**
+   A note about the content itself (what is missing, what is approximate) shrinks to a count on a
+   line the surface already has, with the reason one tap away: a paragraph above the primary content
+   costs that content's space on every view, for a reason most users read once. *Proven by:* the
+   step completes with the section closed, the sentence says what happened without it, and at a
+   phone viewport no note above the primary content wraps past one line.
 
 ## Iconography
 
@@ -1558,7 +1562,9 @@ Read before writing copy; the rules apply to a one-word edit exactly as to a new
 3. **No em dashes in any user-readable string, legal copy included.** Readers take them as a sign
    the text was machine-written and trust the product less. Use a full stop, a comma or a colon.
 4. **Say what the product will not do on the step where the expectation forms**, never on the
-   result. A limit learned at the end reads as a defect. § Won't do lists this app's.
+   result. A limit learned at the end reads as a defect. Stating it is not explaining it: on a
+   phone it takes one line, with the reason one tap away (`ux-patterns.md § Baseline states` 4).
+   § Won't do lists this app's.
 5. **Put the instruction above the control it explains**, as one imperative sentence. An
    instruction below the control is found after the mistake.
 6. **A toggle names its effect in both states.** Two labels that each name only a state read as two

@@ -1648,6 +1648,13 @@ Never deploy across the boundary regardless of caller request. `<PREFIX>-dev` al
 
 **Report:** after any deploy, emit one line per component in the form `<component> → <env> · <url>` so `<PREFIX>-log` can include it in the delivery log entry.
 
+## Build inputs
+
+A ship-env's build must produce what was verified, not whatever the package index serves on the day it runs. A floating range lets the resolver move a package **down** to fit a new release elsewhere — no commit, no warning, no failing test, so nothing keyed on git sees it: one rebuild of unchanged code dragged an agent runtime from 2.x to 1.x to fit a web-framework release, and every prod run crashed. Two rules, both carried in the project's own manifest and build file:
+
+- **Critical packages resolve to one exact version** — an exact pin in the manifest, or a committed lockfile the build installs verbatim. A package is critical when the core journey stops if it breaks: the framework the app runs inside, an SDK for a paid or external service, a library whose types or schemas other code reads, or one that has broken a build before. **The exact pin is the list** — there is no second one. Everything else keeps its floor and floats, so routine updates land on their own. Keep the set small: every pin is raised by hand, through `/fix` or `/code` like any source change, and a version conflict then fails the build loudly instead of downgrading in silence.
+- **The build runs a start-up check inside the built artifact and fails on error**, so nothing that cannot start reaches traffic. It covers what the pins do not — the floating packages and the critical ones' own dependencies — by constructing what the app builds at start-up (tool declarations, route tables, schema models) and running one operation of each floored package the core journey uses. In a container build it is a `RUN` line after the install.
+
 ## Push policy
 
 `git push` is a deploy action whenever a CI ship-env fires on push. Callers (the `/code`/`/fix` close-out step, `/tweak` exit, `/revert`) resolve pushability here — raw pushes must not bypass this skill's gates:
@@ -1661,6 +1668,7 @@ Never deploy across the boundary regardless of caller request. `<PREFIX>-dev` al
 
 Verify before finishing any `<PREFIX>-deploy` invocation:
 - [ ] `references/deploy-config.yaml` matches the components, envs, commands, urls, gates, and triggers currently in use
+- [ ] Every critical runtime package is still pinned exactly and every ship-env build still runs its start-up check (`## Build inputs`) — a new dependency on the core journey without one is named in the report, never pinned on inference
 
 ## References
 

@@ -260,6 +260,10 @@ Create `references/voice.md` from the same section's stub. `§ Rules` ships as w
 
 If the project has no deploy mechanism at all (no IaC/CI/CD/Build/Deployment categories AND no local run command anywhere), still create the file with an empty `components: {}` map and a leading comment `# No deploy mechanism detected at install time — invoke <PREFIX>-skill to add components and envs when the project gains a deploy story.` This keeps the contract uniform and lets the deploy skill no-op cleanly.
 
+### Pin critical packages and add the start-up check
+
+For each component with a ship-env, apply `<PREFIX>-deploy`'s `## Build inputs` (`../../shared/tpl-lifecycle.md § tosk-deploy/SKILL.md`). Read the packages its deployed entrypoints import and propose the critical set by that section's four signals, one reason per package, plus the start-up check its build will run — in the same confirmation as the yaml. Never pin on inference alone: the user confirms the set. Pin each at the version the running artifact uses (or the last good build), not the newest release, and add the check to the build file, in one commit. A component that already installs from a committed lockfile needs only the check.
+
 Also create `docs/roadmap.md` stub if not present:
 ```markdown
 # Roadmap
@@ -382,7 +386,7 @@ Gate timeouts split by risk: reversible gates proceed with defaults labeled `aut
 | `<PREFIX>-log` | Appends delivery log entries to `docs/project-log.md` |
 | `<PREFIX>-review` | Code review reception, reviewer dispatch, verification gates |
 | `<PREFIX>-debug` | Systematic debugging — four-phase root cause investigation |
-| `<PREFIX>-deploy` | Deploy authority — caller-driven env selection (`target=non-prod` from `<PREFIX>-dev`, `target=prod` from the `/code\|/fix --prod` command step); reads `references/deploy-config.yaml` (unified env schema: `run:` serve-envs / `deploy:` ship-envs / `invoke:` run-to-completion jobs, which serve no url and are passed over when resolving a target), fills missing values, gates prod inline via `AskUserQuestion`, verifies reachability |
+| `<PREFIX>-deploy` | Deploy authority — caller-driven env selection (`target=non-prod` from `<PREFIX>-dev`, `target=prod` from the `/code\|/fix --prod` command step); reads `references/deploy-config.yaml` (unified env schema: `run:` serve-envs / `deploy:` ship-envs / `invoke:` run-to-completion jobs, which serve no url and are passed over when resolving a target), fills missing values, gates prod inline via `AskUserQuestion`, verifies reachability; holds critical packages to exact pins and every build to a start-up check |
 | `<PREFIX>-test` | Smoke (always) · per-task verifications via `custom-tests.yaml`, end-state check never narrowed away · regression scope pinned by the caller or resolved from the changed paths |
 | `<PREFIX>-skill` | Meta-skill — skill system governance and path ownership |
 | `<PREFIX>-docs` | Documentation sync — README and workflow.md |
@@ -627,6 +631,7 @@ Walk the checklist before declaring done:
 - [ ] Every graph call site (`<PREFIX>-test` prior-selection, `<PREFIX>-dev` step 1, `<PREFIX>-pm` step 1.5, `<PREFIX>-debug` Phase 1, `/code` + `/fix` Step 0) states an explicit fallback for a missing or failing script — the graph is never a gate
 - [ ] `docs/workflow.md` exists (even as a stub)
 - [ ] `.claude/skills/<PREFIX>-deploy/references/deploy-config.yaml` exists and parses as valid YAML. If any IaC/CI/CD/Build/Deployment categories were discovered or any component can be run locally, the file has at least one component; every env declares exactly one of `run:`/`deploy:`/`invoke:`, and every serve-env and ship-env carries a `url` (an invoke-env carries none); every component with a servable form has at least one non-prod env carrying a url (`envs.local` serve-env or a cloud non-prod ship-env), since an invoke-env is passed over rather than used as a target; a component whose only envs are invoke-envs carries no `verify:` line and no invented url; there is no top-level `local:` block, no `cloud:` prefix in `verify:`, and no placeholder text. If the project has no deploy mechanism and no local run command, the file contains `components: {}` plus an explanatory leading comment.
+- [ ] Every component with a ship-env pins its user-confirmed critical packages exactly (or installs from a committed lockfile) and its build file runs the start-up check; run that check once against the current build and confirm it exits 0
 - [ ] No domain-skill SKILL.md contains a `## Deployment` section (deploy logic lives only in `<PREFIX>-deploy/SKILL.md`)
 - [ ] If any IaC/CI/CD/Build/Deployment categories were discovered, `governed-paths.conf` `DEPLOY_PATHS` is non-empty and contains every path from those categories (regardless of which skill owns each path in `PATH_MAP`); otherwise `DEPLOY_PATHS=''` and the deploy-drift check is skipped silently
 - [ ] If any IaC/CI/CD/Build/Deployment categories were discovered, `governed-paths.conf` `PATH_MAP` has a `<PREFIX>-deploy` entry covering those paths

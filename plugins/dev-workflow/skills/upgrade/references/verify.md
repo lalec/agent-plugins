@@ -144,3 +144,4 @@ Run these verification checks on the upgrade-affected items:
 
 Report a summary of what was upgraded.
 - `whats-up.md`, `roadmap.md`, `pilot.md` and `<PREFIX>-graph/SKILL.md` contain their `graph unavailable` wording; with `python3` renamed away for one command, `/whats-up` reports the Roadmap and Unproven rows as `not done` instead of reading the files
+- `UNKNOWN_FILES[]` re-computed after apply is empty or every remaining file carries `project-owned: true`; `.claude/skills/{handover,proceed}/SKILL.md` exist; `git check-ignore .claude/handovers/x.md` exits 0

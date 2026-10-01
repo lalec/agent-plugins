@@ -13,7 +13,7 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 **What gets installed:**
 - 4 agents: `<PREFIX>-dev`, `<PREFIX>-qa`, `<PREFIX>-pm` (the pipeline) + `<PREFIX>-verify` (the verification child qa fans out to; Sonnet, 60-turn cap, no CLAUDE.md — all frontmatter)
 - 8 lifecycle skills: `<PREFIX>-log`, `<PREFIX>-review`, `<PREFIX>-debug`, `<PREFIX>-deploy`, `<PREFIX>-test`, `<PREFIX>-skill`, `<PREFIX>-docs`, `<PREFIX>-graph`
-- 12 slash commands: `/code` + `/fix` + `/pilot` + `/tweak` + `/audit` + `/revert` + `/tidy` + `/design` (conditional on design skill) + `/whats-up` + `/roadmap` + `/blueprint` + `/wrap`
+- 14 entry-point skills: `/code` + `/fix` + `/pilot` + `/tweak` + `/audit` + `/revert` + `/tidy` + `/design` (conditional on design skill) + `/whats-up` + `/roadmap` + `/blueprint` + `/wrap` + `/handover` + `/proceed`
 - `docs/roadmap.md` stub — source of truth for open items; tracked by `<PREFIX>-dev` (new entries) and `<PREFIX>-pm` (status updates)
 - Domain skills: one per substantive source dir, derived from discovery (not hardcoded)
 - `.claude/hooks/governed-paths.conf` — single source of truth for path→skill ownership (incl. per-skill self-ownership entries), `DEPLOY_PATHS`, `REF_WATCH`, `DEPENDENCY_MANIFESTS`, and `COPY_PATHS`; sourced by skill-guard, path-coverage-check, ref-sync-check, and close-out-gate
@@ -216,6 +216,8 @@ Create these files (skip if already present, offer to overwrite if stale):
 .claude/skills/roadmap/SKILL.md               ← from tpl-commands.md § /roadmap
 .claude/skills/blueprint/SKILL.md             ← from tpl-commands.md § /blueprint; keep its `model:` line — the planning lane runs on the strongest model
 .claude/skills/wrap/SKILL.md                  ← from tpl-commands.md § /wrap
+.claude/skills/handover/SKILL.md              ← from tpl-commands.md § /handover
+.claude/skills/proceed/SKILL.md               ← from tpl-commands.md § /proceed
 .claude/skills/design/SKILL.md                ← from tpl-commands.md § /design (only if a design domain skill was discovered in Phase 1)
 ```
 
@@ -310,6 +312,7 @@ Also append to `.gitignore` (create it if absent) any of these lines not already
 .claude/graph/edges.jsonl
 .claude/graph/__pycache__/
 .claude/pilot/
+.claude/handovers/
 ```
 The index is generated, churns on every delivery, and is rebuilt in under a second — committing it
 would add noise to every diff for no recoverable value. `__pycache__/` appears whenever anything

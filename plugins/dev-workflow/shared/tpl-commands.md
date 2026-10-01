@@ -761,6 +761,152 @@ Report per `.claude/skills/code/references/close-out.md` — the same five block
 
 ---
 
+## § /handover — skills/handover/SKILL.md
+
+Promoted from two installs that each wrote it by hand (byte-identical bar the docs-skill name). Writes the minimal file a fresh session needs to continue this one via `/proceed`. Also the file Round D's context ladder writes at a task boundary before compaction, so the shape here is the one that must survive a compaction: pointers, not prose.
+
+```markdown
+---
+name: handover
+description: Write a minimal handover file for this session so a fresh session can resume it via /proceed
+---
+
+# Handover
+
+**Usage:** `/handover [topic-slug]`
+
+**Examples:**
+- `/handover` — infer the slug from recent work
+- `/handover cloud-run-jobs` — explicit slug
+
+Capture only the minimal context a fresh session needs to pick up where this one left off via `/proceed`. The new session reads this file cold — assume no shared memory.
+
+## Step 1 — Resolve the filename
+
+Path: `.claude/handovers/YYYY-MM-DDTHHMM_<slug>.md`, local time.
+- `<slug>` = `$ARGUMENTS` lowercased, kebab-case.
+- If `$ARGUMENTS` is empty: infer a 2–3 word slug from the most recent turns and the HEAD commit subject. If the inferred slug isn't obvious, ask the user to confirm before writing.
+
+## Step 2 — Gather state (parallel Bash where independent)
+
+- `git log --oneline -10`
+- `git status --short`
+- `git rev-parse --abbrev-ref HEAD`
+- If significant code moved: `git diff --stat HEAD~5..HEAD`
+- Anything else specific to what this session was doing (deploy status, a running job, live env values) — only if it is load-bearing for the next session.
+
+## Step 3 — Write the file
+
+Be terse. Pointers, not code dumps. File refs as `path:line`. Commit SHAs short (7). Under ~200 lines — over that, you are including too much.
+
+Use this exact section order:
+
+~~~markdown
+# Handover — <one-line goal>
+
+## Goal
+One sentence. What this session was doing.
+
+## Commits landed this session
+| SHA | Subject |
+|---|---|
+| `abc1234` | … |
+
+## Working tree state
+- Mine this session, uncommitted: `path/to/file` — why
+- Pre-existing user WIP, do not touch: `path/to/other-file`
+
+## Live deployed state
+(skip if no deploys happened)
+- <component>: `<revision or image>`, env `X=Y`
+
+## Verified working
+| Check | How verified |
+|---|---|
+| … | … |
+
+## Open / unverified
+1. Specific unknown — what would confirm it
+2. Pending decision — options and the current lean
+
+## Files to know (max 10)
+| Path | Why |
+|---|---|
+| `path:line` | … |
+
+## How to resume
+1. First action — an exact copy-paste command where possible
+2. Pass criteria for that action
+3. Then the next action
+
+## Flags
+- Pre-existing bug X — out of scope but worth knowing
+- Quota state, hands-off areas, gotchas
+~~~
+
+## Step 4 — Confirm
+
+Tell the user the filename and quote the first ~3 lines so they can sanity-check. Do **not** commit the file — `.claude/handovers/` is gitignored; a handover is a per-machine snapshot, not a record.
+
+## Do not
+
+- Don't paraphrase user intent. Capture literal state.
+- Don't re-explain context the new session can read for itself.
+- Don't include code dumps; reference by `path:line`.
+- Don't write to `docs/` — that path is governed by `<PREFIX>-docs`; `.claude/handovers/` is `OPEN`.
+```
+
+---
+
+## § /proceed — skills/proceed/SKILL.md
+
+The other half: load a handover and continue, after checking the world has not moved since it was written.
+
+```markdown
+---
+name: proceed
+description: Resume work by loading a prior session's /handover file from .claude/handovers/
+---
+
+# Proceed
+
+**Usage:** `/proceed [slug-or-filename]`
+
+**Examples:**
+- `/proceed` — the most recent handover (or a list if ambiguous)
+- `/proceed cloud-run-jobs` — match by slug substring
+- `/proceed 2026-05-13T0030_cloud-run-jobs.md` — exact filename
+
+## Step 1 — Resolve which handover
+
+`ls -t .claude/handovers/*.md 2>/dev/null`, newest first.
+- `$ARGUMENTS` empty: 0 files → say none found and suggest `/handover` from a session that has context; exactly 1 file in the last 24 h → use it; otherwise show the 5 most recent (filename + first line) and ask which.
+- `$ARGUMENTS` given: match filenames. One match → use it. Several → ask. None → say so and list options.
+
+## Step 2 — Read the chosen file in full
+
+The whole file. Do not skim.
+
+## Step 3 — Acknowledge, briefly
+
+Filename loaded · the one-line goal quoted from `## Goal` · 2–3 lines summarising `## How to resume`. Do not echo the file back.
+
+## Step 4 — Spot-check live state
+
+The handover is a snapshot; the world has moved on. Verify drift:
+- `git log --oneline -5` — does HEAD match what `## Commits landed` implies?
+- `## Live deployed state` names revisions, images or env values → run the checks that confirm them.
+- `## Open / unverified` references a running job, pending CI or a quota window → check its current state.
+
+Flag drift in 1–3 bullets. **The files win over the handover and the handover wins over any summary of this session**: if drift is significant (another deploy happened, an expected file changed), pause and ask before resuming.
+
+## Step 5 — Resume or redirect
+
+One question: "Resume with the listed next action — <first item of How to resume> — or a different priority?" On resume, execute that action directly. Trust `## Verified working` unless Step 4 contradicted it; don't re-verify what was verified.
+```
+
+---
+
 ## § loop.md — .claude/loop.md
 
 What a bare `/loop <interval>` runs in this project (Claude Code reads `.claude/loop.md` when `/loop` is given no prompt). One line, so the standing mission is the default thing a loop does; nothing else belongs here, and it is ignored whenever a prompt is typed after `/loop`.

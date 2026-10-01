@@ -25,6 +25,7 @@ Read `../../shared/preflight.md` and follow it before continuing.
 Read current files (do not prompt the user for things already known):
 - `EXISTING_PREFIX` — read from `.claude/hooks/governed-paths.conf` `PATH_MAP` entries or from agent filenames (`<PREFIX>-dev.md`)
 - `EXISTING_SKILLS[]` — list `.claude/skills/`
+- `UNKNOWN_FILES[]` — every `.claude/commands/*.md`, `.claude/skills/*/SKILL.md` and `.claude/agents/*.md` whose name is neither a template name (the fourteen entry points, `<PREFIX>-{dev,qa,pm,verify}`, the lifecycle skills, the domain skills the category map produced) nor marked `project-owned: true` in its frontmatter. These are asked about in Step 7, one by one, never removed unasked — the two installs each grew `quality-review`, `handover`, `proceed` and a stats skill by hand, and one carried 32 KB of tracked prompt files from a tool no longer used.
 
 `CONFIG_DIR=.claude` and `PROJECT_FILE=CLAUDE.md` are fixed (Claude Code only).
 

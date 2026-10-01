@@ -1499,12 +1499,16 @@ at a phone viewport can walk it.
    sample, never a bare label: users cannot picture what a name will produce. *Proven by:* every
    option renders its preview.
 4. **Optional depth is collapsed by default**, behind one sentence saying what the default already
-   did. Detail some users want should not block the rest. **On a phone that sentence is one line.**
-   A note about the content itself (what is missing, what is approximate) shrinks to a count on a
-   line the surface already has, with the reason one tap away: a paragraph above the primary content
-   costs that content's space on every view, for a reason most users read once. *Proven by:* the
-   step completes with the section closed, the sentence says what happened without it, and at a
-   phone viewport no note above the primary content wraps past one line.
+   did. Detail some users want should not block the rest. *Proven by:* the step completes with the
+   section closed, and the sentence says what happened without it.
+5. **A phone shows only what the next action needs.** Everything on a phone screen, text or not,
+   must earn its place there: explanations, caveats, secondary counts, metadata, legends, helper
+   text, repeated labels and anything decorative go one tap away or are cut. Room on a desktop
+   layout is never the reason something appears on a phone. Too much at once reads as noise, and
+   the thing the screen exists for gets pushed down or covered. *Proven by:* at a phone viewport the
+   primary content starts in the top third of the first screen, nothing above it wraps past one
+   line, no two labels overlap, and every element moved off the screen is one tap away or
+   deliberately dropped.
 
 ## Iconography
 
@@ -1551,7 +1555,9 @@ directory, and `--dry-run` for the preview.)*
 # Voice — <PROJECT>
 
 How every user-readable string is written: labels, instructions, errors, status lines, legal copy.
-Read before writing copy; the rules apply to a one-word edit exactly as to a new surface.
+Read before writing copy; the rules apply to a one-word edit exactly as to a new surface. These
+rules decide how a string reads; whether it appears on a phone at all is `ux-patterns.md § Baseline
+states` 5.
 
 ## Rules
 
@@ -1562,9 +1568,7 @@ Read before writing copy; the rules apply to a one-word edit exactly as to a new
 3. **No em dashes in any user-readable string, legal copy included.** Readers take them as a sign
    the text was machine-written and trust the product less. Use a full stop, a comma or a colon.
 4. **Say what the product will not do on the step where the expectation forms**, never on the
-   result. A limit learned at the end reads as a defect. Stating it is not explaining it: on a
-   phone it takes one line, with the reason one tap away (`ux-patterns.md § Baseline states` 4).
-   § Won't do lists this app's.
+   result. A limit learned at the end reads as a defect. § Won't do lists this app's.
 5. **Put the instruction above the control it explains**, as one imperative sentence. An
    instruction below the control is found after the mistake.
 6. **A toggle names its effect in both states.** Two labels that each name only a state read as two

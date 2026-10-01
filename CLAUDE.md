@@ -11,7 +11,7 @@ Design contract for `plugins/dev-workflow/`. Read before editing anything in it.
 ### Rules
 
 1. **Agents do WHAT, skills do HOW.** Agents are stack-agnostic step sequences; skills carry the project-specific commands, paths, and tools.
-2. **One-way references.** Agents may name skills; skills must never name agents. The twelve entry points (`/code`, `/fix`, `/pilot`, …) live as `.claude/skills/<name>/SKILL.md` because that is where Claude Code puts a slash command with a `references/` directory — they are **commands** in Rules 1–2's sense (they orchestrate agents), and Rules 1–2 bind lifecycle and domain skills.
+2. **One-way references.** Agents may name skills; skills must never name agents. The fourteen entry points (`/code`, `/fix`, `/pilot`, …) live as `.claude/skills/<name>/SKILL.md` because that is where Claude Code puts a slash command with a `references/` directory — they are **commands** in Rules 1–2's sense (they orchestrate agents), and Rules 1–2 bind lifecycle and domain skills.
 3. **Agents and commands are uniform across projects.** Same wording, same structure, only `<PREFIX>` differs — variation belongs in skills.
 4. **No duplicated instructions.** A rule lives in exactly one place; if it appears in both an agent and a skill, the boundary is wrong — fix the design, don't copy text.
 5. **SKILL.md is *what + when + pointer*; references are *how*.** SKILL.md states what the skill owns, when to invoke it, and routes to references via a short read map. Multi-step protocols, full code examples, and detailed checklists live in `references/*.md`, never inlined in SKILL.md. If a SKILL.md restates a reference's content, the duplication is a bug — collapse it to a pointer.

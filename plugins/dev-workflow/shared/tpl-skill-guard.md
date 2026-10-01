@@ -553,7 +553,7 @@ exit 0
 
 ## § pilot-cleanup.sh
 
-Fires on `SessionEnd`. Removes `.claude/pilot/running` **only when the marker names this session** — `/pilot` Step 0 writes the session id (`$CLAUDE_CODE_SESSION_ID`, which the Bash tool exposes) as the marker's second line. Concurrent sessions in one repo are normal, so a plain removal would delete another mission's marker and let two runs commit into one tree. A marker another session owns is left for its own session end, or for `/pilot`'s 6-hour staleness rule. Output is ignored on this event by design; it is cleanup, not a message.
+Fires on `SessionEnd`. Removes `.claude/pilot/running` **only when the marker names this session, and never on a `/resume` switch** (the event fires with `reason: resume` while the old session's subagents may still be running) — `/pilot` Step 0 writes the session id (`$CLAUDE_CODE_SESSION_ID`, which the Bash tool exposes) as the marker's second line. Concurrent sessions in one repo are normal, so a plain removal would delete another mission's marker and let two runs commit into one tree. A marker another session owns is left for its own session end, or for `/pilot`'s 6-hour staleness rule. Output is ignored on this event by design; it is cleanup, not a message.
 
 ```bash
 #!/bin/bash
@@ -561,6 +561,7 @@ Fires on `SessionEnd`. Removes `.claude/pilot/running` **only when the marker na
 INPUT=$(cat) || exit 0
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 [ -z "$SESSION_ID" ] && exit 0
+[ "$(echo "$INPUT" | jq -r '.reason // empty' 2>/dev/null)" = "resume" ] && exit 0   # switching conversations is not ending the run
 MARKER="${CLAUDE_PROJECT_DIR:-.}/.claude/pilot/running"
 [ -f "$MARKER" ] || exit 0
 OWNER=$(sed -n 2p "$MARKER" 2>/dev/null)
@@ -572,7 +573,7 @@ exit 0
 
 ## § limit-mark.sh
 
-Fires on `StopFailure` with matcher `rate_limit|overloaded`. The turn that an allowance limit kills is the one no agent can report, so this hook writes the fact where the next `/pilot` Step 0 and `/whats-up`'s store row read it: `.claude/pilot/limit-hit`, three lines — timestamp, session id, `error_type` verbatim. A `running` marker older than a `limit-hit` from the same session is a run the limit killed, which Step 0 then **resumes instead of waiting six hours for the marker to age out**. The `error_type` line also answers a question the docs leave open — whether a claude.ai usage limit arrives as `rate_limit` — the first time one lands. Output is ignored on this event; the file is the whole effect.
+Fires on `StopFailure` with matcher `rate_limit` — only that: an `overloaded` 529 is transient and a retry succeeds, so recording it here would make Step 0 resume a run that never died. The turn that an allowance limit kills is the one no agent can report, so this hook writes the fact where the next `/pilot` Step 0 and `/whats-up`'s store row read it: `.claude/pilot/limit-hit`, three lines — timestamp, session id, `error_type` verbatim. A `running` marker older than a `limit-hit` from the same session is a run the limit killed, which Step 0 then **resumes instead of waiting six hours for the marker to age out**. The `error_type` line also answers a question the docs leave open — whether a claude.ai usage limit arrives as `rate_limit` — the first time one lands. Output is ignored on this event; the file is the whole effect.
 
 ```bash
 #!/bin/bash
@@ -590,7 +591,7 @@ exit 0
 
 ## § settings.json
 
-Wire all 12 hooks. If the file already exists, merge the `hooks` key without removing unrelated settings. Timeout unit: **seconds**. The `Task|Agent` matcher is what makes `pre-handoff-check.sh` fire when qa is spawned as a subagent — without it the gate never runs in the pipeline. The `SubagentStop` matcher names the four pipeline agents so a research fork or an Explore child never gets blocked for lacking a handoff block.
+Wire all 12 hook scripts — 14 entries, since `skill-guard.sh` sits under both `Edit` and `Write` and `pre-handoff-check.sh` under both `Skill` and `Task|Agent`. If the file already exists, merge the `hooks` key without removing unrelated settings. Timeout unit: **seconds**. The `Task|Agent` matcher is what makes `pre-handoff-check.sh` fire when qa is spawned as a subagent — without it the gate never runs in the pipeline. The `SubagentStop` matcher names the four pipeline agents so a research fork or an Explore child never gets blocked for lacking a handoff block.
 
 ```json
 {
@@ -662,7 +663,7 @@ Wire all 12 hooks. If the file already exists, merge the `hooks` key without rem
     ],
     "StopFailure": [
       {
-        "matcher": "rate_limit|overloaded",
+        "matcher": "rate_limit",
         "hooks": [
           { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/limit-mark.sh", "timeout": 5 }
         ]

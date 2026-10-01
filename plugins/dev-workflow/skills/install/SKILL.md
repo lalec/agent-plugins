@@ -419,7 +419,7 @@ All hooks wired in `.claude/settings.json`.
 | `post-commit.sh` | PostToolUse Bash | Reminds to run `<PREFIX>-log` after every commit |
 | `agent-mark.sh` | SubagentStop (pipeline agents) | Records every pipeline-agent stop to a session marker; blocks a stop **once** when the agent's last message lacks its `## Handoff` block |
 | `pilot-cleanup.sh` | SessionEnd | Removes `.claude/pilot/running` when its second line is this session's id |
-| `limit-mark.sh` | StopFailure `rate_limit\|overloaded` | Writes `.claude/pilot/limit-hit` (ts · session id · error_type) so the next `/pilot` resumes a limit-killed run instead of waiting it out |
+| `limit-mark.sh` | StopFailure `rate_limit` | Writes `.claude/pilot/limit-hit` (ts · session id · error_type) so the next `/pilot` resumes a limit-killed run instead of waiting it out |
 
 ## Delivery Log Format
 
@@ -625,7 +625,7 @@ Walk the checklist before declaring done:
 - [ ] `.claude/hooks/ref-sync-check.sh` is executable, sources `governed-paths.conf` — contains NO hardcoded path patterns; source-drift warning fires only on structural (A/D/R) changes or `REF_WATCH` matches; deploy-drift check unchanged; the copy check counts only added, non-comment lines; every warning is emitted as `hookSpecificOutput.additionalContext` JSON, never stderr
 - [ ] `.claude/hooks/skill-mark.sh` is executable and writes to the session-scoped marker (same derivation as the guards)
 - [ ] `.claude/hooks/post-commit.sh` is executable, references `<PREFIX>-log`, exits 0 on success paths (recorders never exit non-zero), and emits its reminder as `additionalContext` JSON — stderr from an exit-0 hook reaches no one
-- [ ] `.claude/settings.json` exists and wires all 12 hooks: 9 across `PreToolUse`/`PostToolUse` + `Edit`/`Write`/`Bash`/`Skill`/`Task|Agent` matchers, plus `agent-mark.sh` on `SubagentStop` (matcher naming the four pipeline agents), `pilot-cleanup.sh` on `SessionEnd`, `limit-mark.sh` on `StopFailure` (`rate_limit|overloaded`)
+- [ ] `.claude/settings.json` exists and wires all 12 hook scripts (14 entries): 9 across `PreToolUse`/`PostToolUse` + `Edit`/`Write`/`Bash`/`Skill`/`Task|Agent` matchers, plus `agent-mark.sh` on `SubagentStop` (matcher naming the four pipeline agents), `pilot-cleanup.sh` on `SessionEnd`, `limit-mark.sh` on `StopFailure` (`rate_limit`)
 - [ ] `CLAUDE.md` has `## Plan Mode`, `## Agents`, `## Skills`, and `## Roadmap` sections with correct references
 - [ ] `docs/roadmap.md` exists (even as a stub) and its format line documents `**Id:**` as the item's permanent handle
 - [ ] `docs/project-log.md` exists

@@ -97,7 +97,7 @@ Caller also passes `regression_mode` — forward it unchanged when you use the `
 2. **Address findings** — any issues found in review must be resolved before proceeding to testing. Split findings by class:
    - **Source findings** (anything that can change runtime behavior — security fixes, bug fixes, refactors, config consumed at runtime): **you do not edit code.** Return immediately with `Status: blocked — fixes required` in the handoff block (same shape as `<PREFIX>-dev`'s) and `Notes:` listing what must change. The orchestrator re-spawns `<PREFIX>-dev` to apply the fix, which re-deploys non-prod, then re-spawns this agent. Self-patching skips the deploy step and leaves non-prod stale — never do it.
    - **Non-source findings** (docs, reference files, comments, stale `custom-tests.yaml` asserts — nothing that changes runtime behavior): fix them directly, commit by name, and record the fix in `Review:`. Do not block the pipeline for these.
-3. **Test** — use the `<PREFIX>-test` skill, passing through: `regression_mode`, the names of any new verifications captured for this task, and the paths `<PREFIX>-dev` reported under `Files changed:`. Those signals drive tier selection (Smoke always · this task's verifications always, and the end-state one among them is never narrowed away · prior verifications whose `paths` overlap the changed paths · Regression iff the **resolved** scope is `full`). **Verify outcomes, not environments:** re-run each decisive check fresh against the running stack, but trust environment facts dev already recorded (tool availability, artifact paths, evidence in the dev handoff) — re-deriving them from scratch doubles the cost without adding assurance.
+3. **Test** — use the `<PREFIX>-test` skill, passing through: `regression_mode`, the names of any new verifications captured for this task, and the paths `<PREFIX>-dev` reported under `Files changed:`. Those signals drive tier selection (Smoke always · this task's verifications always, and the end-state one among them is never narrowed away · prior verifications whose `paths` overlap the changed paths · Regression iff the **resolved** scope is `full`). **Verify outcomes, not environments:** re-run each decisive check fresh against the running stack, but trust environment facts dev already recorded (tool availability, artifact paths, evidence in the dev handoff) — re-deriving them from scratch doubles the cost without adding assurance. **When `<PREFIX>-test` splits the set, dispatch each slice as a `<PREFIX>-verify` subagent** (Agent tool, `subagent_type: <PREFIX>-verify`, **no `model` parameter** — its model, turn cap and prefix are fixed in its own frontmatter, which is the only place the fan-out's price is decided). Brief it inline per `custom-tests.md § Splitting`; a child returning `Status: partial` hands back an `Unstarted:` list — re-dispatch exactly that list as a new child.
 4. **On test failure** — use `<PREFIX>-debug` skill to identify root cause, then delegate back to <PREFIX>-dev for the fix; re-enter the full dev → qa flow after the fix
 4.5. **Walk the acceptance statement** — the `Done means:` line in the prompt is the sign-off bar; the typed verifications are evidence for it, never a replacement. Trace the journey end to end against the running stack and report **where it actually lands**, not that its parts exist. Passing checks around a journey that dead-ends is the failure this step exists to catch, and it is invisible to assertions written from the diff. If the statement is unwalkable here, say which step blocks and why — it decides the sign-off below.
 5. **Sign off** — only when review reports no unresolved findings and `<PREFIX>-test` reports clean. Map the outcome honestly:
@@ -129,14 +129,14 @@ Code edits → `<PREFIX>-dev`. Delivery log → `<PREFIX>-pm`. Review never skip
 **Status:** signed-off | signed-off-with-deferrals | blocked
 **Review:** clean | <N> findings — <one-line summary; note any non-source nits fixed directly>
 **Tests:** <what ran> · <pass/fail counts> · <N carried, when any prior was carried forward> · <`priors: N walked of M selected (cap C)` whenever priors were in scope — the cap `<PREFIX>-test` sized the walk against; state all three even when N = M> · regression=<the scope that ran: smart|full><when the caller passed `auto`, append ` (derived: <one clause — what in the change decided it>)`>
-**Fanned out:** <N> children (<model>) · <one clause: what each covered>  (or "none")
+**Fanned out:** <N> children (<PREFIX>-verify) · <one clause: what each covered>  (or "none")
 **Evidence:** <one line per typed verification: command/action → observed result → pass|fail|blocked; "none" if no typed verifications ran>
 **UAT-deferred:** <verification names + reasons — only with signed-off-with-deferrals; omit line otherwise>
 **Reference Sync:** done | n/a
 **Notes:** <one short line, optional>
 ```
 
-`Fanned out:` records parallel subagents you dispatched to split a large verification set — the count and the model they ran on are a cost the caller cannot see any other way, so report both even though they need no action. Write `none` when you did the work yourself.
+`Fanned out:` records the `<PREFIX>-verify` children you dispatched to split a large verification set — the count, and the model as `(<PREFIX>-verify)` since the agent file fixes it — a cost the caller cannot see any other way, so report it even though it needs no action. Count every dispatch, re-dispatches of an `Unstarted:` remainder included. Write `none` when you did the work yourself. `<PREFIX>-pm` carries the count onto the log's `Tests:` line, and the `agent-mark.sh` hook's session marker is what a close-out checks the total against.
 
 Use `Status: blocked` if review or tests reported anything that can't be signed off without a code change. Use `signed-off-with-deferrals` only when the sole open items are verifications no available environment can run. `Evidence:` is the compact proof the user reads instead of re-testing — concrete commands and observed output, not claims.
 
@@ -201,4 +201,51 @@ No code edits. No test execution. **No deployments** — prod deploy is the expl
 ```
 
 Use `Status: complete` only after the delivery log is written. Use `Status: blocked` if QA evidence was missing (step 1) or you could not write the log — `Status: signed-off` is `<PREFIX>-qa`'s output, never pm's.
+```
+
+---
+
+## § tosk-verify
+
+The verification child. `<PREFIX>-qa` dispatches one per slice when `<PREFIX>-test` splits a set too large for one context. Its three cost bounds are **frontmatter, not prose**: `model: sonnet` (the fan-out is the cheap half of verification and this is where that is decided — no caller passes a model), `maxTurns: 60` (the ~120-tool-call slice budget `custom-tests.md § Splitting` sizes against, at the measured ~2 calls per turn; a child that reaches it returns partial output and the caller re-dispatches what it lists as unstarted — measured before this cap existed: 56% of 109 children ran past 60 turns, median 71, max 186), and `omitClaudeMd: true` (a child executes a brief; the project's CLAUDE.md is ~3.5K tokens of prefix it never reads). The body is **what**: the how — runner invocations, freshness rule, evidence-line format — arrives in the dispatch brief, because a child sent to read a protocol pays for it on every turn it then takes.
+
+```markdown
+---
+name: <PREFIX>-verify
+description: Verification child for <PROJECT>. Executes one slice of resolved verifications against the running stack and records each outcome through the runner. Dispatched only by <PREFIX>-qa when <PREFIX>-test splits a set; never invoked for design, review, or repair.
+model: sonnet
+maxTurns: 60
+omitClaudeMd: true
+tools: Read, Grep, Glob, Bash
+color: cyan
+---
+
+# <PREFIX>-verify
+
+You execute the verification slice in your dispatch brief. Everything you need is in the brief: the resolved entries with their `type`, `assert` and target, the running-stack and freshness rules, the two runner invocations with their JSON shapes, and the evidence-line format. **Never open the test skill, its references, or any `.claude/**/*.md` file** — a child that goes looking for the protocol spends the budget the split was meant to save.
+
+## Workflow
+
+1. Work the entries in the order given. Exercise each against the running stack; a result the brief's freshness rule rejects is re-run, never reused.
+2. Record every outcome through the runner exactly as the brief states — `pass` only when the assertion was exercised and held; `blocked` or `fail` always with a `reason`. An entry you cannot reach is `blocked` with why, never skipped and never substituted.
+3. Stop when the slice is done **or when you are near your turn cap**: finish the entry in flight, record it, and hand off. Entries you never started are listed, not guessed at.
+
+## Boundaries
+
+No source edits, no reference edits, no commits beyond what the runner's `record` makes. No judgement about *which* entries to run — the slice is the slice. Nothing is backgrounded: a slow check is waited on in the foreground, because nothing can wake this agent once its turn ends.
+
+## Response Requirements
+
+**Every response ends with this block and nothing after it.** The caller machine-reads it to re-dispatch the remainder and to fill its own `Fanned out:` and `Evidence:` fields.
+
+```
+## Handoff
+**Status:** complete | partial
+**Walked:** <N> of <M> entries
+**Evidence:** <one line per entry walked: name → command/action → observed → pass|fail|blocked (reason)>
+**Unstarted:** <names of entries never started, comma-separated | none>
+**Notes:** <one short line, optional>
+```
+
+`Status: partial` whenever `Unstarted:` is not `none` — including when the turn cap ended the slice. Never end a turn without this block.
 ```

@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "dev-workflow",
-      "description": "Install or upgrade a 3-agent delivery pipeline (dev → qa → pm) with skill-guard hooks, domain skills, and roadmap tracking. Claude Code only. Two commands: /dev-workflow:install (fresh) and /dev-workflow:upgrade (existing).",
+      "description": "Install or upgrade a delivery pipeline (dev → qa → pm, plus a bounded verification child) with skill-guard hooks, domain skills, and roadmap tracking. Claude Code only. Two commands: /dev-workflow:install (fresh) and /dev-workflow:upgrade (existing).",
       "author": {
         "name": "lalec"
       },

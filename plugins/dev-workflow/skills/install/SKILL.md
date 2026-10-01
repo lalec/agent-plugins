@@ -11,7 +11,7 @@ user-invocable: false
 Installs a multi-agent delivery workflow on a new project in five phases: discover project structure → create lifecycle infrastructure → wire domain skills + hooks → update CLAUDE.md → verify.
 
 **What gets installed:**
-- 3 orchestrator agents: `<PREFIX>-dev`, `<PREFIX>-qa`, `<PREFIX>-pm`
+- 4 agents: `<PREFIX>-dev`, `<PREFIX>-qa`, `<PREFIX>-pm` (the pipeline) + `<PREFIX>-verify` (the verification child qa fans out to; Sonnet, 60-turn cap, no CLAUDE.md — all frontmatter)
 - 8 lifecycle skills: `<PREFIX>-log`, `<PREFIX>-review`, `<PREFIX>-debug`, `<PREFIX>-deploy`, `<PREFIX>-test`, `<PREFIX>-skill`, `<PREFIX>-docs`, `<PREFIX>-graph`
 - 12 slash commands: `/code` + `/fix` + `/pilot` + `/tweak` + `/audit` + `/revert` + `/tidy` + `/design` (conditional on design skill) + `/whats-up` + `/roadmap` + `/blueprint` + `/wrap`
 - `docs/roadmap.md` stub — source of truth for open items; tracked by `<PREFIX>-dev` (new entries) and `<PREFIX>-pm` (status updates)
@@ -34,7 +34,7 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 - `CLAUDE.md` workflow sections
 
 **Template files (read before Phase 2 and 3):**
-- `../../shared/tpl-agents.md` — tosk-dev, tosk-qa, tosk-pm templates
+- `../../shared/tpl-agents.md` — tosk-dev, tosk-qa, tosk-pm, tosk-verify templates
 - `../../shared/tpl-lifecycle.md` — 8 lifecycle skill templates
 - `../../shared/graph.py` — the delivery-graph projector, copied verbatim to `.claude/graph/graph.py`
 - `../../shared/run-checks.py` — the verification runner/recorder, copied verbatim to `.claude/skills/<PREFIX>-test/scripts/run-checks.py`
@@ -151,7 +151,7 @@ Already present in docs/: <list any of workflow.md, project-log.md, roadmap.md t
 (Omit this line entirely if none exist.)
 
 What will be created:
-- 3 agents: <PREFIX>-dev, <PREFIX>-qa, <PREFIX>-pm
+- 4 agents: <PREFIX>-dev, <PREFIX>-qa, <PREFIX>-pm, <PREFIX>-verify
 - 8 lifecycle skills: <PREFIX>-log, <PREFIX>-review, <PREFIX>-debug, <PREFIX>-deploy, <PREFIX>-test, <PREFIX>-skill, <PREFIX>-docs, <PREFIX>-graph
 - 1 design skill: <PREFIX>-design  ← omit if no frontend category
 - <N> domain skills: <comma-separated list>
@@ -189,6 +189,7 @@ Create these files (skip if already present, offer to overwrite if stale):
 .claude/agents/<PREFIX>-dev.md        ← from tpl-agents.md § tosk-dev
 .claude/agents/<PREFIX>-qa.md         ← from tpl-agents.md § tosk-qa
 .claude/agents/<PREFIX>-pm.md         ← from tpl-agents.md § tosk-pm
+.claude/agents/<PREFIX>-verify.md     ← from tpl-agents.md § tosk-verify
 .claude/skills/<PREFIX>-log/SKILL.md
 .claude/skills/<PREFIX>-review/SKILL.md       ← also create references/{code-review-reception,requesting-code-review,issuing-findings,security-review}.md and references/vex.yaml (`statements: []`) (see tpl-lifecycle.md § tosk-review)
 .claude/skills/<PREFIX>-debug/SKILL.md        ← also create 4 reference files + scripts (see tpl-lifecycle.md § debug)
@@ -363,7 +364,7 @@ Also create `docs/workflow.md` if not present — generate with real content usi
   (top level) close out — push per <PREFIX>-deploy § Push policy + verified scorecard
 ```
 
-Iterative work (pixel nudges, copy rounds, small hotfixes) uses `/tweak` — top-level, inline-verified, close-out batched at exit and enforced by the `close-out-gate` hook at push time. Dependency advisories use `/audit`: it gives each one a VEX status, blocks only on the ones an attacker can actually reach, records the rest in `vex.yaml` so they are never re-decided, and `--deep` runs the built-in `/security-review` over the commits no deep pass has covered. Rollbacks use `/revert` (git revert + scoped re-verify + logged reversal). Leftover WIP — a dirty tree, orphaned stashes, stale branches — uses `/tidy`: it sweeps, probes history to establish what each item actually is, and routes every item to commit / deliver / discard / ignore. Multi-task autonomous runs (a roadmap batch, a goal to iterate toward) use `/pilot` — it decomposes the goal, gates once up-front, routes each task through the pipeline or the tweak lane, and closes out once at the end. `/pilot --gates` is the same lane aimed at a store instead of a goal: it re-measures every parked verdict, closes on its own the ones whose proposal the measurement killed or whose trigger has not fired, and brings the rest back as one batched decision with a recommendation per row — nothing that writes is ever concluded without an answer. `/roadmap` is the way in from tracked work: it ranks the open items (one rank rule, defined in `roadmap.md § Rank` and cited by `/pilot`) and either hands the top set to `/pilot --items <id>,…` as a mission or starts a single item through `/code`/`/fix`. It selects and never implements, so run constraints — task cap, retry limit, budget — live only in `/pilot`. `/blueprint` is the way in for work nobody has planned yet: it reads the record, probes every value it prescribes against the code — that the cited site is on the path production takes, that the literal being replaced exists once, that the literal itself survives the values the project already stores — makes every decision an executor would otherwise guess, and writes one umbrella plus `/pilot`-shaped child items to `docs/roadmap.md` — planning on the strongest model (its frontmatter `model:`), execution unchanged; `/pilot --items <umbrella-id>` expands to the children, and the decisions block follows any item carrying a `**Parent:**` however the mission was addressed. `/whats-up` is the read-only composed reader for a fresh session: it reads every store that outlives a session, reconciles them, and reports what needs a person — and `/pilot` with no arguments is the **standing mission** that takes exactly that report's rows as its task list, asks nothing up front, and at close-out asks only the high or critical rows. That is what runs unattended: `/loop 30m /pilot --max-tasks 1` in a session left open with Remote Control (a fixed interval, never self-paced — a self-paced loop dies when its own wake is refused at the usage limit, a fixed one fires again after the reset and resumes its own interrupted run; a loop over named items asks its gate once, on the first firing, and later firings inherit the answer), or `.claude/pilot/shift.sh install` for headless launchd shifts that need no open session at all. An unattended run dispatches every subagent on Sonnet and keeps the orchestrator on the session model; an attended run uses the agents' own models. A check-in is `/whats-up` → `/pilot --gates`, which asks everything the unattended runs parked, in one sitting.
+Iterative work (pixel nudges, copy rounds, small hotfixes) uses `/tweak` — top-level, inline-verified, close-out batched at exit and enforced by the `close-out-gate` hook at push time. Dependency advisories use `/audit`: it gives each one a VEX status, blocks only on the ones an attacker can actually reach, records the rest in `vex.yaml` so they are never re-decided, and `--deep` runs the built-in `/security-review` over the commits no deep pass has covered. Rollbacks use `/revert` (git revert + scoped re-verify + logged reversal). Leftover WIP — a dirty tree, orphaned stashes, stale branches — uses `/tidy`: it sweeps, probes history to establish what each item actually is, and routes every item to commit / deliver / discard / ignore. Multi-task autonomous runs (a roadmap batch, a goal to iterate toward) use `/pilot` — it decomposes the goal, gates once up-front, routes each task through the pipeline or the tweak lane, and closes out once at the end. `/pilot --gates` is the same lane aimed at a store instead of a goal: it re-measures every parked verdict, closes on its own the ones whose proposal the measurement killed or whose trigger has not fired, and brings the rest back as one batched decision with a recommendation per row — nothing that writes is ever concluded without an answer. `/roadmap` is the way in from tracked work: it ranks the open items (one rank rule, defined in `roadmap.md § Rank` and cited by `/pilot`) and either hands the top set to `/pilot --items <id>,…` as a mission or starts a single item through `/code`/`/fix`. It selects and never implements, so run constraints — task cap, retry limit, budget — live only in `/pilot`. `/blueprint` is the way in for work nobody has planned yet: it reads the record, probes every value it prescribes against the code — that the cited site is on the path production takes, that the literal being replaced exists once, that the literal itself survives the values the project already stores — makes every decision an executor would otherwise guess, and writes one umbrella plus `/pilot`-shaped child items to `docs/roadmap.md` — planning on the strongest model (its frontmatter `model:`), execution unchanged; `/pilot --items <umbrella-id>` expands to the children, and the decisions block follows any item carrying a `**Parent:**` however the mission was addressed. `/whats-up` is the read-only composed reader for a fresh session: it reads every store that outlives a session, reconciles them, and reports what needs a person — and `/pilot` with no arguments is the **standing mission** that takes exactly that report's rows as its task list, asks nothing up front, and asks nothing at close-out either — whatever needs a person parks for `/pilot --gates`, most urgent first. That is what runs unattended: `/loop 30m /pilot --max-tasks 1` in a session left open with Remote Control (a fixed interval, never self-paced — a self-paced loop dies when its own wake is refused at the usage limit, a fixed one fires again after the reset and resumes its own interrupted run; a loop over named items asks its gate once, on the first firing, and later firings inherit the answer), or `.claude/pilot/shift.sh install` for headless launchd shifts that need no open session at all. An unattended run dispatches every subagent on Sonnet and keeps the orchestrator on the session model; an attended run uses the agents' own models. A check-in is `/whats-up` → `/pilot --gates`, which asks everything the unattended runs parked, in one sitting.
 
 ## Agents
 
@@ -372,6 +373,7 @@ Iterative work (pixel nudges, copy rounds, small hotfixes) uses `/tweak` — top
 | `<PREFIX>-dev` | Design → implement → deploy non-prod → Reference Sync → hand off to `<PREFIX>-qa` |
 | `<PREFIX>-qa` | Code review (`<PREFIX>-review`) + tests (`<PREFIX>-test`) → sign-off (`signed-off` \| `signed-off-with-deferrals` when only unrunnable verifications remain) → hand off to `<PREFIX>-pm` |
 | `<PREFIX>-pm` | Verify QA phases ran → write delivery log (`<PREFIX>-log`, hash = the feature commit) → update docs if needed |
+| `<PREFIX>-verify` | Verification child: executes one slice of a split verification set and records outcomes through the runner. Dispatched only by `<PREFIX>-qa`; Sonnet, 60-turn cap and no CLAUDE.md are set in its frontmatter, so no caller decides its price |
 
 Prod deploy is **not** an agent step — it runs at the command top level only when `/code` / `/fix` is invoked with `--prod` (so the `<PREFIX>-deploy` `AskUserQuestion` gate reaches the user), after QA sign-off, on the final code. The `<PREFIX>-deploy` skill carries **no** `disable-model-invocation` frontmatter — the dev step and the command must be able to invoke it via the Skill tool; prod safety comes from its `user_confirm` gate, not a frontmatter gate.
 
@@ -415,6 +417,9 @@ All hooks wired in `.claude/settings.json`.
 | `ref-sync-check.sh` | PostToolUse Bash | Warns on reference-worthy drift (structural / `REF_WATCH`), deploy-config drift, dependency drift, and em dashes added to user-facing copy |
 | `skill-mark.sh` | PostToolUse Skill | Records invoked skills to a session-scoped marker |
 | `post-commit.sh` | PostToolUse Bash | Reminds to run `<PREFIX>-log` after every commit |
+| `agent-mark.sh` | SubagentStop (pipeline agents) | Records every pipeline-agent stop to a session marker; blocks a stop **once** when the agent's last message lacks its `## Handoff` block |
+| `pilot-cleanup.sh` | SessionEnd | Removes `.claude/pilot/running` when its second line is this session's id |
+| `limit-mark.sh` | StopFailure `rate_limit\|overloaded` | Writes `.claude/pilot/limit-hit` (ts · session id · error_type) so the next `/pilot` resumes a limit-killed run instead of waiting it out |
 
 ## Delivery Log Format
 
@@ -502,7 +507,7 @@ This is the **only** file that should contain path→skill mappings. Do not dupl
 
 **Step 2 — Create hook scripts**
 
-Create all 9 hooks from their templates in `tpl-skill-guard.md`. Substitute `<PREFIX>` throughout:
+Create all 12 hooks from their templates in `tpl-skill-guard.md`. Substitute `<PREFIX>` throughout:
 
 | Hook | Template section |
 |---|---|
@@ -515,10 +520,13 @@ Create all 9 hooks from their templates in `tpl-skill-guard.md`. Substitute `<PR
 | `ref-sync-check.sh` | § ref-sync-check.sh |
 | `skill-mark.sh` | § skill-mark.sh |
 | `post-commit.sh` | § post-commit.sh |
+| `agent-mark.sh` | § agent-mark.sh |
+| `pilot-cleanup.sh` | § pilot-cleanup.sh |
+| `limit-mark.sh` | § limit-mark.sh |
 
 For `pre-handoff-check.sh`, also substitute `<LINT_CMD>` and `<TYPECHECK_CMD>` with the commands discovered in Phase 1 — following the **Bare-shell rule** in `tpl-skill-guard.md § pre-handoff-check.sh`: the hook runs without the project's activated environment, so a bare interpreter/tool command (`ruff check .`, `python -m ruff`, `eslint .`, `tsc`) that works in a terminal will silently fail the gate. Substitute an env-launcher (`uv run …`, `poetry run …`, `pnpm exec …`, `npx --no-install …`) or an absolute project-env path (`.venv/bin/…`, `node_modules/.bin/…`); when the interpreter path itself may or may not exist, resolve it defensively at the top of the hook (the venv-fallback snippet in the template Note). If no lint/typecheck command was discovered, leave the `<fill in>` stub and tell the user. A command counts as *discovered* only if it **verifiably resolves** — the `lint` script exists under `scripts` in `package.json`, or the linter is an installed dependency; a conventional-but-unwired `npm run lint` errors on every run, so stub it rather than substitute it.
 
-Make all 9 executable:
+Make all 12 executable:
 ```bash
 chmod +x .claude/hooks/skill-guard.sh
 chmod +x .claude/hooks/path-coverage-check.sh
@@ -529,6 +537,9 @@ chmod +x .claude/hooks/close-out-gate.sh
 chmod +x .claude/hooks/ref-sync-check.sh
 chmod +x .claude/hooks/skill-mark.sh
 chmod +x .claude/hooks/post-commit.sh
+chmod +x .claude/hooks/agent-mark.sh
+chmod +x .claude/hooks/pilot-cleanup.sh
+chmod +x .claude/hooks/limit-mark.sh
 ```
 
 **Step 3 — Wire `settings.json`**
@@ -582,7 +593,7 @@ Upsert the following sections in `CLAUDE.md` (add if missing, replace if present
 
 Walk the checklist before declaring done:
 
-- [ ] `.claude/agents/` has `<PREFIX>-dev.md`, `<PREFIX>-qa.md`, `<PREFIX>-pm.md`
+- [ ] `.claude/agents/` has `<PREFIX>-dev.md`, `<PREFIX>-qa.md`, `<PREFIX>-pm.md`, `<PREFIX>-verify.md`; the verify file's frontmatter carries `model: sonnet`, `maxTurns: 60`, `omitClaudeMd: true` and a `tools:` list — the bounds live there, not in prose
 - [ ] `.claude/skills/` has all 8 lifecycle skills (`<PREFIX>-log`, `-review`, `-debug`, `-deploy`, `-test`, `-skill`, `-docs`, `-graph`) + all confirmed domain skills, all named `<PREFIX>-*`
 - [ ] `.claude/skills/<PREFIX>-skill/references/skill-manifest.md` exists and lists all installed lifecycle and domain skills
 - [ ] `.claude/skills/<PREFIX>-test/references/` has `test-commands.md` (with `## Smoke`, `## Regression`, `## Functional Feature Subjects` headings), `sync-checklist.md`, `custom-tests.md`, and `custom-tests.yaml` (initialized to `tests: []`). `<PREFIX>-test/SKILL.md` has a `## Test Plan` with the three tiers and no `## E2E Browser Tests` section. `custom-tests.md`'s schema uses `type: UX | Integration | E2E` (not `surface`)
@@ -614,7 +625,7 @@ Walk the checklist before declaring done:
 - [ ] `.claude/hooks/ref-sync-check.sh` is executable, sources `governed-paths.conf` — contains NO hardcoded path patterns; source-drift warning fires only on structural (A/D/R) changes or `REF_WATCH` matches; deploy-drift check unchanged; the copy check counts only added, non-comment lines; every warning is emitted as `hookSpecificOutput.additionalContext` JSON, never stderr
 - [ ] `.claude/hooks/skill-mark.sh` is executable and writes to the session-scoped marker (same derivation as the guards)
 - [ ] `.claude/hooks/post-commit.sh` is executable, references `<PREFIX>-log`, exits 0 on success paths (recorders never exit non-zero), and emits its reminder as `additionalContext` JSON — stderr from an exit-0 hook reaches no one
-- [ ] `.claude/settings.json` exists and wires all 9 hooks across `PreToolUse`/`PostToolUse` + `Edit`/`Write`/`Bash`/`Skill`/`Task|Agent` matchers
+- [ ] `.claude/settings.json` exists and wires all 12 hooks: 9 across `PreToolUse`/`PostToolUse` + `Edit`/`Write`/`Bash`/`Skill`/`Task|Agent` matchers, plus `agent-mark.sh` on `SubagentStop` (matcher naming the four pipeline agents), `pilot-cleanup.sh` on `SessionEnd`, `limit-mark.sh` on `StopFailure` (`rate_limit|overloaded`)
 - [ ] `CLAUDE.md` has `## Plan Mode`, `## Agents`, `## Skills`, and `## Roadmap` sections with correct references
 - [ ] `docs/roadmap.md` exists (even as a stub) and its format line documents `**Id:**` as the item's permanent handle
 - [ ] `docs/project-log.md` exists

@@ -15,7 +15,8 @@ Replace these placeholders before writing the files:
 - `<TYPECHECK_CMD>` → project typecheck command (e.g. `pnpm exec tsc --noEmit` or `npm run typecheck`)
 
 **Hook conduct rules (apply to every script below):**
-- *Gates* (skill-guard, path-coverage, dependency-guard, package-edit-guard, pre-handoff, close-out-gate) exit 2 with an actionable message on violation, 0 otherwise.
+- *Gates* (skill-guard, path-coverage, dependency-guard, package-edit-guard, pre-handoff, close-out-gate) exit 2 with an actionable message on violation, 0 otherwise. `agent-mark` is the one gate on a lifecycle event: it blocks a stop through `decision: block` JSON (exit codes carry no meaning on `SubagentStop`), and only once per agent.
+- *Lifecycle recorders* (pilot-cleanup on `SessionEnd`, limit-mark on `StopFailure`) write a file and exit 0; Claude Code ignores their output entirely, so the file is their whole effect.
 - *Recorders* (ref-sync-check, skill-mark, post-commit) must **always exit 0** — a recorder that exits non-zero makes successful commands surface as errors and burns a reasoning turn. A recorder with something to tell the model prints it as `hookSpecificOutput.additionalContext` JSON on stdout. Stderr from a hook that exits 0 goes to the debug log only, so a warning written there reaches neither the model nor the user.
 
 ---
@@ -521,9 +522,75 @@ exit 0
 
 ---
 
+## § agent-mark.sh
+
+Fires on `SubagentStop` for the four pipeline agents. Two jobs, both things prose could only ask for: it **records** every child that finished to a session-scoped marker (`agent_type`, `subagent_id`, and whether its last message carried a `## Handoff` block) — the deterministic count a close-out checks `Fanned out:` totals against, and the evidence the salvage protocol reads instead of guessing whether an agent returned — and it **blocks once** when a pipeline agent tries to stop without the block, telling it to end with the handoff. Once: the marker records the block, and a second stop from the same `subagent_id` is let through, so a genuinely stuck agent costs one extra turn, never a loop. The hook is evidence for salvage, not a replacement for it — `last_assistant_message` is truncated at 10,000 characters, and a very long final message could hide a real block from the grep, which is one more reason the second stop always passes.
+
+```bash
+#!/bin/bash
+# SubagentStop hook — records pipeline-agent stops; blocks once on a missing ## Handoff block.
+INPUT=$(cat) || exit 0
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+[ -z "$SESSION_ID" ] && exit 0
+TYPE=$(echo "$INPUT" | jq -r '.agent_type // empty' 2>/dev/null)
+SUB_ID=$(echo "$INPUT" | jq -r '.subagent_id // .agent_id // "unknown"' 2>/dev/null)
+MARKER="/tmp/<PREFIX>-agents-${SESSION_ID}"   # session-scoped — same derivation as skill-mark.sh
+
+HAS_HANDOFF=no
+echo "$INPUT" | jq -r '.last_assistant_message // ""' 2>/dev/null | grep -q '^## Handoff' && HAS_HANDOFF=yes
+
+if [ "$HAS_HANDOFF" = no ] && ! grep -q "^${TYPE} ${SUB_ID} blocked" "$MARKER" 2>/dev/null; then
+  echo "${TYPE} ${SUB_ID} blocked $(date -u +%FT%TZ)" >> "$MARKER"
+  jq -n '{decision: "block", reason: "End your turn with the ## Handoff block from your Response Requirements — the caller machine-reads it, and a return without it parks the pipeline."}'
+  exit 0
+fi
+
+echo "${TYPE} ${SUB_ID} ${HAS_HANDOFF} $(date -u +%FT%TZ)" >> "$MARKER"
+exit 0
+```
+
+---
+
+## § pilot-cleanup.sh
+
+Fires on `SessionEnd`. Removes `.claude/pilot/running` **only when the marker names this session** — `/pilot` Step 0 writes the session id (`$CLAUDE_CODE_SESSION_ID`, which the Bash tool exposes) as the marker's second line. Concurrent sessions in one repo are normal, so a plain removal would delete another mission's marker and let two runs commit into one tree. A marker another session owns is left for its own session end, or for `/pilot`'s 6-hour staleness rule. Output is ignored on this event by design; it is cleanup, not a message.
+
+```bash
+#!/bin/bash
+# SessionEnd hook — clears this session's own /pilot run marker.
+INPUT=$(cat) || exit 0
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+[ -z "$SESSION_ID" ] && exit 0
+MARKER="${CLAUDE_PROJECT_DIR:-.}/.claude/pilot/running"
+[ -f "$MARKER" ] || exit 0
+OWNER=$(sed -n 2p "$MARKER" 2>/dev/null)
+[ "$OWNER" = "$SESSION_ID" ] && rm -f "$MARKER"
+exit 0
+```
+
+---
+
+## § limit-mark.sh
+
+Fires on `StopFailure` with matcher `rate_limit|overloaded`. The turn that an allowance limit kills is the one no agent can report, so this hook writes the fact where the next `/pilot` Step 0 and `/whats-up`'s store row read it: `.claude/pilot/limit-hit`, three lines — timestamp, session id, `error_type` verbatim. A `running` marker older than a `limit-hit` from the same session is a run the limit killed, which Step 0 then **resumes instead of waiting six hours for the marker to age out**. The `error_type` line also answers a question the docs leave open — whether a claude.ai usage limit arrives as `rate_limit` — the first time one lands. Output is ignored on this event; the file is the whole effect.
+
+```bash
+#!/bin/bash
+# StopFailure hook — records a limit-killed turn for /pilot and /whats-up.
+INPUT=$(cat) || exit 0
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+ERR=$(echo "$INPUT" | jq -r '.error_type // "unknown"' 2>/dev/null)
+DIR="${CLAUDE_PROJECT_DIR:-.}/.claude/pilot"
+mkdir -p "$DIR" 2>/dev/null || exit 0
+printf '%s\n%s\n%s\n' "$(date -u +%FT%TZ)" "$SESSION_ID" "$ERR" > "$DIR/limit-hit"
+exit 0
+```
+
+---
+
 ## § settings.json
 
-Wire all 9 hooks. If the file already exists, merge the `hooks` key without removing unrelated settings. Timeout unit: **seconds**. The `Task|Agent` matcher is what makes `pre-handoff-check.sh` fire when qa is spawned as a subagent — without it the gate never runs in the pipeline.
+Wire all 12 hooks. If the file already exists, merge the `hooks` key without removing unrelated settings. Timeout unit: **seconds**. The `Task|Agent` matcher is what makes `pre-handoff-check.sh` fire when qa is spawned as a subagent — without it the gate never runs in the pipeline. The `SubagentStop` matcher names the four pipeline agents so a research fork or an Explore child never gets blocked for lacking a handoff block.
 
 ```json
 {
@@ -575,6 +642,29 @@ Wire all 9 hooks. If the file already exists, merge the `hooks` key without remo
         "matcher": "Skill",
         "hooks": [
           { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/skill-mark.sh", "timeout": 5 }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "<PREFIX>-dev|<PREFIX>-qa|<PREFIX>-pm|<PREFIX>-verify",
+        "hooks": [
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/agent-mark.sh", "timeout": 5 }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pilot-cleanup.sh", "timeout": 5 }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "matcher": "rate_limit|overloaded",
+        "hooks": [
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/limit-mark.sh", "timeout": 5 }
         ]
       }
     ]

@@ -80,7 +80,7 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
 
 - **Title** — short, plain English. Not the raw commit message — rephrase for a human skimming the log.
 - **Body** — 1–3 sentences. Add context beyond the title: *why* it was needed, *what problem* it solves, any non-obvious decisions.
-- **Tests** — be honest. "manual smoke" is a real test. Common values: `lint + type check (clean)`, `manual smoke in browser`, `E2E: <scenario>`, `none`. If a gate decision was auto-selected on a timeout, say so here — never record it as user-confirmed. Same for a scope the pipeline derived rather than asked: when QA's handoff reports `regression=<value> (derived: <reason>)`, carry that reason here, so the log says *why* the run was as broad as it was. Carry its `priors: N walked of M selected (cap C)` verbatim too when it has one — three numbers, no rewriting: that triple is the only durable record of how wide a regression actually went, and it is what lets a later reader see a cap being exceeded run after run rather than once.
+- **Tests** — be honest. "manual smoke" is a real test. Common values: `lint + type check (clean)`, `manual smoke in browser`, `E2E: <scenario>`, `none`. If a gate decision was auto-selected on a timeout, say so here — never record it as user-confirmed. Same for a scope the pipeline derived rather than asked: when QA's handoff reports `regression=<value> (derived: <reason>)`, carry that reason here, so the log says *why* the run was as broad as it was. When QA's handoff reports `Fanned out: N children (…)`, append `· fanned out: N` here as well — it is the only durable record of how many verification children a task cost, and the field set is closed, so it rides on this line rather than getting one of its own. Carry its `priors: N walked of M selected (cap C)` verbatim too when it has one — three numbers, no rewriting: that triple is the only durable record of how wide a regression actually went, and it is what lets a later reader see a cap being exceeded run after run rather than once.
 - **Skills** — only skills confirmed present in the marker union from Process step 3, separated by ` · `. Use `—` if none found; never reconstruct from memory. This field is the source of the delivery graph's `USED` edges, and it is the **only** record that a no-file-trace skill like `<PREFIX>-review` or `<PREFIX>-debug` ran — git cannot recover it, so an inaccurate list here is unrecoverable later.
 - **Deployed** — one line per component deployed this session, taken verbatim from the deploy-owning skill's report (e.g. `backend → test · https://test-api.example.com`). Omit the line entirely when no deploy happened.
 - **Addresses** — the `**Id:**` of each `docs/roadmap.md` item this task advances or closes, comma-separated (e.g. `verification-email-on-signup, stripe-receipt-sender`). This is the durable roadmap↔delivery link: without it the connection survives only as a status flip that nothing can trace back. Use the ids the pm step confirmed; omit the line when the task addresses no tracked item, and say so in the pm handoff rather than guessing an id.
@@ -2045,11 +2045,15 @@ is the cost the split was meant to divide. Give it the resolved entries with the
 `type`, `assert` and target already looked up, so it starts working rather than orienting. Reading
 this file is for whoever does the splitting; the children get its conclusions.
 
-**Spawn every child with `model: sonnet`**, attended run or not. A child executes and records
-against a brief — it neither designs nor reviews, and its one judgment (does the observation satisfy
-the `assert`, or is it vacuous) is the same rule on every row. That is the fan-out priced cheap; the
-judgment that decided what to fan out stays on the caller's model. Name the model on the handoff's
-`Fanned out:` field so the saving is measurable rather than assumed.
+**Dispatch each slice as the verification agent the caller designates — never as a general-purpose
+subagent, and never with a per-call `model`.** That agent's frontmatter fixes the three bounds this
+section used to state as prose: Sonnet (a child executes and records against a brief — it neither
+designs nor reviews, and its one judgment, does the observation satisfy the `assert` or is it
+vacuous, is the same rule on every row; that is the fan-out priced cheap while the judgment that
+decided what to fan out stays on the caller's model), a **turn cap of 60**, and no project
+`CLAUDE.md` in its prefix. A prose bound did not hold — 56% of 109 measured children ran past 60
+turns, median 71, max 186 — and a frontmatter cap cannot be forgotten. The caller names the agent on
+its handoff's `Fanned out:` field so the saving is measurable rather than assumed.
 
 **Bound the total tool calls, and size each slice by the *type* of check in it.** Cost is close to
 **linear in tool calls** — measured at $0.032–0.047 per turn across children from 41 to 186 turns, a
@@ -2066,9 +2070,11 @@ count and produced children of 186, 186, 139 and 127 calls against a stated boun
 one retest — because the split ignored that every entry in those slices was the expensive kind.
 
 Give each child **~120 tool calls of work**: roughly 6 UX/E2E entries, or 40 Integration ones, or a
-mix that adds up. A child still working past its slice returns what it has plus the entries it never
-started, and the caller re-dispatches the remainder. Split further only to fit that budget — never as
-a saving in itself.
+mix that adds up. That figure and the agent's 60-turn cap are **one bound, not two** — measured
+children average ~2 tool calls per turn, so a slice sized to ~120 calls fits under the cap, and a
+slice that does not fit is the cap's job to end: the child returns `Status: partial` with an
+`Unstarted:` list, and the caller re-dispatches exactly that list as a new child. Split further only
+to fit that budget — never as a saving in itself.
 
 **One condition on that, and only at the wall.** Run `bash ~/.claude/usage-snapshot.sh --read` at the
 moment of splitting — that script owns the arithmetic; never read its files directly, because a shared

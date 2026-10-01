@@ -1,4 +1,4 @@
-# Install — Phase 3b: hooks, governed-paths.conf, settings.json, headless shifts, allowance
+# Install — Phase 3b: hooks, governed-paths.conf, settings.json, the scheduled standing mission, allowance
 
 > Paths of the form `../../shared/<file>` are relative to the install skill's directory (`plugins/dev-workflow/skills/install/`), i.e. the plugin's `shared/`.
 
@@ -57,9 +57,9 @@ chmod +x .claude/hooks/limit-mark.sh
 
 Use `tpl-skill-guard.md § settings.json`. If the file does not exist, create it from the template. If it already exists, merge the `hooks` key — add all hook entries without removing unrelated settings. Do not tell the user to wire hooks manually; write the file in this step.
 
-**Step 4 — Schedule headless shifts (opt-in, macOS only)**
+**Step 4 — The standing mission on a schedule (nothing to install)**
 
-`.claude/pilot/shift.sh` is already copied and staged (Phase 2). Ask once, with `AskUserQuestion`: "Schedule headless shifts on this machine? — a launchd job runs `/pilot --max-tasks N` every interval with a dollar cap, orchestrator on Opus, subagents on Sonnet; you answer what it parks at check-in." Options: `Yes — every 30 min, 3 tasks, $15 cap (Recommended)` / `Not now`; the automatic "Other" takes an interval, task cap, budget and a Discord/Slack webhook URL for `PILOT_NOTIFY_URL`. On yes, run `bash .claude/pilot/shift.sh install [--interval S] [--max-tasks N] [--budget USD] [--notify URL]` and show its output; on no, print that same command so the user can run it later. Never install without asking — it writes to `~/Library/LaunchAgents`, outside the repo — and never run this step from inside a shift or any non-interactive session. Remind the user that a shift asks nothing (the standing mission has no gate, and a question timeout is not relied on — it does not fire in practice) and that the interactive loop form (`/loop 30m /pilot --max-tasks 1`, fixed interval) needs no install at all.
+`.claude/loop.md` is already written (Phase 2), so a bare `/loop 30m` in any session of this project runs `/pilot --max-tasks 1` every half hour — the attended form. For the form that needs no open session, tell the user, do not do it: in Claude Code Desktop open **Routines → New routine → Local**, folder = this repo, instructions `/pilot --max-tasks 1`, schedule hourly, permission mode as they prefer. It fires only while the app is open and the machine is awake, and it never creates a session this workflow did not ask for — the plugin schedules nothing itself, by design. There is no launchd job, no background process and no dollar cap to configure: the run's own `--budget` and allowance read bound what one firing may spend.
 
 **Step 5 — Let a run see its remaining allowance (opt-in, writes outside the repo)**
 
@@ -81,4 +81,4 @@ On no, print the copy command and the exact settings block so the user can paste
 
 **One file per session is also not optional, and the reason is worth knowing.** A first version wrote one shared path. On a machine running 12 concurrent sessions — each re-rendering every 60 s — that file flipped between 46% and 7% for the same window four seconds apart, and published a missing window under a timestamp zero seconds old. A mission read it, reversed its own correct decision to stop, ran into the limit, and had a subagent killed mid-write against production. The script now writes `~/.claude/usage/<session id>.json` and `--read` reconciles them; **every caller must use `--read`** and never open those files, or it is reading one arbitrary session again.
 
-Never write this without asking — it is the second of only two things in this install that touch anything outside the repo. Never run the step from inside a shift or any non-interactive session. It is machine-scoped, so a second project's install finds it already wired and skips.
+Never write this without asking — it is the second of only two things in this install that touch anything outside the repo. Never run the step from a non-interactive session. It is machine-scoped, so a second project's install finds it already wired and skips.

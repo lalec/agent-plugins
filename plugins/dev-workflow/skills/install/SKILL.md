@@ -28,7 +28,6 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 - `.claude/hooks/post-commit.sh` — PostToolUse Bash: reminds to run `<PREFIX>-log` after every commit
 - `.claude/graph/graph.py` — delivery-graph projector + query engine (copied verbatim from `../../shared/graph.py`); `edges.jsonl` is generated and gitignored
 - `.claude/skills/<PREFIX>-test/scripts/run-checks.py` — batched execution of resolved Integration commands and `last:` recording for every type (copied verbatim from `../../shared/run-checks.py`); returns observations, never verdicts
-- `.claude/pilot/shift.sh` — headless-shift runner for the standing mission (copied verbatim from `../../shared/shift.sh`); the rest of `.claude/pilot/` is run markers and is gitignored. Scheduling it is opt-in (Phase 3 Step 4)
 - `~/.claude/usage-snapshot.sh` — **outside the repo, opt-in** (Phase 3 Step 5): wraps the status line so a run can read the account's remaining allowance, writing one file per session under `~/.claude/usage/` and aggregating them on `--read`. Account-scoped, so one machine needs it once
 - `.claude/settings.json` — wires all hooks
 - `CLAUDE.md` workflow sections
@@ -38,7 +37,6 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 - `../../shared/tpl-lifecycle.md` — 8 lifecycle skill templates
 - `../../shared/graph.py` — the delivery-graph projector, copied verbatim to `.claude/graph/graph.py`
 - `../../shared/run-checks.py` — the verification runner/recorder, copied verbatim to `.claude/skills/<PREFIX>-test/scripts/run-checks.py`
-- `../../shared/shift.sh` — the headless-shift runner, copied verbatim to `.claude/pilot/shift.sh`
 - `../../shared/usage-snapshot.sh` — the status-line allowance tee, copied verbatim to `~/.claude/usage-snapshot.sh` (opt-in, Phase 3 Step 5)
 - `../../shared/tpl-skill-guard.md` — all hook templates + governed-paths.conf + settings.json
 - `../../shared/tpl-domain-skill.md` — domain skill stub + project file sections
@@ -202,7 +200,7 @@ Create these files (skip if already present, offer to overwrite if stale):
 .claude/skills/<PREFIX>-docs/SKILL.md
 .claude/skills/<PREFIX>-graph/SKILL.md        ← from tpl-lifecycle.md § tosk-graph; also create references/graph-schema.md
 .claude/graph/graph.py                        ← copy ../../shared/graph.py VERBATIM — no substitution (it glob-discovers skill dirs), so it stays byte-identical across projects and diffs cleanly on upgrade
-.claude/pilot/shift.sh                        ← copy ../../shared/shift.sh VERBATIM — no substitution (it resolves the repo from git), so it stays byte-identical across projects; `git add` it; the rest of `.claude/pilot/` is gitignored
+.claude/loop.md                               ← from tpl-commands.md § loop.md — what a bare `/loop <interval>` runs: the standing mission
 .claude/skills/<PREFIX>-design/SKILL.md       ← only if a frontend/website domain skill was confirmed in Phase 1c; also create references/design-tokens.md, references/ux-patterns.md and references/voice.md stubs
 .claude/skills/code/SKILL.md                  ← from tpl-commands.md § /code, substitute <PROJECT> and <PREFIX>
 .claude/skills/code/references/pipeline.md    ← from tpl-commands.md § /code — references/pipeline.md (Steps 1–3 shared by /code, /fix, /pilot)
@@ -311,19 +309,17 @@ Also append to `.gitignore` (create it if absent) any of these lines not already
 ```
 .claude/graph/edges.jsonl
 .claude/graph/__pycache__/
-.claude/pilot/*
-!.claude/pilot/shift.sh
+.claude/pilot/
 ```
 The index is generated, churns on every delivery, and is rebuilt in under a second — committing it
 would add noise to every diff for no recoverable value. `__pycache__/` appears whenever anything
 imports `graph.py` rather than running it as a script. `.claude/pilot/` holds `/pilot`'s run
-markers (`running`, `last-run.json`) and a headless shift's `state.json` and raw results — per-machine
-facts about *when* a run happened, never *what* it decided (that lives in the log and the roadmap),
-so nothing in it belongs in the repo except the runner script itself.
+markers (`running`, `last-run.json`, `limit-hit`) — per-machine facts about *when* a run happened,
+never *what* it decided (that lives in the log and the roadmap), so nothing in it belongs in the repo.
 
-**`graph.py` and `shift.sh` themselves must be committed** — stage them explicitly:
+**`graph.py` itself must be committed** — stage it explicitly:
 ```bash
-git add .claude/graph/graph.py .claude/pilot/shift.sh .gitignore
+git add .claude/graph/graph.py .claude/loop.md .gitignore
 ```
 An untracked `graph.py` has no protection: any `git clean`, a `/tidy` discard, or a stray `rm -rf`
 deletes it, and because every call site is required to fall back silently, the workflow keeps
@@ -360,7 +356,7 @@ For each confirmed domain skill `<PREFIX>-<name>`:
 
 ### 3b. Hooks + governed-paths.conf + settings.json
 
-Read `references/hooks.md` now and run its five steps in order: `governed-paths.conf`, the hook scripts, `settings.json`, the opt-in headless shifts, the opt-in allowance snapshot. Nothing in it is optional to read — the substitution rules for the conf and the bare-shell rule for `pre-handoff-check.sh` are where installs go wrong.
+Read `references/hooks.md` now and run its five steps in order: `governed-paths.conf`, the hook scripts, `settings.json`, the standing mission on a schedule, the opt-in allowance snapshot. Nothing in it is optional to read — the substitution rules for the conf and the bare-shell rule for `pre-handoff-check.sh` are where installs go wrong.
 
 ---
 

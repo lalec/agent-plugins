@@ -281,7 +281,7 @@ After the single Step 1 gate, the run is unattended until close-out:
   | Flag | Store | Query | Fallback when the query cannot run |
   |---|---|---|---|
   | `--gates [<name>…]` | the delivery log | `python3 .claude/graph/graph.py open-gates` | `grep -n '=parked' docs/project-log.md`, reconciled by hand exactly as `.claude/skills/whats-up/SKILL.md § Step 2` describes |
-  | `--deferrals [<name>…]` | `custom-tests.yaml` and the delivery log | `python3 .claude/graph/graph.py open-deferrals` | read `custom-tests.yaml` for every `last.status` of `blocked` or `fail`; a deferral's condition is its `last.reason` |
+  | `--deferrals [<name>…]` | `custom-tests.yaml` and the delivery log | `python3 .claude/graph/graph.py open-deferrals` | none that fits a context — report `graph unavailable` and stop; a deferral's condition is its `last.reason` |
   | *(no goal, no flag)* — the **standing mission** | every store `/whats-up` reads | `.claude/skills/whats-up/SKILL.md § Step 1–2` — the read and the reconcile, run once, exactly as that command runs them; its `Open` rows and `Emerged` counts are the claims | that command's own table names a fallback per store |
 
   Each task **re-measures the claim's condition and states one verdict from the ladder in Step 2** — that is its acceptance statement. A `--deferrals` task's condition is the verification's `last.reason`, and its verdict is the verification's outcome: it re-walks the check exactly as `<PREFIX>-test` would and records `last:` through `run-checks.py record`; `pass` closes it, `blocked` restates the trigger, and a `fail` is a pipeline task on the next run, not this one's problem to fix. A check the re-measure finds **cannot be walked by anyone** — its baseline code is gone, its subject removed, a newer check owns the assertion — is the ladder's `superseded` / `expired` / `moot`: the run records it `retired` with the measurement that decided it as the `reason`, `(pilot-auto)`, and it closes. Never `pass` for a walk that did not happen, never left `blocked` to be re-raised by every later run, never deleted from `custom-tests.yaml` — the log entry that deferred it still names it. A check that *could* be walked but costs money or a person is not moot; it stays `blocked` and its cost is the trigger.
@@ -858,8 +858,8 @@ Read-only, in parallel. **A store that is absent or errors gets a `not done` Sta
 |---|---|---|
 | What moved | `git log --oneline --since=<date of the newest `docs/project-log.md` entry>` | no entries yet → last 20 commits |
 | Held commits | `git rev-list --count @{upstream}..HEAD` | no upstream → say so, do not fail |
-| Roadmap | `python3 .claude/graph/graph.py roadmap-open` | read `docs/roadmap.md`. Either way, count `**Status:** in-progress` separately from open, and report the total **with its breakdown** — an item with no `**Status:**` line counts as open, so a bare total silently mixes tracked work with items nobody ever gave a status |
-| Unproven work | `python3 .claude/graph/graph.py open-deferrals --with-fail` | read `custom-tests.yaml` for every `last.status` of `blocked` or `fail` |
+| Roadmap | `python3 .claude/graph/graph.py roadmap-open` | `not done — graph unavailable` (python3 missing or `build` failing); never read `docs/roadmap.md` whole — on a mature install it is ~1 MB, more than a context holds. Count `**Status:** in-progress` separately from open, and report the total **with its breakdown** — an item with no `**Status:**` line counts as open, so a bare total silently mixes tracked work with items nobody ever gave a status |
+| Unproven work | `python3 .claude/graph/graph.py open-deferrals --with-fail` | `not done — graph unavailable`; `custom-tests.yaml` is the same order of size as the roadmap, so it is not read whole either |
 | Gates | `python3 .claude/graph/graph.py open-gates` | `grep -n '=parked' docs/project-log.md`, then reconcile each hit by hand per Step 2 |
 | Repo | the `/tidy` **Step 1** sweep — run it, do not restate it here | none |
 | Project health | every store the project declares (below). None declared → the row is `n/a` | the declaring command's own fallback |
@@ -966,7 +966,7 @@ This command **selects**; it never implements. Work happens in `/code`, `/fix`, 
 
 ## Step 1 — Read the open set
 
-Run `python3 .claude/graph/graph.py roadmap-open` — it returns the open and in-progress items with priority, status, and which prior deliveries touched the same paths. **Fall back** to reading `docs/roadmap.md` directly if the script is absent or exits non-zero; the graph is an accelerator here, never a gate. If there is no roadmap at all, say "No roadmap found — create `docs/roadmap.md` first." and stop.
+Run `python3 .claude/graph/graph.py roadmap-open` — it returns the open and in-progress items with priority, status, and which prior deliveries touched the same paths. If the script is absent or exits non-zero, stop and say `graph unavailable — install python3 / fix graph.py build`; do **not** read `docs/roadmap.md` whole, which on a mature install is ~1 MB and exceeds a context. The graph is the only affordable reader of this file. If there is no roadmap at all, say "No roadmap found — create `docs/roadmap.md` first." and stop.
 
 **Filter.** When `$ARGUMENTS` (flags stripped) is non-empty, keep only items whose title, category, priority, or `**Id:**` matches it case-insensitively. If nothing matches, say so and rank the unfiltered set rather than reporting an empty roadmap — a typo'd filter must not read as "no open work".
 

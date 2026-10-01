@@ -40,7 +40,7 @@ A multi-agent delivery workflow for Claude Code. It runs your plan through a tea
 - Claude Code (`claude`) installed and authenticated
 - A git repo (recommended — hooks use `git status`)
 - `jq` on PATH (used by hook scripts)
-- `python3` on PATH (used by the delivery graph; stdlib only, no packages). Without it the graph simply never builds and every call site falls back — the pipeline still works, just without the index.
+- `python3` on PATH — **required**. The delivery graph (stdlib only, no packages) is the only affordable reader of a mature project's roadmap and log, which grow past what a context can hold; without it those readers report *graph unavailable* rather than reading the files whole.
 - For unattended runs: nothing extra, because an unattended run asks nothing — a question timeout in `/config` is welcome but the workflow never waits on one. `autoContinueAtUsageLimit` is worth setting for attended sessions; without it the usage window is a dead stop. Headless shifts also need macOS `launchd`, and take an optional Discord or Slack incoming-webhook URL for their reports
 - [`agent-browser`](https://github.com/vercel-labs/agent-browser) plugin installed — used by `<PREFIX>-test` for E2E browser automation
 - [`skill-creator`](https://github.com/anthropics/skills/tree/main/skills/skill-creator) skill installed — used by `<PREFIX>-skill` to author and update skills

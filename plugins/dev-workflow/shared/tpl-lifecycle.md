@@ -2465,8 +2465,7 @@ Owns the delivery graph: a typed, provenanced edge index projected from the proj
 `graph.py build` discards `edges.jsonl` and reprojects from them. Never hand-edit `edges.jsonl`,
 and never record a fact only in the graph — write it to its owning artifact and reproject.
 
-**Every caller falls back.** If `graph.py` is missing, python3 is unavailable, or the command
-exits non-zero, the caller uses its pre-graph behaviour. The graph is an accelerator, never a gate.
+**Every caller states what it does without the graph — and for the three big stores that is `graph unavailable`, not a read.** If `graph.py` is missing, python3 is unavailable, or the command exits non-zero, a caller that was accelerating a bounded read (a `grep` over the log for `=parked`, a `git log`) runs that read; a caller whose only alternative is the whole of `docs/roadmap.md`, `docs/project-log.md` or `custom-tests.yaml` reports `not done — graph unavailable` and moves on, because on a mature install each of those is ~1 MB and a context cannot hold it (measured: 980 KB roadmap, 778 KB log, 295 KB verifications on one project). `python3` is therefore a hard prerequisite, checked at install and upgrade preflight.
 
 ## Owned Paths
 - `.claude/graph/` — `graph.py` and the schema reference (`edges.jsonl` itself is EXEMPT: machine-generated)

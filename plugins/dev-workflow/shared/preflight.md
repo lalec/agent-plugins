@@ -4,6 +4,7 @@ Before starting (install or upgrade), verify the required external skills are in
 
 | Skill | Required by | If missing |
 |---|---|---|
+| `python3` | `<PREFIX>-graph` — the delivery graph, the only affordable reader of `docs/roadmap.md`, `docs/project-log.md` and `custom-tests.yaml` once they outgrow a context | **Required.** Warn and stop: every store reader reports `graph unavailable` without it, and nothing below falls back to reading those files whole |
 | `agent-browser` | `<PREFIX>-test` (E2E browser automation) | Warn the user and link to https://github.com/vercel-labs/agent-browser |
 | `skill-creator` | `<PREFIX>-skill` (authoring new skills) | Warn the user and link to https://github.com/anthropics/skills/tree/main/skills/skill-creator |
 | `ui-ux-pro-max` | `<PREFIX>-design` (design intelligence: styles, palettes, font pairings, design-system generation) | Conditional — only required if a design skill is installed. Warn the user and link to https://github.com/nextlevelbuilder/ui-ux-pro-max-skill. Can be replaced with any design skill — the installed `<PREFIX>-design/SKILL.md` names the skill to use and can be edited after install. |

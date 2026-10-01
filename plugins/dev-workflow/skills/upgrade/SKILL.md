@@ -71,7 +71,7 @@ Do not proceed until the user confirms which gaps to apply.
 
 ## Step 7 — Apply only the confirmed fixes
 
-Read `references/apply.md` now and apply the confirmed steps in its order — the entry-point move first, `<PREFIX>-skill`'s manifest last. Each step is idempotent and guarded on its **end state**, never on a phrase: a step revised since it shipped lists every clause its guard must check, because an install that took an earlier version already satisfies a guard written on the earlier phrase and the extension then silently never lands.
+Read `references/apply.md` now and apply the confirmed steps in its order — the entry-point move first, `<PREFIX>-skill`'s manifest last. Writes under `.claude/skills/<PREFIX>-<x>/` are gated by `skill-guard.sh` on that skill being loaded: invoke the owning skill once via the Skill tool before editing its files, and never work around the gate with a shell write — the gate is the install's own invariant. Each step is idempotent and guarded on its **end state**, never on a phrase: a step revised since it shipped lists every clause its guard must check, because an install that took an earlier version already satisfies a guard written on the earlier phrase and the extension then silently never lands.
 
 ---
 

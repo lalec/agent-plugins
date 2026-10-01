@@ -197,7 +197,7 @@ Complete all four phases:
 1. Root Cause Investigation — read errors, reproduce, check recent changes, gather evidence
 2. Pattern Analysis — find working examples, compare, identify differences
 3. Hypothesis and Testing — form theory, test minimally, verify
-4. Hand off to Step 2 with root cause clearly identified
+4. Hand off to the dev step (pipeline Step 1) with root cause clearly identified
 
 Do NOT write any fix until Phase 1–3 are complete.
 
@@ -218,7 +218,7 @@ Do NOT write any fix until Phase 1–3 are complete.
     symptom being gone is not the same as the end state being reached — check the latter.
 
 7. **Scorecard** (Step 5) — the `Committed` row reads `git log --oneline -5` shows the fix + capture + log commits.
-8. **Done** — report per `.claude/skills/code/references/close-out.md`. The Status rows for deploy / push / log / docs / ref-sync are the Step 5 scorecard facts, each checked against reality there. The root cause `<PREFIX>-debug` found belongs in the Verdict line — one clause, so the user knows what broke, not how it was traced. Ship state, a serve-env started at Step 2.7, a regression scope the pipeline worked out, any children qa fanned out to, an undischarged `prod-walk:`, and a `UAT-only` task are handled exactly as in `.claude/skills/code/references/close-out.md` — including that the first three are Status rows, not Open ones.
+8. **Done** — report per `.claude/skills/code/references/close-out.md`. The Status rows for deploy / push / log / docs / ref-sync are the Step 5 scorecard facts, each checked against reality there. The root cause `<PREFIX>-debug` found belongs in the Verdict line — one clause, so the user knows what broke, not how it was traced. Ship state, a serve-env started at pipeline Step 1.7, a regression scope the pipeline worked out, any children qa fanned out to, an undischarged `prod-walk:`, and a `UAT-only` task are handled exactly as in `.claude/skills/code/references/close-out.md` — including that the first three are Status rows, not Open ones.
 ```
 
 ---

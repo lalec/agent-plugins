@@ -2349,7 +2349,7 @@ These rules apply to **every project (`<PREFIX>-*`) skill**. Third-party skills 
    - `<PREFIX>-dev.md` — only if invoked during implementation
    - `<PREFIX>-qa.md` — only if invoked during review or testing
    - `<PREFIX>-pm.md` — only if invoked during delivery logging or docs
-   - `.claude/commands/` — if skill introduces a new workflow step users invoke directly
+   - `.claude/skills/<name>/SKILL.md` (no prefix, an entry point) — if the skill introduces a new workflow step users invoke directly; `.claude/commands/` only for a project-owned command
 
 ## Reference File Lifecycle
 

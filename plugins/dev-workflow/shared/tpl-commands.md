@@ -2,14 +2,15 @@
 
 Substitute `<PROJECT>` with the project name and `<PREFIX>` with the chosen prefix derived in Phase 1.
 
-Claude Code only. Markdown files in `.claude/commands/`, YAML frontmatter `description:`, `$ARGUMENTS` placeholder.
+Claude Code only. Each entry point is a **skill**: `.claude/skills/<name>/SKILL.md` creates `/<name>` exactly as a command file did, and gains a `references/` directory for the protocol text a run reads only at the step that needs it. Frontmatter carries `name:` and `description:`; `$ARGUMENTS` is the placeholder. Project-owned commands may stay in `.claude/commands/`; every discovery scan reads both homes.
 
 ---
 
-## § /code — code.md (Claude Code)
+## § /code — skills/code/SKILL.md
 
 ```markdown
 ---
+name: code
 description: Implement a feature through the full <PREFIX>-dev → <PREFIX>-qa → <PREFIX>-pm delivery workflow
 ---
 
@@ -30,7 +31,7 @@ If a question times out unanswered — the timeout is the user's own `askUserQue
 
 ## Step 0 — Flags + entry hygiene
 
-**Flag parse (first):** if `$ARGUMENTS` contains `--prod`, set `ship_mode = prod`; if it contains `--no-push`, set `ship_mode = hold` and `no_push = true`. If it contains `--regression full` or `--regression smart`, pin `regression_mode` to that value. Strip every flag from the task description used in every step below. If no ship flag is present, `ship_mode` is decided by the Ship question in the Step 0.5 gate; if no `--regression` flag is present, `regression_mode` is `auto` and the scope is resolved from the change itself (Step 0.5).
+**Flag parse (first):** if `$ARGUMENTS` contains `--then`, set `then = true` (Step 5 (d) — the run keeps working the backlog after a clean close-out); if it contains `--prod`, set `ship_mode = prod`; if it contains `--no-push`, set `ship_mode = hold` and `no_push = true`. If it contains `--regression full` or `--regression smart`, pin `regression_mode` to that value. Strip every flag from the task description used in every step below. If no ship flag is present, `ship_mode` is decided by the Ship question in the Step 0.5 gate; if no `--regression` flag is present, `regression_mode` is `auto` and the scope is resolved from the change itself (Step 0.5).
 
 **Entry hygiene:** run `git status --porcelain` and `git rev-list --count @{upstream}..HEAD` (report "no upstream" rather than failing when the branch has none). If the count is non-zero, say so in one line with the reason if you can see it — held commits are work that already passed review and is waiting on a decision, and **nothing else raises them**: a close-out's Open row dies with its session, and entry hygiene is the only step that runs before every task. Report, do not gate; if the held set overlaps the paths this task will touch, say that too, because the task is about to build on unshipped work. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it in the close-out step — the pre-handoff gate blocks the qa spawn on any dirty tree, so deferring the stash just moves the failure mid-pipeline. If the WIP overlaps paths this task will touch, do not stash it blind — tell the user and run `/tidy` scoped to the overlapping paths first, then resume here.
 
@@ -74,6 +75,7 @@ Then ask in **one AskUserQuestion call** (at most two questions) — one gate in
    - header: "Confirm"
    - options:
      - label: "Yes, proceed (Recommended)" — description: "Run the full <PREFIX>-dev → <PREFIX>-qa → <PREFIX>-pm pipeline and verify exactly the checks above"
+     - label: "Yes, then keep going" — description: "Same, and after a clean close-out run the standing mission unattended for up to 3 more tasks, Ship held (sets `then`)"
      - label: "No, cancel" — description: "Stop here, do not implement"
 2. **Ship** (omit when `--prod` or `--no-push` already decided it):
    - question: "Ship after QA sign-off?"
@@ -104,6 +106,289 @@ Hold the resulting `{assert, type}` pairs in context — **do not write or commi
 - A **pinned** value binds in **both directions** — nothing downstream may widen it and nothing may narrow it (see `<PREFIX>-test` Rules — a full unit-suite re-run is not a permissible "superset").
 
 Capture the Ship answer as `ship_mode` = `prod` (Ship) or `hold`. A user-answered **Ship** is standing consent for the close-out — but it is conditional, and the conditions are verified mechanically at Step 4: it collapses back to a fresh ask if the run wasn't clean.
+
+## Steps 1–3 — Implement · Review & Test · Log & Docs
+
+Read `.claude/skills/code/references/pipeline.md` now and run its Steps 1, 1.5, 1.7, 2 and 3 exactly as written — the dev, qa and pm prompt shapes, the salvage protocol, the verification persist, the stack step, and the pre-grounding pack. That file is the pipeline every lane shares (`/fix` and `/pilot` run the same steps from the same file), so a change to how the agents are dispatched is made there once.
+
+## Step 4 — Deploy to prod (only if `ship_mode: prod`)
+
+Run only if `ship_mode = prod` (from the `--prod` flag or the Step 0.5 Ship answer). After <PREFIX>-pm has logged, invoke the `<PREFIX>-deploy` skill **here at the top level** (not via a subagent) with `target=prod`. It runs the fill-in pass, builds the gate context, and gates via `AskUserQuestion` — which works because this is the top level. Running after sign-off and any retest loop means it deploys the final, signed-off code.
+
+**Pre-authorization.** If the user answered **Ship** at the Step 0.5 gate (not a timeout default), pass `preauth: user shipped at Step 0.5` to the skill **only when all of these hold** — verified now, not assumed:
+- QA status is `signed-off`, or `signed-off-with-deferrals` where the deferral was **user-confirmed** (not auto-accepted on timeout);
+- no gate in this run was auto-decided on timeout;
+- the commits being shipped are exactly the reviewed set (nothing landed after QA's sign-off except the capture/log commits).
+
+When any condition fails — or Ship was a timeout default — the skill gates normally (ask; on no answer it returns `gate: unanswered — parked` → park per the Gate policy; never decide a prod deploy on the user's behalf). If no `prod` env is declared or the user declines, report that and finish at UAT.
+
+**Prod walk (run when Step 2 carried a `prod-walk:`, or when any prod-only deferral covers what this deploy just shipped).** After the deploy succeeds, walk the acceptance statement against prod **here at the top level** and report where it lands — the same end-to-end trace qa would have run, against the only environment that can host it. This is the whole point of the prod-only branch: a project that cannot prove a journey before shipping proves it immediately after, using the access this pipeline already has. Handing the user a checklist for a flow you can reach yourself is not a verification, and "I have prod access but asked you to click it" is the failure this step closes. Record the outcome in the scorecard and update the verification's `last:` accordingly — pass discharges it, failure opens a `/fix` with the journey as its acceptance statement. If prod genuinely cannot be reached from here (no credentials, human-only auth), say so explicitly and name what the user must click — a checklist is the fallback, never the default.
+
+**Then drain what this deploy made provable.** A prod-only check is discharged by *a* prod deploy, not only by the task that first deferred it — so on a project that habitually holds at UAT, those checks accumulate forever while every `--prod` run walks one and leaves the rest. Run `python3 .claude/graph/graph.py blast <the paths this deploy shipped>` and walk every still-open prod-only deferral it returns, exactly as above. **The shipped paths are the bound** — do not walk the whole backlog, and never re-walk a check this deploy could not have affected. Report the ones you walked and the count still carried; if the graph is unavailable, walk only this task's carry and say the sweep was skipped.
+
+## Step 5 — Close out: push + verified scorecard
+
+Runs on every completion, regardless of `ship_mode`.
+
+**(a) Push.** Skip if `no_push` or no remote is configured. Resolve the push policy via the `<PREFIX>-deploy` skill § Push policy: if pushing the current branch fires a prod CI deploy, pushing IS shipping — push only if Step 4 ran and its gate (or pre-authorization) approved; otherwise ask now (irreversible gate — ask at this moment even if an earlier gate timed out; park only if this ask goes unanswered). If push does not trigger prod, push now.
+
+**(b) Scorecard.** Verify each fact against reality — never echo handoff claims:
+
+| Fact | Evidence |
+|---|---|
+| Committed | `git log --oneline -5` shows the feature + capture + log commits |
+| Pushed | `git rev-list --count @{upstream}..HEAD` → 0, or "not pushed — <reason>" |
+| Deployed | curl the env url/health from the dev handoff (2xx), or "no deployable env" |
+| Logged | new entry present at top of `docs/project-log.md` (grep the title) |
+| Docs | pm handoff `Docs:` field; spot-check the file if `updated` |
+| Ref sync | `Reference Sync:` fields from all three handoffs |
+
+**(c) Restore stashed WIP.** If pre-existing WIP was stashed at Step 0, `git stash pop` it now and confirm it restored cleanly; report any conflict instead of resolving it silently.
+
+**(d) Continue, if `then`.** Only when the run was clean — sign-off without deferrals, log written, no `timeout` decision — report per § Done first, then invoke the `pilot` skill with `--unattended --max-tasks 3` and no goal: the standing mission, in this session, Ship held. The cap is deliberate and stated in the gate option: until a window-wide budget exists, three tasks is the most one answer may authorise, because the one thing a continuation must never do is spend the week. A run that was not clean does not continue; it says so in one line and the user decides.
+
+## Done — the close-out report
+
+Read `.claude/skills/code/references/close-out.md` now and report exactly as it says: five blocks, the closed status vocabulary, the one placement test, the closing line derived from Open. Every other lane cites that file, so the shape is defined once.
+```
+
+---
+
+## § /fix — skills/fix/SKILL.md
+
+```markdown
+---
+name: fix
+description: Investigate and fix a bug or performance issue through <PREFIX>-debug → <PREFIX>-dev → <PREFIX>-qa → <PREFIX>-pm
+---
+
+# Bug Fix
+
+**Usage:** `/fix <description>` — the Step 0.5 gate states what will be verified and asks whether to ship after sign-off. `--prod` pre-answers Ship; `--no-push` pre-answers Hold and skips the close-out push; `--regression full|smart` pins the test scope that is otherwise resolved from the change itself.
+
+**Examples:**
+- `/fix pipeline table takes too long to load`
+- `/fix assessment status stuck on running after completion`
+- `/fix <description> --prod`
+
+## How this lane runs
+
+`/fix` is `/code` with an investigation in front and bug-shaped wording. Read `.claude/skills/code/SKILL.md` and run its **Gate policy, Step 0 and Step 0.5** exactly as written, then `.claude/skills/code/references/pipeline.md` **Steps 1–3** and the code skill's **Steps 4–5 and Done**, applying only the differences below. Nothing else about the lane changes, and nothing here is restated — a rule that lives in both files is a bug.
+
+**Differences, in pipeline order:**
+
+1. **Flags** (Step 0) — same set as `/code`.
+2. **Acceptance statement** (Step 0.5) — replace the first paragraph of the derivation with this one:
+
+First write the **acceptance statement**: one sentence naming the end state in the user's terms — who does what, and where they end up. **A bug report names a symptom; the acceptance statement names the journey that symptom sits in.** "Clicking them does nothing" is a broken step, not a goal — the goal is *"a user picks a look in the gallery and lands on the generate step with a pack built from it"*. Fixing only the reported symptom is how a run ends with the click working and the journey still dead-ending: ask what the broken step is *for*, and state where it ends. Derive it from whichever source applies:
+- **A plan exists** (the current session has a just-approved plan with a *Verification* / *Acceptance* section): the plan's outcome is the acceptance statement.
+- **No plan** (e.g. `/fix` invoked first thing in a fresh context): infer it from the task (`$ARGUMENTS`, with any flags already stripped) — the default fallback whenever no plan is in context.
+
+3. **Confirm question** (Step 0.5) — the question ends `Investigate and fix?`; options are `Yes, proceed (Recommended)` — "Run <PREFIX>-debug root cause analysis, then fix through the full pipeline and verify exactly the checks above" — and `No, cancel` — "Stop here, do not investigate". On cancel, tell the user the fix was cancelled and stop.
+4. **Investigate first** — before pipeline Step 1, run this step at the top level:
+
+## Step 1 — Investigate (<PREFIX>-debug)
+
+Use the <PREFIX>-debug skill to investigate the root cause before any code is written.
+
+Invoke the `<PREFIX>-debug` skill, then analyze the following bug or performance issue in <PROJECT>: $ARGUMENTS
+
+Complete all four phases:
+1. Root Cause Investigation — read errors, reproduce, check recent changes, gather evidence
+2. Pattern Analysis — find working examples, compare, identify differences
+3. Hypothesis and Testing — form theory, test minimally, verify
+4. Hand off to Step 2 with root cause clearly identified
+
+Do NOT write any fix until Phase 1–3 are complete.
+
+5. **Dev prompt** (pipeline Step 1) — open it with:
+
+    Fix the following in <PROJECT>: $ARGUMENTS
+    Root cause has already been investigated — implement the fix.
+    Complete the full <PREFIX>-dev workflow (domain skills, implement, deploy, Reference Sync).
+    Done means: <the acceptance statement from Step 0.5> — this is the task, not the diff that
+    approaches it. The journey's last step must be reachable by a user before you report complete.
+    A bug report names a symptom; the statement names the state the user should end in. Removing the
+    symptom without reaching that state is not a fix.
+    Verifications (these must hold when done): <the verifications captured in Step 0.5, or "none">
+
+6. **QA prompt** (pipeline Step 2) — add to its acceptance-statement paragraph:
+
+    sign-off; the assertions are evidence for the statement, never a substitute for it. The original
+    symptom being gone is not the same as the end state being reached — check the latter.
+
+7. **Scorecard** (Step 5) — the `Committed` row reads `git log --oneline -5` shows the fix + capture + log commits.
+8. **Done** — report per `.claude/skills/code/references/close-out.md`. The Status rows for deploy / push / log / docs / ref-sync are the Step 5 scorecard facts, each checked against reality there. The root cause `<PREFIX>-debug` found belongs in the Verdict line — one clause, so the user knows what broke, not how it was traced. Ship state, a serve-env started at Step 2.7, a regression scope the pipeline worked out, any children qa fanned out to, an undischarged `prod-walk:`, and a `UAT-only` task are handled exactly as in `.claude/skills/code/references/close-out.md` — including that the first three are Status rows, not Open ones.
+```
+
+---
+
+## § /pilot — skills/pilot/SKILL.md
+
+```markdown
+---
+name: pilot
+description: Autonomous multi-task run — decompose a goal into tasks, route each through the right lane (full pipeline or tweak), and work unattended until the goal is met. One up-front gate, no mid-run questions, single batched close-out. With no goal it runs the standing mission — whatever the project's own stores say needs doing next.
+whats-up-store:
+  reads: .claude/pilot/last-run.json — the newest run's marker (ts, mode, verdict, runnable_left) — .claude/pilot/running, present while a run is in flight, and `bash ~/.claude/usage-snapshot.sh --read`, the allowance figures a run reads before starting work
+  healthy: last-run.json absent → n/a (no run has happened yet); else its verdict is not `failed` and either its ts is within 2 h, or its runnable_left is 0 **and the roadmap and unproven-work stores this reader just read are themselves empty** — a marker's 0 is a claim about the moment it was written, and work landing since is exactly when a loop that stopped firing still reports healthy, which is the failure this store exists to name. Also, `usage-snapshot.sh --read` prints a figure rather than `unknown` for at least one window — an `unknown` from a session that has been working means the status-line wrapper that keeps the figures current has come undone, so every run from now on reports its allowance as unknown, correctly and forever, and nobody notices; `Next` is the install step that re-wires it. Read it **from a session that has done work**, since a brand-new one legitimately has no figures yet. Nothing gates on this, here or anywhere — a check-in is simply where a person is present to fix it
+  live: .claude/pilot/running present, under 6 h old, and not older than .claude/pilot/limit-hit from the same session — a marker the limit-mark.sh hook has outdated is a run the allowance killed, reported as `killed by <error_type> at <ts> — resumes on the next /pilot in that session`, never as busy
+  when-bad: degraded
+---
+
+# Pilot
+
+**Usage:** `/pilot <goal>` — a batch of work (e.g. open roadmap items matching a filter) or a target state to reach (improve an area until measurable criteria pass). **`/pilot` alone runs the standing mission**: the task list is what `/whats-up` would report, ranked, so `/loop 30m /pilot --max-tasks 1` keeps a project moving with nobody typing. **Use a fixed interval, never the self-paced form**: a self-paced loop's only heartbeat is the wake its last turn scheduled, so when that turn is refused at the usage limit nothing is left to fire and the loop dies until a person returns; a fixed interval fires regardless, fails cheaply while the window is spent, and picks the mission back up on the first firing after the reset. Flags: `--max-tasks N` caps the run (default 10; on the standing mission a cap equal to `/whats-up`'s executable Open rows runs exactly the unfinished business and none of the backlog, which is how its `All:` line is built); `--items <id>,<id>` runs exactly those roadmap items (how `/roadmap` hands over a set); `--gates [<name>,<name>]` re-measures parked verdicts and settles them (all of them, or just the named ones); `--deferrals [<name>,<name>]` re-walks blocked or deferred verifications (all of them, or just the named ones); `--prod` pre-answers Ship; `--no-push` pre-answers Hold and skips the close-out push; `--grant <unit>=<N>` (repeatable) pre-answers Budget for a metered lane; `--regression full|auto` opts the whole mission out of the fixed `smart` scope.
+
+**Examples:**
+- `/pilot` — the standing mission: finish what is started, re-walk what became provable, close what died, then the ranked backlog
+- `/loop 30m /pilot --max-tasks 1` — the same, every half hour, in a session you leave open; a firing that lands mid-tick declines on the run marker and the next one continues
+- `/pilot implement all open roadmap items`
+- `/pilot work through the high-priority roadmap items --max-tasks 5`
+- `/pilot --gates` — re-measure every parked verdict, close the dead ones, batch the rest
+- `/pilot improve <area> until <measurable criteria> --prod`
+
+## Autonomy contract
+
+After the single Step 1 gate, the run is unattended until close-out:
+- A run is **unattended** when `--unattended` was passed or no goal and no store flag made it the standing mission — one property, decided by the caller, never inferred: a loop firing is indistinguishable from a typed prompt, and no gate timeout has ever fired to infer it from. Everything else that keys on it (the ladder's agent column, Sonnet dispatch, the `[large]` skip, Ship held) follows from that flag. Unattended is a property of the run, decided once at the gate, and three rules key on it — what the run may conclude (the ladder in Step 2), which model its subagents run on (Step 2, *Models*), and which questions reach a person at close-out (Step 3 `(a0)`).
+- Reversible decisions are made autonomously with the recommended default and labeled `auto-decided (pilot run — not user-confirmed)` in every downstream record — never presented as user consent; in the delivery log's `**Decisions:**` line the provenance token for any of them is exactly `pilot-auto`, never a paraphrase such as `measured` or `auto`, because `open-gates` and the log's checklist compare that word. This extends to **concluding an open claim**: a task that re-measures one states a verdict from the ladder in Step 2, and the run itself concludes every verdict that takes no irreversible action. What separates the two is not who raised the question but what the answer does.
+- Irreversible actions (prod deploy; any push that fires prod CI) never happen mid-run — they are deferred to close-out, where they gate normally per the `/code` Gate policy (ask at the moment of the action; park on silence).
+- The user may interrupt at any time; on their next message, resume from the current task using the mission state in context.
+
+## Step 0 — Flags + entry hygiene
+
+**Flag parse (first):** `--unattended` → nobody is present: the ids or goal typed are the Confirm, Ship = hold, Budget = None unless `--grant` says otherwise, `[large]` items skipped, every subagent on Sonnet, planned questions = 0 — the standing mission (no goal, no store flag) implies it; `--then` → after a clean close-out keep working the standing mission, `--unattended --max-tasks 3`, in this session; `--max-tasks N` → cap the task list at N (default 10); `--items <id>[,<id>…]` → the task list is these roadmap `**Id:**` values, in this order (see Decompose); `--gates [<name>[,<name>…]]` → the task list is parked verdicts (see Decompose); with no names, every one `open-gates` returns; `--deferrals [<name>[,<name>…]]` → the task list is blocked or deferred verifications (see Decompose); with no names, every one `open-deferrals` returns; `--prod` → `ship_mode = prod`; `--no-push` → `ship_mode = hold` and `no_push = true`; `--grant <unit>=<N>` (repeatable) → seed the resource ledger below; `--regression full|auto` → the mission's test scope, otherwise `smart`. **`--regression full` on a mission is refused unless the Confirm answer carried its price** — it re-covers every prior per task *and* per fix cycle, measured 8–17× a `smart` mission of the same size, and a `smart` 10-task mission already cost 714M tokens; `auto` on a mission resolves per task to `smart` and can never reach `full`. Strip all flags from the goal used below. **No goal and no store flag → the standing mission** (see Decompose): `ship_mode = hold`, and the gate is not asked. Otherwise, if neither ship flag is present, `ship_mode` is decided by the Ship question in Step 1.
+
+**One run at a time.** If `.claude/pilot/running` exists and is under 6 h old, another `/pilot` — a loop iteration, a headless shift, a check-in in a second session — is active in this repo: report "a run is active since <its timestamp>" and stop, because two missions committing into one tree is a collision nothing below can untangle. A marker older than 6 h is a killed run: say so, remove it, continue. **So is a marker older than `.claude/pilot/limit-hit` from the same session** (the `limit-mark.sh` hook writes that file — timestamp, session id, `error_type` — on the turn a limit refuses, which no agent can report): that run died on the allowance; treat it as your own unfinished run below rather than waiting six hours for the marker to age out, and quote the `error_type` line in the entry report, since whether a claude.ai usage limit arrives as `rate_limit` is a fact the docs leave open and this file settles. **A marker that is your own is a resume, never a decline**: if this session dispatched the run the marker belongs to and never reached Step 3 `(d)` — a subagent died on a usage limit, a loop firing landed mid-task — then this firing continues that mission: apply the salvage protocol to whatever never returned a handoff, finish the task in flight, close out, and only then take new work. Declining your own run is how a fixed-interval loop stalls for six hours after a limit reset while the marker ages out. Otherwise write it now — two lines, the timestamp and **this session's id**: `mkdir -p .claude/pilot && printf '%s\n%s\n' "$(date -u +%FT%TZ)" "$CLAUDE_CODE_SESSION_ID" > .claude/pilot/running` — and let Step 3 `(d)` remove it; the `pilot-cleanup.sh` hook removes it on session end too, but only when the second line is its own session, because two sessions in one repo are normal and a blind removal would unmark another mission. In the same command write the run's record skeleton, so every per-task figure Step 2 records lands in **this** run's file rather than the previous run's: `.claude/pilot/last-run.json` = `{"ts": "<now>", "session_id": "$CLAUDE_CODE_SESSION_ID", "mode": "standing|flagged|goal", "unattended": true|false, "verdict": "running", "per_task_cost": {}}` — `(d)` finalises the rest. Measured before this: an install's `ts` read 16 hours older than the file's own mtime, because Step 2 had been writing into the last finished run's record. The directory is gitignored and `EXEMPT` in `governed-paths.conf`; nothing in it is mission state.
+
+**Entry hygiene:** run `git status --porcelain` and `git rev-list --count @{upstream}..HEAD` (report "no upstream" rather than failing when the branch has none). If the count is non-zero, say so in one line with the reason if you can see it — held commits are work that already passed review and is waiting on a decision, and **nothing else raises them**: a close-out's Open row dies with its session, and entry hygiene is the only step that runs before every task. Report, do not gate; if the held set overlaps the paths this task will touch, say that too, because the task is about to build on unshipped work. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it at close-out. If the WIP overlaps paths this mission will touch, do not stash it blind — tell the user and run `/tidy` scoped to the overlapping paths first, then resume here.
+
+**Open deferrals and gates:** run the same read `.claude/skills/code/SKILL.md § Step 0` defines — `python3 .claude/graph/graph.py open-deferrals` — plus `python3 .claude/graph/graph.py open-gates`, and report each as a line, with the same silent skip when the script is absent or exits non-zero. On the standing mission these two reads are part of the `/whats-up` read Decompose runs — run that once there and report its Status rows here, rather than reading the same stores twice. A mission is the main way work starts, so leaving it out would mean nothing raises a deferral for the whole run. Report only: the routine list does **not** go into the Step 1 gate, which already carries a task per line. Report a gate with the condition and age `open-gates` returns, and name `/pilot --gates` as what settles them — a gate waiting on a trigger that has not fired is not a decision anyone can make today, and reporting it as one is why they accumulate. The one exception is that command's escalation — the same *fixable* blocker named by 3+ open deferrals, or a single verification deferred 3+ times: add it as a line in the Confirm question, so the user can redirect the mission to the blocker through the automatic "Other" rather than spending the run on top of it.
+
+**Allowance:** run `bash ~/.claude/usage-snapshot.sh --read` and report its lines verbatim. That script owns every arithmetic rule — which sessions to believe, how to reconcile them, when a figure is dead — so **never read the snapshot files directly and never recompute a figure it prints**. The aggregation is not optional detail: one machine ran 12 concurrent sessions and a shared file flipped between 46% and 7% for the same window four seconds apart; a run that reads raw files will read one of those. `unknown` on any line → say so and **proceed** — a mission that halts because a status-line script did not run halts for no reason, and a fresh session has no figures until its first API response. Report only; the decision is Step 2's. Nothing here gates.
+
+**And say how this run recovers if the allowance runs out**, in the same line, because it is decided now and not later. A `/pilot` orchestrator sits idle waiting on subagents, so when the limit lands it is a **background agent** that dies, and the turn that reports that death is not a task Claude Code's auto-continue can resume — measured twice: 2h19m and 2h53m of idle time after the allowance had already returned, once with `autoContinueAtUsageLimit` on and only a single refusal. **A bare `/pilot` therefore has no recovery at all.** The fixed-interval loop form is the only one that comes back by itself, and Step 0's own resume clause is what makes it safe. So on a run of 3+ tasks started bare at a terminal, say in one line: this run will not resume itself; `/loop 30m /pilot --items <the list> --max-tasks 1` would, and `caffeinate -i` stops the machine sleeping through the reset — the branch that waits for a keypress instead of continuing.
+
+## Step 1 — Mission plan + single gate
+
+**Decompose.** Build the task list from whichever source applies:
+- **Pre-selected items** (`--items <id>[,<id>…]`, how `/roadmap` hands over a set): the ids **are** the selection, already ranked — take them in the given order and read each item's body in `docs/roadmap.md` for its description. Skip selection and ranking only; everything below still applies to each item, including the per-task derivation and the split rule. An id that matches no roadmap item is reported at the gate and dropped — never silently guessed at; an id whose item is no longer open (`done`, or closed by a later entry) is skipped and reported the same way, which is what lets a fixed-interval loop over `--items` take one id per firing and run out rather than repeat the first. **An id other items name as their `**Parent:**` is an umbrella** (what `/blueprint` writes): it expands in place to its open children in `**Depends on:**` order and is never run itself — its body is the plan's context and decisions. A child whose `**Depends on:**` names a sibling that failed in this run is skipped and reported, never started on top of it.
+
+  **The decisions block follows the child, not the address.** Any task whose item carries a `**Parent:**` reads that parent once and pastes its `**Decisions made here so the executor does not:**` block into the dev prompt under `Plan decisions:` — whether the mission was given the umbrella, the child list, or one child by name. A subagent then reads it from the cached prefix instead of re-deriving a choice the planner already made, and the plan's own executor rule (deviate-and-record when attended, `blocked — decision <n> contradicted` when not) travels with it. Keying the paste to the umbrella address instead left one child of eight dispatched with no decisions at all on a real mission, because the plan's `**Run:**` line named the children.
+- **A store of open claims** (`--gates` today): the flag names a store, the store's query returns the claims, and each returned claim is one task. Nothing else about the mission changes. A **claim** is a record plus the condition that would resolve it — a parked verdict, and later a deferral or a stalled item; they decay the same way, so they decompose the same way and this bullet takes each new store as another row, never as a second mechanism.
+
+  | Flag | Store | Query | Fallback when the query cannot run |
+  |---|---|---|---|
+  | `--gates [<name>…]` | the delivery log | `python3 .claude/graph/graph.py open-gates` | `grep -n '=parked' docs/project-log.md`, reconciled by hand exactly as `.claude/skills/whats-up/SKILL.md § Step 2` describes |
+  | `--deferrals [<name>…]` | `custom-tests.yaml` and the delivery log | `python3 .claude/graph/graph.py open-deferrals` | read `custom-tests.yaml` for every `last.status` of `blocked` or `fail`; a deferral's condition is its `last.reason` |
+  | *(no goal, no flag)* — the **standing mission** | every store `/whats-up` reads | `.claude/skills/whats-up/SKILL.md § Step 1–2` — the read and the reconcile, run once, exactly as that command runs them; its `Open` rows and `Emerged` counts are the claims | that command's own table names a fallback per store |
+
+  Each task **re-measures the claim's condition and states one verdict from the ladder in Step 2** — that is its acceptance statement. A `--deferrals` task's condition is the verification's `last.reason`, and its verdict is the verification's outcome: it re-walks the check exactly as `<PREFIX>-test` would and records `last:` through `run-checks.py record`; `pass` closes it, `blocked` restates the trigger, and a `fail` is a pipeline task on the next run, not this one's problem to fix. A check the re-measure finds **cannot be walked by anyone** — its baseline code is gone, its subject removed, a newer check owns the assertion — is the ladder's `superseded` / `expired` / `moot`: the run records it `retired` with the measurement that decided it as the `reason`, `(pilot-auto)`, and it closes. Never `pass` for a walk that did not happen, never left `blocked` to be re-raised by every later run, never deleted from `custom-tests.yaml` — the log entry that deferred it still names it. A check that *could* be walked but costs money or a person is not moot; it stays `blocked` and its cost is the trigger.
+
+  **The standing mission's tasks are `/whats-up`'s rows, filtered to what a run can do.** Take its `Open` rows in their order and keep each one whose `Next` this run could execute, mapped onto the shapes above rather than onto anything new: a parked gate becomes a claim task exactly as `--gates` shapes it; a recorded `fail` or a closable `blocked` becomes a pipeline task whose acceptance statement is the verification's own `assert`; a deferral whose recorded trigger has since fired becomes a re-walk task as `--deferrals` shapes it; an in-progress roadmap item becomes an item task as `--items` shapes it. Then append the `Emerged` roadmap backlog ranked per `.claude/skills/roadmap/SKILL.md § Rank` as further item tasks, up to `max_tasks` — features included; the roadmap's own `**Priority:**` and `**Status:**` are the only ordering, and a person changes what a run picks by changing those, never by editing this command. A row only a person can act on — `verify live`, a `resume here`, a decision with nothing left to re-measure — is carried to the mission report untouched: never turned into a task, never dropped. The task is read-only, so it needs no serve-env and no QA cycle; route it to the lane that owns whatever the condition measures, else the lane named in the claim's own log entry, else `pipeline`, and let it exit at that lane's declared `close-out`. **Claims whose refreshed evidence is the same set are one task, and that task answers every one of their names verbatim** — one repair is routinely parked under two names, and one lane routinely parks the same name once per run; answering only the name you happened to read leaves the others parked forever. A named claim the query does not return is reported at the gate and dropped, never guessed at.
+- **Roadmap-shaped goal** (the goal names the roadmap or matches its items): read `docs/roadmap.md`, select the open items the goal covers, and rank them per `.claude/skills/roadmap/SKILL.md § Rank` — one rank rule, stated once, so the order a user saw in `/roadmap` is the order a mission runs.
+- **Target-state goal** ("improve X until Y"): derive 2–3 **success criteria** — measurable checks, each with a command or observable that decides pass/fail — then derive the initial tasks that most plausibly move toward them. The loop re-plans between tasks; the criteria, not the initial list, define done.
+- **Plain batch** (an explicit list of things to do): one task per item.
+
+Cap at `max_tasks`. For each task derive: a one-line description, an **acceptance statement** (the end state in the user's terms — where the journey lands, not what changes), 1–3 verifications derived *from that statement* (`{assert, type}` — UX / Integration / E2E, same vocabulary and same mandatory end-state rule as `/code` Step 0.5), and a **lane**. The end-state check matters more here than anywhere: this lane runs unattended, so a task that ships a half-journey has no one present to notice it dead-ends.
+
+**Lanes, `apply:`, `reversal:`** — before routing any task to a lane other than pipeline or tweak, and whenever `--gates` is set, read `.claude/skills/pilot/references/lanes.md`: the discovered lane registry and what a lane owes.
+
+**Split broad tasks (do this before the gate).** A single item that applies **one uniform change across an enumerable set** — phrased with "~N", "each", "all/every X", plural targets, "across the <collection>" — is really N sub-tasks. Bundled into one pipeline task it balloons the dev agent past a healthy context window and hands QA an unreviewable diff (the observed failure: one "invert ~9 modules" item ran 49 turns / 222k context / 41 min and had to spawn its own sub-agents to cope). For each such task, enumerate the concrete target set, then:
+- **Split into bounded chunks** — group the set so each chunk is one coherent review unit (rule of thumb: ≤~5 files of the same uniform change per chunk), one `pipeline` task per chunk, sharing the parent's verifications. This is the **default** — a bounded pipeline unit keeps context healthy and the per-task diff reviewable.
+- **Cap tension:** if splitting would exceed `max_tasks`, don't silently drop chunks — keep the item **whole** but tag it `[large]` in the gate list with the target count, so the user sees the ballooning risk and can raise `--max-tasks` or pre-split via "Other". Never split a task whose changes are genuinely interdependent (a single edit touching N files together) — that's one review unit, not a set; tag it `[large]` instead. **An unattended run does not run a `[large]` item at all**: with nobody to raise the cap or pre-split, it becomes an Open row in the report with `Next: /pilot --items <id> --max-tasks <N>`, because a 49-turn dev nobody watches is the failure this rule exists to prevent.
+
+**Gate.** Ask everything in **one AskUserQuestion call** — the only planned interaction of the run, and the last: nothing after it asks, except an irreversible gate that parks on silence and, on a `--gates` mission, the disposition table at `(a0)`. The scorecard's `Questions` row counts what was actually asked against this:
+
+1. **Confirm**:
+   - question: "Fly this mission? <goal> — <N> tasks: <numbered task list with lanes and verifications; split chunks shown as sub-items; any `[large]` tag with its target count; success criteria if any> · Regression: <the mission scope> — <N> tasks x <scope>"
+   - header: "Confirm"
+   - options:
+     - label: "Launch (Recommended)" — description: "Run all tasks unattended; everything holds at UAT until close-out"
+     - label: "No, cancel" — description: "Stop here"
+   - The automatic "Other" field lets the user reorder, drop, or add tasks and amend verifications or criteria — incorporate, restate the updated plan, and re-ask the full gate once.
+   - **A claim's disposition is never stated here.** On a store-targeted mission this question settles *scope* — which claims get re-measured — and nothing else. The only evidence available now is the parked evidence, which is the evidence this lane exists to distrust: a disposition offered from it is a guess the run is about to contradict, and the user who accepts it then gets asked the same question again at `(a0)` and reasonably reads it as a repeat. List each claim with its age and what it currently says would answer it, and say in one clause that the recommendations come after the re-measure. Scope once, dispositions once — never the same decision twice.
+2. **Ship** (omit when `--prod` or `--no-push` already decided it):
+   - question: "Ship after the mission completes clean?"
+   - header: "Ship"
+   - options:
+     - label: "Ship (Recommended)" — description: "If every task signs off clean, deploy/push to prod at close-out without asking again. On projects where push fires prod CI, shipping = prod deploy."
+     - label: "Hold at UAT" — description: "End committed but not pushed/deployed; ship later with /code --prod or by asking"
+
+3. **Budget** (include only when the task list routes to a lane whose `spend` is `metered:<unit>` **and** no `--grant` already covered that unit):
+   - question: "Grant a budget for <unit>? <M> task(s) route to metered lanes."
+   - header: "Budget"
+   - options: two or three concrete grants sized to the task count (e.g. "20", "50"), plus "None — skip those tasks". The automatic "Other" accepts an exact number.
+
+**Budget, ledger and the price in the question** — read `.claude/skills/pilot/references/allowance.md` before composing the gate: the resource ledger for metered lanes, the regression price in tokens, and the allowance line the question repeats.
+
+**A loop never asks.** On a fixed-interval loop every firing is a fresh invocation of this command, so a gate would be asked every half hour and, with nobody present, would wait until someone returned (measured: a firing asked at 20:15 and started at 23:27). So every loop line carries `--unattended`: the ids typed into the loop *are* the Confirm, given once when the loop was started; Ship is hold; `--grant` on the loop line is the Budget. There is nothing to inherit between firings and nothing to time out, which is why `/whats-up`'s `Loop:` lines print the flag.
+
+**Standing-mission gate.** A standing mission, or any run with `--unattended`, asks **nothing here**. Every task came from a record the project already keeps — a parked gate, a blocked verification, a roadmap item with its own priority — so there is no scope for a person to confirm, and nobody is assumed present: Ship is Hold, Budget is None unless `--grant` came on the command, regression is `smart`, and the run is **unattended** from its first task. A task that routes to a metered lane whose unit no `--grant` covers is dropped exactly as the ledger says — but with no gate to report the drop at, each such task is an **Open** row in the mission report, `Next: /pilot --grant <unit>=<N>` sized to the cohort the task states, because a drop nobody sees here is a row `/whats-up` re-proposes every day and nothing ever runs. The escalation line that would have gone into Confirm (the same fixable blocker behind 3+ deferrals) becomes an Open row in the report instead, with `Next` naming what would build the blocker. A flagged or goal mission asks exactly as above; `/pilot --gates` at a check-in is the way to be asked everything the standing runs parked, and `/whats-up`'s closing line already names it.
+
+## Step 2 — The loop
+
+Work the task list in order until: tasks exhausted, all success criteria pass, `max_tasks` tasks completed, or the allowance runs out (below). No user gates inside the loop.
+
+**Stop between tasks, never inside one.** Run `bash ~/.claude/usage-snapshot.sh --read` before and after each task. The rise in `% used` is what that task cost. Before dispatching the next task, do this arithmetic **per window** and write the numbers in the progress line:
+
+> `left` is what the read prints. `cost` is the rise across the task just finished. **Start the next task only while `left > cost`.**
+
+Worked, from a real run: 7-day printed `91% used, 9% left` and the task that had just finished cost 3 points. `9 > 3`, so the mission continues — with two more tasks of headroom. **A percentage is not a threshold.** 91% "feels" empty and a run stopped there on that feeling, three tasks early; the rule is the comparison and nothing else. Conversely 60% used with a task that costs 40 is a stop.
+
+| Condition | What the run does |
+|---|---|
+| `five_hour.left ≤ cost` | **Stop the mission here.** Close out per Step 3 over the tasks that finished, state the reset time, and make the closing line `/loop 30m /pilot --items <the ids still open> --max-tasks 1 --no-push` — closed ids are skipped by the Decompose bullet, so it resumes exactly what remains and idles once done |
+| `seven_day.left ≤ cost` | **Stop and say when it returns.** No loop: one idling for days is a worse answer than a sentence |
+| Either window `unknown`, or the measured cost ≤ 0 | That window decides nothing — carry on. Unknown is never read as empty, and a window that moved less than its own resolution says nothing |
+
+**A reading that contradicts an earlier one is discarded, not obeyed — and never voids the signal.** Within one window `% used` can only rise; a drop means the reader saw a stale session, which the script's own aggregation should already have removed. If a printed figure is *lower* than one this run printed earlier for the same window, keep the earlier figure, say in one line that the reading was discarded, and go on using the higher number. The cost of getting this backwards is measured: a mission read 5-hour at 75%, decided correctly to stop, then took a contradicting read one minute later, **reversed its own decision**, ran into the wall, and had a subagent killed mid-write against production Firestore. Abandoning the signal on a contradiction is how a correct stop gets undone.
+
+Record each task's measured cost **as that task finishes** — not at close-out — into the `per_task_cost` object of the `.claude/pilot/last-run.json` skeleton Step 0 wrote for this run, in the exact per-task shape Step 3 `(d)` defines (`five_hour_pts`, `seven_day_pts`, `commit`, `regression_mode`, optional `reason`), stamped with the commit and the `regression_mode` it was measured under. A run killed mid-mission then still leaves what it learned, and Step 1's price quote gets a figure measured on *this* project instead of another one. A figure stamped with a different scope is quoted as indicative and never used to stop a run. **Write the field even when the cost is unmeasurable**, with the reason — a run that leaves `per_task_cost` as a note saying it could not measure has told the next mission something; an absent field has not.
+
+**Models.** An **unattended** run dispatches every subagent — `<PREFIX>-dev`, `<PREFIX>-qa`, `<PREFIX>-pm`, a discovered lane's command, a claim's re-measure — with the Agent tool's per-call `model: sonnet`. An attended run passes **no model to any agent**, so each runs on its own frontmatter or the session's. **`<PREFIX>-pm` is never passed a model in either case** — its frontmatter says Sonnet and a per-call value overrides frontmatter, which is how two attended runs sent pm to Opus three times while applying a `Size:` rule that belongs to unattended dispatch alone. The orchestrator — this command, doing the planning, gating, routing and close-out — never changes model in either case, and fan-out children are `<PREFIX>-verify` agents in both, whose own frontmatter fixes Sonnet, a 60-turn cap and no CLAUDE.md — no caller passes them anything (the dispatch rule lives in `custom-tests.md § Splitting`). One override, and it comes from the record rather than from any agent file: a task whose roadmap item declares `**Size:** medium` is dispatched with `model: opus` on an unattended run **only** — the planner that wrote the item sized it, which is one of the decisions a `/blueprint` makes so the run does not; `small`, or no `**Size:**` line, takes Sonnet as above, and on an attended run `Size:` changes nothing because nothing is passed. Name every override in the `Models` row. The split is deliberate and priced: the work a person is not watching is the fan-out, and the judgment that decides what to fan out stays where it was. Record the three models as dispatched in the scorecard's `Models` row; never assume them.
+
+**(a) Pipeline lane** — run the `/code` machinery without its interactive steps (`.claude/skills/code/references/pipeline.md` holds the exact mechanics — `/code` Step N below means that file's Step N; reuse them, replacing every mid-run AskUserQuestion with the autonomous branch below):
+1. Spawn `<PREFIX>-dev` with the task + its verifications (`/code` Step 1 prompt shape). The salvage protocol and the no-top-level-edits rule apply verbatim. **A decision the task turns out to need that the gate did not settle** — a product choice, a design direction, a pricing value — is never asked mid-run, attended or not: the task is marked `blocked — needs decision <name>`, the question is parked as a gate with that name and the evidence gathered so far, and the loop moves on. Measured: the mid-run "pick a direction" and "refund or not" questions were half of what made a one-gate contract ask 2.4 times per run.
+2. On `Status: complete`, persist the task's verifications exactly as `/code` Step 1.5 (single-quoted scalars, `paths` reduced to behavioral surface, `test:` commit). On `Status: blocked`, mark the task **failed** with dev's `Notes:` and go to (c).
+3. Ensure the verification stack as `/code` Step 1.7 — except on an unreachable env, don't ask: leave the affected verifications to report blocked and continue (they surface as deferrals below).
+4. Spawn `<PREFIX>-qa` `mode=initial`, `regression_mode:` the mission scope (`smart` unless `--regression` set it), with the new verification names + changed paths + the `Graph blast:` pack (`/code` Step 2 says how it is produced — one call here, pasted into this prompt and pm's). Branch on its handoff:
+   - `signed-off` → continue to 5.
+   - `signed-off-with-deferrals` → **auto-accept the deferral, but first route each deferred verification by declared project fact** — the same three branches as `/code` Step 2, read from `deploy-config.yaml`, not judged. Auto-accept means no mid-run *gate*; it does not mean every unrun check is equivalent:
+     - **A non-prod env declaring a `url:` exists and the end state still wasn't walked** → this is not a deferral, it is an unproven feature. Treat it exactly like `blocked`: re-spawn dev, spend a fix cycle, and if it still can't be walked mark the task **failed**. Never auto-accept this branch — an unattended run is the worst place to let a feature ship unwalked, because nobody is present to notice.
+     - **No non-prod env declares a `url:`** (ships only to prod, or its non-prod envs are all run-to-completion jobs) → carry it forward as `prod-walk: <verification name>` into Step 3(a) and walk it **after** the prod deploy. It is not discharged here.
+     - **The end state is triggered out-of-band** (schedule, webhook, external callback) → defer with a named trigger, expected observable, and where to look. Without those three it is not a deferral; send it back to qa's `Notes:` rather than accepting a shrug.
+     Carry `UAT-deferred: <names> (auto-accepted — pilot run, not user-confirmed)` into the pm prompt and the mission report for the branches that were genuinely deferred, then continue to 5.
+   - `blocked` with code-fix `Notes:` → re-spawn `<PREFIX>-dev` with the fix, then `<PREFIX>-qa` `mode=retest`. At most **2 fix cycles per task**; still blocked → mark the task **failed** with qa's notes. If the failure leaves the tree broken (smoke fails), `git revert` the task's commits before moving on. If later tasks depend on this one, stop the loop and go to Step 3.
+5. Spawn `<PREFIX>-pm` with the feature commit, any UAT-deferred line, the changed paths, the same `Graph blast:` pack, and the verbatim QA-evidence block (`/code` Step 3 prompt shape). Its `Decisions:` line carries the mission gate's answers plus anything decided inside the loop — every autonomous branch is labelled `(pilot-auto)`, never `(user)`; an auto-accepted deferral is `defer=accept (pilot-auto)`. The mission gate's own Ship answer keeps its true origin (`user` or `timeout`).
+6. Stop the verification stack exactly as `/code` Step 3 does, once pm has returned — the next task restarts it on its own commits anyway, so nothing is lost and no server outlives the task that needed it.
+
+**(b) Tweak lane** — top-level inline work under the `/tweak` lane rules: load the owning domain skill first, verify every change inline with shown evidence, commit in small named steps. Task exit: use the `<PREFIX>-review` skill on the task's diff (fix non-source nits directly; a source finding needing review depth → reclassify the task to the pipeline lane and run (a)), then one `<PREFIX>-log` entry for the task. **Scope guard:** if the work grows into schema/API/auth/migrations, reclassify to the pipeline lane before continuing.
+
+**(b2) Discovered lane** — invoke the lane's command with the task, then hold it to its declared contract. It owes whatever its `close-out` names (a log entry, an artifact, a parked verdict, or nothing) and, if its `spend` is metered, a spend figure to decrement the ledger — a metered lane that reports no spend is treated as having exhausted its remaining balance, so an unreported burn closes the lane instead of running free. The lane's own steps are project-owned and not restated here; the salvage protocol applies to it exactly as to any subagent. If the lane's work turns out to need review depth (it changed source), reclassify to the pipeline lane and run (a).
+
+**Verdicts** — when a task re-measures a claim, or a lane returns one, read `.claude/skills/pilot/references/verdicts.md`: the five-verdict ladder, who concludes each, and what an unattended run may take.
+
+**(c) Progress + re-plan.** Keep each task's `<PREFIX>-dev` handoff `Roadmap:` ids — they are the mission report's Emerged rows. Then emit one status line — `task k/N · <title> · <status> · <commit> · <evidence pointer>` — a report, not a question. Then re-plan: drop later tasks the outcome obsoleted, insert a revealed prerequisite (within `max_tasks`), and if success criteria exist, evaluate them with evidence — stop the loop when all pass. Record every plan amendment for the mission report. For roadmap-driven runs, verify pm flipped the item's status.
+
+**Context health:** keep the top level thin — never read source files or heavy references at the top level; work from handoff blocks. If context is clearly degrading (earlier tasks summarized away, repeated re-derivation), finish the current task, then go to Step 3 and list the remaining tasks as resumable — a degraded pilot ships worse code than a fresh session.
+
+## Step 3 — Close out (once per mission) and the mission report
+
+Read `.claude/skills/pilot/references/close-out.md` now and run it: apply-or-park, prod deploy and walk, the one docs sync, push, the evidence-verified scorecard, the run marker, then the mission report per `.claude/skills/code/references/close-out.md`.
+```
+
+---
+
+## § /code — references/pipeline.md
+
+The shared pipeline body — Steps 1–3 of `/code`, run verbatim by `/code`, by `/fix` after its investigate step, and by `/pilot`'s pipeline lane. Not a skill: a reference file the three entry points read at the step that needs it, so none of them carries it in its own body.
+
+```markdown
+# Pipeline — Steps 1–3
+
+Step numbers here are the ones `/code`, `/fix` and `/pilot` cite (`/code` Step 1.5 means this file's Step 1.5). `/fix` applies the substitutions its own SKILL.md lists; `/pilot` replaces every mid-run AskUserQuestion with the autonomous branch its lane (a) states.
 
 ## Step 1 — Implement (<PREFIX>-dev)
 
@@ -199,40 +484,16 @@ Task:
     <paste the full ## Handoff block returned by <PREFIX>-qa, verbatim>
 
 **Then stop the verification stack.** Once pm has returned, stop every serve-env the ensure-stack step started or restarted — kill its process group and confirm its port is free. Nothing after pm needs it: the prod deploy and the prod walk run against prod, and a dev server left up keeps a seeded test user and any auth bypass reachable for as long as nobody remembers it. A server that was already running and only reused is left as found. The one exception is the user asking, in this run, to keep it up to look at it themselves — then it stays, and the Status row says so with its url.
+```
 
-## Step 4 — Deploy to prod (only if `ship_mode: prod`)
+---
 
-Run only if `ship_mode = prod` (from the `--prod` flag or the Step 0.5 Ship answer). After <PREFIX>-pm has logged, invoke the `<PREFIX>-deploy` skill **here at the top level** (not via a subagent) with `target=prod`. It runs the fill-in pass, builds the gate context, and gates via `AskUserQuestion` — which works because this is the top level. Running after sign-off and any retest loop means it deploys the final, signed-off code.
+## § /code — references/close-out.md
 
-**Pre-authorization.** If the user answered **Ship** at the Step 0.5 gate (not a timeout default), pass `preauth: user shipped at Step 0.5` to the skill **only when all of these hold** — verified now, not assumed:
-- QA status is `signed-off`, or `signed-off-with-deferrals` where the deferral was **user-confirmed** (not auto-accepted on timeout);
-- no gate in this run was auto-decided on timeout;
-- the commits being shipped are exactly the reviewed set (nothing landed after QA's sign-off except the capture/log commits).
+The close-out report contract, cited by every command that closes work. Read at close-out only.
 
-When any condition fails — or Ship was a timeout default — the skill gates normally (ask; on no answer it returns `gate: unanswered — parked` → park per the Gate policy; never decide a prod deploy on the user's behalf). If no `prod` env is declared or the user declines, report that and finish at UAT.
-
-**Prod walk (run when Step 2 carried a `prod-walk:`, or when any prod-only deferral covers what this deploy just shipped).** After the deploy succeeds, walk the acceptance statement against prod **here at the top level** and report where it lands — the same end-to-end trace qa would have run, against the only environment that can host it. This is the whole point of the prod-only branch: a project that cannot prove a journey before shipping proves it immediately after, using the access this pipeline already has. Handing the user a checklist for a flow you can reach yourself is not a verification, and "I have prod access but asked you to click it" is the failure this step closes. Record the outcome in the scorecard and update the verification's `last:` accordingly — pass discharges it, failure opens a `/fix` with the journey as its acceptance statement. If prod genuinely cannot be reached from here (no credentials, human-only auth), say so explicitly and name what the user must click — a checklist is the fallback, never the default.
-
-**Then drain what this deploy made provable.** A prod-only check is discharged by *a* prod deploy, not only by the task that first deferred it — so on a project that habitually holds at UAT, those checks accumulate forever while every `--prod` run walks one and leaves the rest. Run `python3 .claude/graph/graph.py blast <the paths this deploy shipped>` and walk every still-open prod-only deferral it returns, exactly as above. **The shipped paths are the bound** — do not walk the whole backlog, and never re-walk a check this deploy could not have affected. Report the ones you walked and the count still carried; if the graph is unavailable, walk only this task's carry and say the sweep was skipped.
-
-## Step 5 — Close out: push + verified scorecard
-
-Runs on every completion, regardless of `ship_mode`.
-
-**(a) Push.** Skip if `no_push` or no remote is configured. Resolve the push policy via the `<PREFIX>-deploy` skill § Push policy: if pushing the current branch fires a prod CI deploy, pushing IS shipping — push only if Step 4 ran and its gate (or pre-authorization) approved; otherwise ask now (irreversible gate — ask at this moment even if an earlier gate timed out; park only if this ask goes unanswered). If push does not trigger prod, push now.
-
-**(b) Scorecard.** Verify each fact against reality — never echo handoff claims:
-
-| Fact | Evidence |
-|---|---|
-| Committed | `git log --oneline -5` shows the feature + capture + log commits |
-| Pushed | `git rev-list --count @{upstream}..HEAD` → 0, or "not pushed — <reason>" |
-| Deployed | curl the env url/health from the dev handoff (2xx), or "no deployable env" |
-| Logged | new entry present at top of `docs/project-log.md` (grep the title) |
-| Docs | pm handoff `Docs:` field; spot-check the file if `updated` |
-| Ref sync | `Reference Sync:` fields from all three handoffs |
-
-**(c) Restore stashed WIP.** If pre-existing WIP was stashed at Step 0, `git stash pop` it now and confirm it restored cleanly; report any conflict instead of resolving it silently.
+```markdown
+# Close-out report
 
 ## Done — the close-out report
 
@@ -291,7 +552,7 @@ One row each for: a parked gate, a gate decided on a **timeout** (labelled as au
 - a `custom-tests.yaml` entry **this run** recorded `blocked` → Step 0 of `/code`, `/fix`, `/pilot` (name the route: walked after a prod deploy, or open on a named trigger)
 - the git tree or a named stash → Step 0 entry hygiene and `/tidy`
 
-**Ranked, each with a recommendation.** Ten filings in a day read as ten equal rows unless the report says which two matter. `Item` carries the priority for a roadmap row — `<id> · high|medium|low`, the `**Priority:**` line the filing sets, which is also what `roadmap.md § Rank` reads — and rows are ordered by that rank rule. `Recommendation` is one of a closed set, and the reader is always given one: `queue` (filed at that priority — the priority *is* the recommendation), `fold into <id>` (a duplicate of an item that already exists — file nothing, name it), `hold until <trigger>` (a verification this run recorded `blocked`), `keep` or `discard — <why>` (the tree or a stash). `act now` is not in the set: that row is Open. Low rows may share one line — `3 low · queue: <id>, <id>, <id>` — never dropped, so the block stays a screen and still names every id.
+**Ranked, each with a recommendation.** Ten filings in a day read as ten equal rows unless the report says which two matter. `Item` carries the priority for a roadmap row — `<id> · high|medium|low`, the `**Priority:**` line the filing sets, which is also what `.claude/skills/roadmap/SKILL.md § Rank` reads — and rows are ordered by that rank rule. `Recommendation` is one of a closed set, and the reader is always given one: `queue` (filed at that priority — the priority *is* the recommendation), `fold into <id>` (a duplicate of an item that already exists — file nothing, name it), `hold until <trigger>` (a verification this run recorded `blocked`), `keep` or `discard — <why>` (the tree or a stash). `act now` is not in the set: that row is Open. Low rows may share one line — `3 low · queue: <id>, <id>, <id>` — never dropped, so the block stays a screen and still names every id.
 
 **No home → the row is Open.** And **needs you now → the row is Open even when it has a home** — filing it does not discharge it, and the id rides in that Open row's `Next` instead. Filing is for **scope** only — work someone would pick up later. Append it to `docs/roadmap.md` in the format `<PREFIX>-dev` step 1.5 defines (`**Id:**`, `**Added:**`, matching the convention the file already uses); the path is `EXEMPT` in PATH_MAP, so no skill load is needed. A parked gate, a timeout decision and a `fail` are **not** scope: they are this run's unfinished business and stay Open. Otherwise this block becomes a way to make Open look empty. Nothing emerged → write `None`.
 
@@ -303,11 +564,11 @@ One row each for: a parked gate, a gate decided on a **timeout** (labelled as au
 |---|---|
 | none | `Next: none — nothing open, safe to start a fresh session.` |
 | one | that row's `Next` |
-| two or more, **all carrying roadmap ids** | `Next: /pilot --items <id>,<id>` — ranked per `roadmap.md § Rank`, cited not restated |
+| two or more, **all carrying roadmap ids** | `Next: /pilot --items <id>,<id>` — ranked per `.claude/skills/roadmap/SKILL.md § Rank`, cited not restated |
 | two or more, **all parked gates** | `Next: /pilot --gates` — the gate names are permanent handles, exactly as ids are, and that mission re-measures each one before proposing anything |
 | two or more, **any without an id** | `Next: /pilot <goal naming the set>` — e.g. `/pilot close the 5 parked gates and 2 failing checks in Open` |
 
-**Whatever the line says, it also names the command for what this run filed.** Append ` · filed: <command>` for the roadmap items this run's Emerged block filed with `queue` — `/fix <id>` (`/code <id>` for a feature) for one, `/pilot --items <id>,…` ranked per `roadmap.md § Rank` for two or more. Filed work does not make the session unsafe to close, which is why it stays out of Open, but a report that files an exploitable flaw and ends `nothing open` leaves the reader to look the command up. Only this run's filings, never the standing backlog — that is `/roadmap`'s — and a `fold into`/`hold until`/`keep`/`discard` row adds nothing. Nothing filed → no suffix.
+**Whatever the line says, it also names the command for what this run filed.** Append ` · filed: <command>` for the roadmap items this run's Emerged block filed with `queue` — `/fix <id>` (`/code <id>` for a feature) for one, `/pilot --items <id>,…` ranked per `.claude/skills/roadmap/SKILL.md § Rank` for two or more. Filed work does not make the session unsafe to close, which is why it stays out of Open, but a report that files an exploitable flaw and ends `nothing open` leaves the reader to look the command up. Only this run's filings, never the standing backlog — that is `/roadmap`'s — and a `fold into`/`hold until`/`keep`/`discard` row adds nothing. Nothing filed → no suffix.
 
 **Two or more always proposes a batch.** `--items` takes permanent ids and would drop an unfiled row silently, which is why the id-carrying case is separate — but the answer to a mixed set is the **goal form**, which names the whole set, not one command that leaves the reader to re-derive the rest a row at a time. A report that knows about seven open things and offers one of them has made the reader the batching mechanism.
 
@@ -340,339 +601,18 @@ Rows this command produces that the test above places for you:
 
 ---
 
-## § /fix — fix.md (Claude Code)
+## § /pilot — references/lanes.md
+
+The discovered lane registry, `apply:` and `reversal:`. Read before routing to a discovered lane or on a `--gates` mission.
 
 ```markdown
----
-description: Investigate and fix a bug or performance issue through <PREFIX>-debug → <PREFIX>-dev → <PREFIX>-qa → <PREFIX>-pm
----
-
-# Bug Fix
-
-**Usage:** `/fix <description>` — the Step 0.5 gate states what will be verified and asks whether to ship after sign-off. `--prod` pre-answers Ship; `--no-push` pre-answers Hold and skips the close-out push; `--regression full|smart` pins the test scope that is otherwise resolved from the change itself.
-
-**Examples:**
-- `/fix pipeline table takes too long to load`
-- `/fix assessment status stuck on running after completion`
-- `/fix <description> --prod`
-
-## Gate policy (governs every AskUserQuestion in this command)
-
-If a question times out unanswered — the timeout is the user's own `askUserQuestionTimeout` setting, and it is a courtesy, never a mechanism: measured across 60 questions it did not fire once, so a question with nobody present waits until someone returns. A lane that must run unattended therefore **asks nothing** (`/pilot`'s standing mission; a loop's later firings, which inherit the first firing's answer). What follows governs a timeout that does fire — split by risk:
-- **Reversible** (confirm, ship choice, UAT-defer): proceed with the recommended default and label every downstream record `auto-selected on timeout — not user-confirmed` (handoffs, delivery log, final report). **Never present a timeout as user consent** — not to a subagent, not in a log, not in the report.
-- **Irreversible** (prod deploy; any push that fires a prod CI deploy): **park** — do not proceed and do not decide. End the turn stating exactly what awaits confirmation and how to resume; on the user's next message, resume from the parked step. Park only after actually asking at the moment of the irreversible action — never skip the ask because an earlier, unrelated gate timed out; the user may have returned.
-
-## Step 0 — Flags + entry hygiene
-
-**Flag parse (first):** if `$ARGUMENTS` contains `--prod`, set `ship_mode = prod`; if it contains `--no-push`, set `ship_mode = hold` and `no_push = true`. If it contains `--regression full` or `--regression smart`, pin `regression_mode` to that value. Strip every flag from the description used in every step below. If no ship flag is present, `ship_mode` is decided by the Ship question in the Step 0.5 gate; if no `--regression` flag is present, `regression_mode` is `auto` and the scope is resolved from the change itself (Step 0.5).
-
-**Entry hygiene:** run `git status --porcelain` and `git rev-list --count @{upstream}..HEAD` (report "no upstream" rather than failing when the branch has none). If the count is non-zero, say so in one line with the reason if you can see it — held commits are work that already passed review and is waiting on a decision, and **nothing else raises them**: a close-out's Open row dies with its session, and entry hygiene is the only step that runs before every task. Report, do not gate; if the held set overlaps the paths this task will touch, say that too, because the task is about to build on unshipped work. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it in the close-out step — the pre-handoff gate blocks the qa spawn on any dirty tree, so deferring the stash just moves the failure mid-pipeline. If the WIP overlaps paths this task will touch, do not stash it blind — tell the user and run `/tidy` scoped to the overlapping paths first, then resume here.
-
-**Open deferrals:** run `python3 .claude/graph/graph.py open-deferrals` and, if it returns anything, **split what comes back into three buckets before reporting it**: (1) a deferral whose `reason` names a *structural* fact — a component that only ships to prod, a journey that ends on a schedule, a cost- or quota-bound external call — can never be closed by a local run and is **counted, not listed** ("58 structurally unprovable: the worker declares no non-prod env, image generation is quota-bound"); (2) everything else with a reason is **closable** and gets listed; (3) a row with **no reason at all** is **unclassified** — counted separately and labelled as written before reasons were required. Never guess which of the first two an unclassified row belongs to: the text was never written and is not recoverable, so a guess would either inflate the backlog you act on or hide work in the count you ignore. New deferrals all carry a reason, so this bucket only shrinks. Without the split the list grows without bound as the same two facts re-defer on every task, and a number nobody reads is the same as no report at all. Then list the closable ones for the user in one line — these are verifications that are still unproven and nothing has passed since: either an earlier task formally deferred them, or a run recorded them `blocked` (which is what the vacuous-pass rule mandates when the assertion never got exercised). A blocked row carries its `reason` — the trigger that would close it — so quote that, not just the name. This read is the reason a deferral is an Emerged row at close-out rather than something the user has to hold: the three lanes that can discharge one — `/code`, `/fix`, `/pilot` — all open with it. Report, do not gate — **with one exception: if the same *fixable* blocker is named by 3+ open deferrals, or any single verification has been deferred 3+ times, say so and ask whether to fix the blocker first.** Repeated deferrals of that kind are not a backlog, they are one missing capability (usually a test environment) charging rent on every task that follows; five checks deferred across three deploys is how a feature ships unwalked. **Fixable means someone could build it** — seed data, an auth strategy, a `stack:` block, a missing non-prod env. A structural fact is not a blocker to escalate: a component that only ships to prod, or a journey that ends on a schedule, will produce deferrals forever and asking every third run is noise, not signal. Those are discharged by the post-deploy prod walk and by triggered follow-ups respectively — count them, never nag about them. Skip silently if the script is absent or exits non-zero. (Cheap by design — a few lines of output, not a file read; the Step 0.5 gate stays read-free.) Only the lanes that can turn a `blocked` into a `pass` run this read — `/code`, `/fix`, `/pilot`. `/tweak`, `/wrap`, `/revert` and `/tidy` persist no typed verifications and could not discharge one, so listing them there would be noise the user cannot act on.
-
-**Plan shortcut:** if the session contains a just-approved plan covering this fix **and that plan carries its own Verification / Acceptance section**, plan approval was the confirmation — omit the Confirm question from the Step 0.5 gate. Both halves are required: Confirm is the only place the derived verifications are shown, so omitting it on a plan that never stated an end state would ship a set the user has never seen — and with `--prod` or `--no-push` also pre-answering Ship, the gate would fall to zero questions.
-
-## Step 0.5 — Single gate: confirm the plan of record
-
-**Read-free step — do NOT read `custom-tests.yaml`, `test-commands.md`, or any reference file here.**
-
-First write the **acceptance statement**: one sentence naming the end state in the user's terms — who does what, and where they end up. **A bug report names a symptom; the acceptance statement names the journey that symptom sits in.** "Clicking them does nothing" is a broken step, not a goal — the goal is *"a user picks a look in the gallery and lands on the generate step with a pack built from it"*. Fixing only the reported symptom is how a run ends with the click working and the journey still dead-ending: ask what the broken step is *for*, and state where it ends. Derive it from whichever source applies:
-- **A plan exists** (the current session has a just-approved plan with a *Verification* / *Acceptance* section): the plan's outcome is the acceptance statement.
-- **No plan** (e.g. `/fix` invoked first thing in a fresh context): infer it from the task (`$ARGUMENTS`, with any flags already stripped) — the default fallback whenever no plan is in context.
-
-Then derive 2–3 **verifications** *from that statement*. Each must be a clause of the acceptance statement — never an independent thought about the diff. A plan's lines describe *how it's proven*; restate each as *what must hold* so it reads as a regression invariant. (A bug's verification becomes its never-regress-again invariant.)
-
-| Part of the acceptance statement | Type |
-|---|---|
-| The end state the user lands on | **E2E** — mandatory |
-| Each boundary the journey crosses (UI → API, API → stored data) | **Integration** |
-| Each surface the user acts on | **UX** |
-
-**The end-state verification is not optional, and it is the one that proves the fix.** A set that checks the repaired step but not where the user lands passes while the journey dead-ends — the reported symptom is gone and the feature still does not work. If nothing covers the last step of the statement, the *set* is wrong; fix it before asking. This is the whole point of deriving from an acceptance statement rather than from the bug report: the report names where the journey broke, never where it should end.
-
-**You derive the set — the user does not assemble it.** The gate states what will be verified and the free-text reply amends it; there is no pick-list, because choosing between checks you just derived is work the user should not have to do, and a picker invites dropping the end state one option at a time.
-
-**No behavioral surface is the only exemption.** A task that changes nothing a user or caller can observe (docs, comments, a rename with no observable effect) derives an empty set — then say so **and name why** in the Confirm text, so an empty set is a visible claim rather than a silent omission. Anything that changes behavior has an end state; "no check came to mind" is not the same fact as "there is nothing to check". A reported bug is behavior by definition, so an empty set here is nearly always wrong.
-
-Then ask in **one AskUserQuestion call** (at most two questions) — one gate interaction, so an AFK timeout costs the configured wait once for the whole run:
-
-1. **Confirm** (omit this question only when the plan shortcut applies):
-   - question: the plan of record, on its own lines —
-     ```
-     Done means: <the acceptance statement>.
-     Verifying: <assert> (E2E) · <assert> (Integration) · <assert> (UX)
-     Regression: <"resolved after implementation, from the paths actually changed" | "full — pinned by --regression" | "smart — pinned by --regression">
-     Investigate and fix?
-     ```
-     With an empty set, the `Verifying:` line reads `nothing — <why this task has no behavioral surface>`. Leading with the end state is the point: this is the user's chance to correct the *goal*, which is cheap here and expensive after dev has built to the wrong one.
-   - header: "Confirm"
-   - options:
-     - label: "Yes, proceed (Recommended)" — description: "Run <PREFIX>-debug root cause analysis, then fix through the full pipeline and verify exactly the checks above"
-     - label: "No, cancel" — description: "Stop here, do not investigate"
-2. **Ship** (omit when `--prod` or `--no-push` already decided it):
-   - question: "Ship after QA sign-off?"
-   - header: "Ship"
-   - options:
-     - label: "Ship (Recommended)" — description: "After a clean sign-off, deploy/push to prod at close-out without asking again. On projects where push fires prod CI, shipping = prod deploy."
-     - label: "Hold at UAT" — description: "End committed but not pushed/deployed; ship later with --prod or by asking"
-
-Branch on the answers:
-- Confirm = **Yes** or **timeout** → the stated set is the set. Gate policy: reversible — proceed on the recommended defaults, **except Ship, whose timeout default is always Hold** (shipping needs a real answer; holding is free to reverse), labeled `auto-selected on timeout — not user-confirmed`. Silence is acceptance *only because the set was shown* — which is why the plan shortcut may never omit Confirm on a plan that stated no end state.
-- Confirm = **No, cancel** → tell the user the fix was cancelled and stop (discard the other answers).
-- Confirm = **Other / custom input** → read the reply as exactly one of the rows below. When it could be read two ways, take the **earliest** matching row: re-asking costs one interaction, building to the wrong end state costs a pipeline.
-
-| The free-text reply… | Do |
-|---|---|
-| restates the goal or the end state | it is the **new acceptance statement** — re-derive the whole set from it, restate, and re-ask the gate **once** |
-| names, replaces, or removes checks | amend the set, then proceed without re-asking. The end-state rule still binds: if the amendment leaves the last step of the statement uncovered, say so and put a check back |
-| names test scope ("run full regression", "smoke only") | pin `regression_mode` to it and proceed |
-| declines automated verification ("I'll verify live") | the UAT-only path below |
-
-**Honor the user's answer.** A free-text reply that declines automated verification ("I'll verify live", "I'll test by eye") is a decision: record this task as `UAT-only`, capture nothing, and skip Step 2.5 — do not persist synthesized entries against the user's stated intent.
-
-Hold the resulting `{assert, type}` pairs in context — **do not write or commit anything yet**. For a verification the user supplied in free text, infer `type` from the wording (**UX** (frontend only) · **Integration** (backend: endpoint or stored data) · **E2E** (a UI action with a backend effect)).
-
-**Regression scope is not asked here, and not decided here.** At this point <PREFIX>-dev has not run, so there is no changed-path list and any answer would be a guess about a diff that does not exist yet. Carry the value pinned by `--regression`, else the default `regression_mode: auto`:
-- `auto` authorizes `<PREFIX>-test` to resolve the scope **once**, from the paths dev actually changed (see `<PREFIX>-test` → *Regression scope*). It resolves to `smart`, possibly widened by named priors — **`auto` can never become `full`.** That is not a detail: `full` is an order-of-magnitude decision, and twice now a run reached it without anyone asking for it, once for a ten-line change, once because the file it touched was covered by a check that had been blocked for weeks. Both times a weekly allowance went with it. The resolved value and its reason come back on the qa handoff's `Tests:` line.
-- **`full` is reachable only by a person typing `--regression full`, and it is priced before it runs.** When the flag is present, say in the Confirm question what it costs — `full` measured **8–17×** a `smart` run of the same size, and a `smart` 10-task mission measured 714M tokens — so the number is in front of the person who typed it. No flag, no `full`: an agent may report that it *would* widen and why, and that report is a line in the handoff, never a scope it took.
-- A **pinned** value binds in **both directions** — nothing downstream may widen it and nothing may narrow it (see `<PREFIX>-test` Rules — a full unit-suite re-run is not a permissible "superset").
-
-Capture the Ship answer as `ship_mode` = `prod` (Ship) or `hold`. A user-answered **Ship** is standing consent for the close-out — but it is conditional, and the conditions are verified mechanically at Step 5: it collapses back to a fresh ask if the run wasn't clean.
-
-## Step 1 — Investigate (<PREFIX>-debug)
-
-Use the <PREFIX>-debug skill to investigate the root cause before any code is written.
-
-Invoke the `<PREFIX>-debug` skill, then analyze the following bug or performance issue in <PROJECT>: $ARGUMENTS
-
-Complete all four phases:
-1. Root Cause Investigation — read errors, reproduce, check recent changes, gather evidence
-2. Pattern Analysis — find working examples, compare, identify differences
-3. Hypothesis and Testing — form theory, test minimally, verify
-4. Hand off to Step 2 with root cause clearly identified
-
-Do NOT write any fix until Phase 1–3 are complete.
-
-## Step 2 — Implement (<PREFIX>-dev)
-
-Once root cause is identified, spawn <PREFIX>-dev:
-
-Task:
-  subagent_type: <PREFIX>-dev
-  prompt: |
-    Fix the following in <PROJECT>: $ARGUMENTS
-    Root cause has already been investigated — implement the fix.
-    Complete the full <PREFIX>-dev workflow (domain skills, implement, deploy, Reference Sync).
-    Done means: <the acceptance statement from Step 0.5> — this is the task, not the diff that
-    approaches it. The journey's last step must be reachable by a user before you report complete.
-    A bug report names a symptom; the statement names the state the user should end in. Removing the
-    symptom without reaching that state is not a fix.
-    Verifications (these must hold when done): <the verifications captured in Step 0.5, or "none">
-
-While the agent runs, do **not** edit governed source files at the top level — concurrent writers make QA's diff unattributable.
-
-**Salvage protocol (applies to every subagent in this command):** if an agent returns **anything that is not a `## Handoff` block** — it died (watchdog kill, session limit, API error) **or** it ended its turn with an interim/progress status — do not absorb its role at the top level. **An agent that has not returned is running, however long it has been**: its transcript size, its silence and the clock are not signals — the transcript is written at the end, and a QA fanning out children is quiet for hours — so only a return without a handoff triggers this protocol, and a loop firing that lands mid-task declines and waits (a firing once "resumed" a QA that was mid-walk, judged dead from a 161-byte transcript). Inspect `git status` / `git log` to see what landed, then resume with a salvage prompt naming what is already done and which contract steps remain (quality checks, deploy, Reference Sync, commit, handoff). **The two resume mechanisms are not interchangeable — they differ in control flow, not just in cost:**
-
-- **SendMessage — preferred.** It preserves the agent's context, so a fix round returns a delta instead of re-deriving the task. But resuming a completed agent **always runs detached**: the call returns immediately saying it resumed in the background, and *that return is not a status* — it reports nothing about the work. Do not read it as progress, do not act on it, and never forward it as an interim update. **End the turn.** The real result arrives later as a task notification, and only the `## Handoff` inside it counts. Waiting through this on the same turn is impossible; that is the mechanism, not a failure.
-- **Re-spawn (`Agent`, `run_in_background: false`).** Blocks in-turn and hands back the handoff directly, but the fresh agent re-reads its way back to the current state. Use it when the agent's context is not worth preserving, or its transcript is unusable.
-
-The trap is that SendMessage's immediate return looks exactly like the interim return this protocol treats as a stall — so a top level that "checks the result" after resuming re-triggers salvage on an agent that is working fine, or reports a parked step as done. Resume, then wait for the notification; never infer state from the resume call itself. A salvaged completion counts as `Status: complete` for the steps below.
-
-A **parked** agent is the failure mode to watch for, because nothing announces it: an agent that backgrounds a long wait (a deploy watch, a poll loop) and returns control cannot be woken by that task — its completion notification is delivered here, to the top level, not to the dormant agent. So an interim return is never "still working"; it is a stalled step. Treat the missing `## Handoff` as the trigger and resume the agent. If the outstanding work is a wait, own the wait here and hand the result to the resumed agent — this is the same reason gates and the verification stack live at the top level: **only the top level has the channel** (to the user, to a held server, to an async completion).
-
-## Step 2.5 — Persist captured verifications
-
-Run unless the task was recorded `UAT-only` or the derived set was empty (no behavioral surface) — and only once <PREFIX>-dev has finished — `Status: complete` or a salvaged completion (captured verifications must never be lost to an agent death). If dev blocked, skip — nothing is written.
-
-For each captured `{assert, type}`, append an entry to `.claude/skills/<PREFIX>-test/references/custom-tests.yaml`:
-- `name` — auto-slug from the verification
-- `added` — today's date
-- `task` — `$ARGUMENTS`, written as a **single-quoted** YAML scalar (double any internal `'`) so colons / braces / double-quotes in the description can't break parsing
-- `assert` — the sentence, also **single-quoted** (double any internal `'`). Keep it **symbolic**: reference behavior and configured values ("matches the configured tolerance"), never volatile constants copied from code — those rot within days and QA then wastes a cycle correcting them
-- `type` — the inferred/confirmed type
-- `paths` — the dev `## Handoff` `Files changed:` list, reduced to **behavioral surface only**: paths whose change could actually break the assertion. Exclude **documentation-only paths** (`docs/**`, `*.md` outside source trees, and any other docs-only tree this project keeps) and **workflow-internal reference/doc paths** under `.claude/**` — neither can change runtime behavior, so neither may drive prior-selection. One exception: executable source that happens to live under `.claude/` (e.g. `.claude/skills/**/scripts/**`) **is** behavioral surface and must be kept. If this reduction would leave `paths` empty, the entry is mis-anchored — name the code the assertion is actually about instead of storing the docs that described it
-
-Commit: `test: capture verifications for <task-slug>` (the tree is clean post-dev — a clean follow-up commit). Keep the new entry `name`s to forward to Step 3.
-
-## Step 2.7 — Ensure verification stack
-
-Run only if verifications with type `UX` or `E2E` were captured. For each affected component (from the dev `Files changed:` paths), resolve its **first non-prod env** in `.claude/skills/<PREFIX>-deploy/references/deploy-config.yaml`:
-- Env has `deploy:` (ship-env) → nothing to do; <PREFIX>-dev already deployed it.
-- Env has `run:` (serve-env) → start or restart it here at the top level (subagents can't hold a server), applying the env's `stack:` block if declared — env-var overrides that wire the frontend to the local backend, the `seed:` command, the `auth:` strategy (see the deploy-config schema). Then poll the url until HTTP 2xx (up to ~60s). If still unreachable, surface the output and ask the user how to proceed before spawning <PREFIX>-qa.
-  **Freshness:** a server started before dev's commits is running stale code — restart it so QA tests the new code; a green check against a stale server is non-evidence.
-- Env has `invoke:` (invoke-env) → skip it. A run-to-completion job holds no process and answers at no address, so there is nothing to start and nothing to probe — probing it reports a component down that was never up. Continue to the component's **next** non-prod env, and fall through to the row below only when none is left.
-- No non-prod env → continue; <PREFIX>-test reports those verifications blocked and Step 3 handles it.
-
-**Loopback only**: start it bound to `localhost` per the deploy-config schema's loopback rule, and once it answers confirm the listener is not on every interface — `lsof -nP -iTCP:<port> -sTCP:LISTEN` shows `127.0.0.1` or `[::1]`, never `*`; a `*` listener is stopped at once and restarted on loopback, or reported if it cannot be. Note the process group and port of every server you start or restart: the pm step stops them.
-
-## Step 3 — Review & Test (<PREFIX>-qa)
-
-After <PREFIX>-dev completes, parse its `## Handoff` block — and keep its `Roadmap:` ids: they are the Emerged rows for scope the agent tracked, and nothing else carries them out of the subagent:
-- `Status: complete` → spawn <PREFIX>-qa with `mode=initial`.
-- `Status: blocked` → tell the user dev blocked with `Notes:` and stop.
-
-**Pre-ground qa and pm with one graph call.** Run `python3 .claude/graph/graph.py blast <the dev Handoff Files changed list> --ids <the roadmap ids this task carries, if any>` **once, here**, and paste its text output into the qa prompt below and the pm prompt in the next step under `Graph blast:`. It is the pack `<PREFIX>-test` (prior selection, regression scope) and `<PREFIX>-pm` (roadmap linkage) would each otherwise spend a turn querying mid-context; pasted into the prompt it sits in the part of their context that is cached. Skip the line silently if the script is absent or exits non-zero — the agents then query as they always have.
-
-Task:
-  subagent_type: <PREFIX>-qa
-  prompt: |
-    Run code review (<PREFIX>-review) and tests (<PREFIX>-test) for the most recent changes. mode=initial
-    regression_mode: <auto | smart | full, from Step 0.5 — `auto` unless --regression pinned it>
-    Graph blast: <the text output of the blast call above — omit the line when it did not run>
-    Done means: <the acceptance statement from Step 0.5> — walk it end to end and report where it
-    actually lands. Green on the individual checks while the journey dead-ends is a `blocked`, not a
-    sign-off; the assertions are evidence for the statement, never a substitute for it. The original
-    symptom being gone is not the same as the end state being reached — check the latter.
-    New verifications this task: <names from Step 2.5, or "none">
-    Changed paths: <the dev Handoff `Files changed:` list>
-    Sign off when quality gates pass.
-
-After <PREFIX>-qa returns, parse its `## Handoff` block:
-- `Status: signed-off` → continue to Step 4.
-- `Status: signed-off-with-deferrals` → **first check what is being deferred.** Hop-level checks (a boundary, a surface) defer normally. If a deferral covers the **end state** of the acceptance statement, the journey is unproven, and what happens next depends on *why* — which `deploy-config.yaml` already answers, so read it rather than judging:
-  - **A non-prod env that can answer exists** — one declaring a `url:` — and the end state still wasn't walked → the gap is fixable and is being avoided. Do not offer the deferral. Say which journey cannot be walked and what is missing (usually seed data, auth, or a `stack:` block), and ask whether to build that or stop. **This is the only case that blocks.**
-  - **No non-prod env declares a `url:`** — the component ships only to prod, or every non-prod env it has is a job that runs to completion and answers nowhere → nothing was avoided; the project cannot prove this before shipping and never could. Carry the end-state check forward as `prod-walk: <verification name>` into Step 5 and continue. It is **not** discharged here and **not** handed to the user.
-  - **The end state is triggered out-of-band** (a schedule, a webhook, an external callback) → it cannot be walked on demand at any point in this run. Defer it, but only with a **named trigger, expected observable, and where to look** (e.g. "next 03:00 run writes a summary row for yesterday; check the jobs collection"). A deferral without those three is not a deferral, it is a shrug — send it back rather than accepting it.
-
-  Otherwise ask via AskUserQuestion: "QA is clean except these verifications no environment can run: `<UAT-deferred list with reasons>`. Defer to UAT and continue, or stop?" On **Defer** — carry `UAT-deferred: <names> (user-confirmed)` into the Step 4 pm prompt and continue. On timeout — reversible gate: continue, but carry `UAT-deferred: <names> (auto-accepted on timeout — not user-confirmed)`. On **Stop** — halt and report. Never re-spawn qa to relabel its handoff — the deferral status IS the sign-off vocabulary.
-- `Status: blocked` with code-fix `Notes:` → re-spawn <PREFIX>-dev with the fix request, then on dev complete re-spawn <PREFIX>-qa with `mode=retest` (review already passed, run tests only) — passing **the scope qa resolved on the first pass**, taken from its `Tests:` line, never `auto` again. Re-sending `auto` would let the scope flip mid-task, and the delivery log records one `regression=` value for the task. Repeat until signed-off or user aborts.
-
-## Step 4 — Log & Docs (<PREFIX>-pm)
-
-After <PREFIX>-qa signs off (either signed-off status), capture its `## Handoff` block verbatim and pass it to pm under `**QA-evidence:**`:
-
-Task:
-  subagent_type: <PREFIX>-pm
-  prompt: |
-    Verify QA phases ran. Write delivery log via <PREFIX>-log. Update docs if architectural changes were made.
-    Feature commit: <the dev Handoff `Commit:` hash — the delivery-log hash, not any later bookkeeping commit>
-    UAT-deferred: <names + how confirmed, from Step 3 — omit line if none>
-    Decisions: regression=<the scope qa resolved, smart|full> (<agent|user|timeout> — `agent` when Step 0.5 carried `auto`, `user` only when --regression pinned it) · ship=<prod|hold> (<user|timeout>)<append ` · defer=accept (<user|timeout>)` when the Step 3 deferral gate ran>
-    Changed paths: <the dev Handoff `Files changed:` list>
-    Graph blast: <the same text pasted into the qa prompt — omit the line when it did not run>
-
-    **QA-evidence:**
-    <paste the full ## Handoff block returned by <PREFIX>-qa, verbatim>
-
-**Then stop the verification stack.** Once pm has returned, stop every serve-env the ensure-stack step started or restarted — kill its process group and confirm its port is free. Nothing after pm needs it: the prod deploy and the prod walk run against prod, and a dev server left up keeps a seeded test user and any auth bypass reachable for as long as nobody remembers it. A server that was already running and only reused is left as found. The one exception is the user asking, in this run, to keep it up to look at it themselves — then it stays, and the Status row says so with its url.
-
-## Step 5 — Deploy to prod (only if `ship_mode: prod`)
-
-Run only if `ship_mode = prod` (from the `--prod` flag or the Step 0.5 Ship answer). After <PREFIX>-pm has logged, invoke the `<PREFIX>-deploy` skill **here at the top level** (not via a subagent) with `target=prod`. It runs the fill-in pass, builds the gate context, and gates via `AskUserQuestion` — which works because this is the top level. Running after sign-off and any retest loop means it deploys the final, signed-off code.
-
-**Pre-authorization.** If the user answered **Ship** at the Step 0.5 gate (not a timeout default), pass `preauth: user shipped at Step 0.5` to the skill **only when all of these hold** — verified now, not assumed:
-- QA status is `signed-off`, or `signed-off-with-deferrals` where the deferral was **user-confirmed** (not auto-accepted on timeout);
-- no gate in this run was auto-decided on timeout;
-- the commits being shipped are exactly the reviewed set (nothing landed after QA's sign-off except the capture/log commits).
-
-When any condition fails — or Ship was a timeout default — the skill gates normally (ask; on no answer it returns `gate: unanswered — parked` → park per the Gate policy; never decide a prod deploy on the user's behalf). If no `prod` env is declared or the user declines, report that and finish at UAT.
-
-**Prod walk (run when Step 2 carried a `prod-walk:`, or when any prod-only deferral covers what this deploy just shipped).** After the deploy succeeds, walk the acceptance statement against prod **here at the top level** and report where it lands — the same end-to-end trace qa would have run, against the only environment that can host it. This is the whole point of the prod-only branch: a project that cannot prove a journey before shipping proves it immediately after, using the access this pipeline already has. Handing the user a checklist for a flow you can reach yourself is not a verification, and "I have prod access but asked you to click it" is the failure this step closes. Record the outcome in the scorecard and update the verification's `last:` accordingly — pass discharges it, failure opens a `/fix` with the journey as its acceptance statement. If prod genuinely cannot be reached from here (no credentials, human-only auth), say so explicitly and name what the user must click — a checklist is the fallback, never the default.
-
-**Then drain what this deploy made provable.** A prod-only check is discharged by *a* prod deploy, not only by the task that first deferred it — so on a project that habitually holds at UAT, those checks accumulate forever while every `--prod` run walks one and leaves the rest. Run `python3 .claude/graph/graph.py blast <the paths this deploy shipped>` and walk every still-open prod-only deferral it returns, exactly as above. **The shipped paths are the bound** — do not walk the whole backlog, and never re-walk a check this deploy could not have affected. Report the ones you walked and the count still carried; if the graph is unavailable, walk only this task's carry and say the sweep was skipped.
-
-## Step 6 — Close out: push + verified scorecard
-
-Runs on every completion, regardless of `ship_mode`.
-
-**(a) Push.** Skip if `no_push` or no remote is configured. Resolve the push policy via the `<PREFIX>-deploy` skill § Push policy: if pushing the current branch fires a prod CI deploy, pushing IS shipping — push only if Step 5 ran and its gate (or pre-authorization) approved; otherwise ask now (irreversible gate — ask at this moment even if an earlier gate timed out; park only if this ask goes unanswered). If push does not trigger prod, push now.
-
-**(b) Scorecard.** Verify each fact against reality — never echo handoff claims:
-
-| Fact | Evidence |
-|---|---|
-| Committed | `git log --oneline -5` shows the fix + capture + log commits |
-| Pushed | `git rev-list --count @{upstream}..HEAD` → 0, or "not pushed — <reason>" |
-| Deployed | curl the env url/health from the dev handoff (2xx), or "no deployable env" |
-| Logged | new entry present at top of `docs/project-log.md` (grep the title) |
-| Docs | pm handoff `Docs:` field; spot-check the file if `updated` |
-| Ref sync | `Reference Sync:` fields from all three handoffs |
-
-**(c) Restore stashed WIP.** If pre-existing WIP was stashed at Step 0, `git stash pop` it now and confirm it restored cleanly; report any conflict instead of resolving it silently.
-
-## Done
-
-Report per `code.md § Done` — the same five blocks (Verdict · Learned · Status · Open · Emerged) and closing line, the same closed status words, the same writing rules. Nothing about this lane changes the shape.
-
-**This run's rows.** The Status rows for deploy / push / log / docs / ref-sync are the Step 6 scorecard facts, each checked against reality there. The root cause `<PREFIX>-debug` found belongs in the Verdict line — one clause, so the user knows what broke, not how it was traced. Ship state, a serve-env started at Step 2.7, a regression scope the pipeline worked out, any children qa fanned out to, an undischarged `prod-walk:`, and a `UAT-only` task are handled exactly as in `code.md § Done` — including that the first three are Status rows, not Open ones.
-```
-
----
-
-## § /pilot — pilot.md (Claude Code)
-
-```markdown
----
-description: Autonomous multi-task run — decompose a goal into tasks, route each through the right lane (full pipeline or tweak), and work unattended until the goal is met. One up-front gate, no mid-run questions, single batched close-out. With no goal it runs the standing mission — whatever the project's own stores say needs doing next.
-whats-up-store:
-  reads: .claude/pilot/last-run.json — the newest run's marker (ts, mode, verdict, runnable_left) — .claude/pilot/running, present while a run is in flight, and `bash ~/.claude/usage-snapshot.sh --read`, the allowance figures a run reads before starting work
-  healthy: last-run.json absent → n/a (no run has happened yet); else its verdict is not `failed` and either its ts is within 2 h, or its runnable_left is 0 **and the roadmap and unproven-work stores this reader just read are themselves empty** — a marker's 0 is a claim about the moment it was written, and work landing since is exactly when a loop that stopped firing still reports healthy, which is the failure this store exists to name. Also, `usage-snapshot.sh --read` prints a figure rather than `unknown` for at least one window — an `unknown` from a session that has been working means the status-line wrapper that keeps the figures current has come undone, so every run from now on reports its allowance as unknown, correctly and forever, and nobody notices; `Next` is the install step that re-wires it. Read it **from a session that has done work**, since a brand-new one legitimately has no figures yet. Nothing gates on this, here or anywhere — a check-in is simply where a person is present to fix it
-  live: .claude/pilot/running present, under 6 h old, and not older than .claude/pilot/limit-hit from the same session — a marker the limit-mark.sh hook has outdated is a run the allowance killed, reported as `killed by <error_type> at <ts> — resumes on the next /pilot in that session`, never as busy
-  when-bad: degraded
----
-
-# Pilot
-
-**Usage:** `/pilot <goal>` — a batch of work (e.g. open roadmap items matching a filter) or a target state to reach (improve an area until measurable criteria pass). **`/pilot` alone runs the standing mission**: the task list is what `/whats-up` would report, ranked, so `/loop 30m /pilot --max-tasks 1` keeps a project moving with nobody typing. **Use a fixed interval, never the self-paced form**: a self-paced loop's only heartbeat is the wake its last turn scheduled, so when that turn is refused at the usage limit nothing is left to fire and the loop dies until a person returns; a fixed interval fires regardless, fails cheaply while the window is spent, and picks the mission back up on the first firing after the reset. Flags: `--max-tasks N` caps the run (default 10; on the standing mission a cap equal to `/whats-up`'s executable Open rows runs exactly the unfinished business and none of the backlog, which is how its `All:` line is built); `--items <id>,<id>` runs exactly those roadmap items (how `/roadmap` hands over a set); `--gates [<name>,<name>]` re-measures parked verdicts and settles them (all of them, or just the named ones); `--deferrals [<name>,<name>]` re-walks blocked or deferred verifications (all of them, or just the named ones); `--prod` pre-answers Ship; `--no-push` pre-answers Hold and skips the close-out push; `--grant <unit>=<N>` (repeatable) pre-answers Budget for a metered lane; `--regression full|auto` opts the whole mission out of the fixed `smart` scope.
-
-**Examples:**
-- `/pilot` — the standing mission: finish what is started, re-walk what became provable, close what died, then the ranked backlog
-- `/loop 30m /pilot --max-tasks 1` — the same, every half hour, in a session you leave open; a firing that lands mid-tick declines on the run marker and the next one continues
-- `/pilot implement all open roadmap items`
-- `/pilot work through the high-priority roadmap items --max-tasks 5`
-- `/pilot --gates` — re-measure every parked verdict, close the dead ones, batch the rest
-- `/pilot improve <area> until <measurable criteria> --prod`
-
-## Autonomy contract
-
-After the single Step 1 gate, the run is unattended until close-out:
-- A run is **unattended** when no person answered its gate: the standing mission asks none (Step 1), and a flagged or goal mission's gate timed out. A later loop firing that inherits the first firing's answer (Step 1, *A loop asks once*) is attended — a person answered that plan. Unattended is a property of the run, decided once at the gate, and three rules key on it — what the run may conclude (the ladder in Step 2), which model its subagents run on (Step 2, *Models*), and which questions reach a person at close-out (Step 3 `(a0)`).
-- Reversible decisions are made autonomously with the recommended default and labeled `auto-decided (pilot run — not user-confirmed)` in every downstream record — never presented as user consent; in the delivery log's `**Decisions:**` line the provenance token for any of them is exactly `pilot-auto`, never a paraphrase such as `measured` or `auto`, because `open-gates` and the log's checklist compare that word. This extends to **concluding an open claim**: a task that re-measures one states a verdict from the ladder in Step 2, and the run itself concludes every verdict that takes no irreversible action. What separates the two is not who raised the question but what the answer does.
-- Irreversible actions (prod deploy; any push that fires prod CI) never happen mid-run — they are deferred to close-out, where they gate normally per the `/code` Gate policy (ask at the moment of the action; park on silence).
-- The user may interrupt at any time; on their next message, resume from the current task using the mission state in context.
-
-## Step 0 — Flags + entry hygiene
-
-**Flag parse (first):** `--max-tasks N` → cap the task list at N (default 10); `--items <id>[,<id>…]` → the task list is these roadmap `**Id:**` values, in this order (see Decompose); `--gates [<name>[,<name>…]]` → the task list is parked verdicts (see Decompose); with no names, every one `open-gates` returns; `--deferrals [<name>[,<name>…]]` → the task list is blocked or deferred verifications (see Decompose); with no names, every one `open-deferrals` returns; `--prod` → `ship_mode = prod`; `--no-push` → `ship_mode = hold` and `no_push = true`; `--grant <unit>=<N>` (repeatable) → seed the resource ledger below; `--regression full|auto` → the mission's test scope, otherwise `smart`. **`--regression full` on a mission is refused unless the Confirm answer carried its price** — it re-covers every prior per task *and* per fix cycle, measured 8–17× a `smart` mission of the same size, and a `smart` 10-task mission already cost 714M tokens; `auto` on a mission resolves per task to `smart` and can never reach `full`. Strip all flags from the goal used below. **No goal and no store flag → the standing mission** (see Decompose): `ship_mode = hold`, and the gate is not asked. Otherwise, if neither ship flag is present, `ship_mode` is decided by the Ship question in Step 1.
-
-**One run at a time.** If `.claude/pilot/running` exists and is under 6 h old, another `/pilot` — a loop iteration, a headless shift, a check-in in a second session — is active in this repo: report "a run is active since <its timestamp>" and stop, because two missions committing into one tree is a collision nothing below can untangle. A marker older than 6 h is a killed run: say so, remove it, continue. **So is a marker older than `.claude/pilot/limit-hit` from the same session** (the `limit-mark.sh` hook writes that file — timestamp, session id, `error_type` — on the turn a limit refuses, which no agent can report): that run died on the allowance; treat it as your own unfinished run below rather than waiting six hours for the marker to age out, and quote the `error_type` line in the entry report, since whether a claude.ai usage limit arrives as `rate_limit` is a fact the docs leave open and this file settles. **A marker that is your own is a resume, never a decline**: if this session dispatched the run the marker belongs to and never reached Step 3 `(d)` — a subagent died on a usage limit, a loop firing landed mid-task — then this firing continues that mission: apply the salvage protocol to whatever never returned a handoff, finish the task in flight, close out, and only then take new work. Declining your own run is how a fixed-interval loop stalls for six hours after a limit reset while the marker ages out. Otherwise write it now — two lines, the timestamp and **this session's id**: `mkdir -p .claude/pilot && printf '%s\n%s\n' "$(date -u +%FT%TZ)" "$CLAUDE_CODE_SESSION_ID" > .claude/pilot/running` — and let Step 3 `(d)` remove it; the `pilot-cleanup.sh` hook removes it on session end too, but only when the second line is its own session, because two sessions in one repo are normal and a blind removal would unmark another mission. In the same command write the run's record skeleton, so every per-task figure Step 2 records lands in **this** run's file rather than the previous run's: `.claude/pilot/last-run.json` = `{"ts": "<now>", "session_id": "$CLAUDE_CODE_SESSION_ID", "mode": "standing|flagged|goal", "unattended": true|false, "verdict": "running", "per_task_cost": {}}` — `(d)` finalises the rest. Measured before this: an install's `ts` read 16 hours older than the file's own mtime, because Step 2 had been writing into the last finished run's record. The directory is gitignored and `EXEMPT` in `governed-paths.conf`; nothing in it is mission state.
-
-**Entry hygiene:** run `git status --porcelain` and `git rev-list --count @{upstream}..HEAD` (report "no upstream" rather than failing when the branch has none). If the count is non-zero, say so in one line with the reason if you can see it — held commits are work that already passed review and is waiting on a decision, and **nothing else raises them**: a close-out's Open row dies with its session, and entry hygiene is the only step that runs before every task. Report, do not gate; if the held set overlaps the paths this task will touch, say that too, because the task is about to build on unshipped work. If tracked files are already dirty, stash the pre-existing WIP **now** with a named stash (`git stash push -m "preexisting-wip"`), tell the user, and restore it at close-out. If the WIP overlaps paths this mission will touch, do not stash it blind — tell the user and run `/tidy` scoped to the overlapping paths first, then resume here.
-
-**Open deferrals and gates:** run the same read `.claude/commands/code.md § Step 0` defines — `python3 .claude/graph/graph.py open-deferrals` — plus `python3 .claude/graph/graph.py open-gates`, and report each as a line, with the same silent skip when the script is absent or exits non-zero. On the standing mission these two reads are part of the `/whats-up` read Decompose runs — run that once there and report its Status rows here, rather than reading the same stores twice. A mission is the main way work starts, so leaving it out would mean nothing raises a deferral for the whole run. Report only: the routine list does **not** go into the Step 1 gate, which already carries a task per line. Report a gate with the condition and age `open-gates` returns, and name `/pilot --gates` as what settles them — a gate waiting on a trigger that has not fired is not a decision anyone can make today, and reporting it as one is why they accumulate. The one exception is that command's escalation — the same *fixable* blocker named by 3+ open deferrals, or a single verification deferred 3+ times: add it as a line in the Confirm question, so the user can redirect the mission to the blocker through the automatic "Other" rather than spending the run on top of it.
-
-**Allowance:** run `bash ~/.claude/usage-snapshot.sh --read` and report its lines verbatim. That script owns every arithmetic rule — which sessions to believe, how to reconcile them, when a figure is dead — so **never read the snapshot files directly and never recompute a figure it prints**. The aggregation is not optional detail: one machine ran 12 concurrent sessions and a shared file flipped between 46% and 7% for the same window four seconds apart; a run that reads raw files will read one of those. `unknown` on any line → say so and **proceed** — a mission that halts because a status-line script did not run halts for no reason, and a fresh session has no figures until its first API response. Report only; the decision is Step 2's. Nothing here gates.
-
-**And say how this run recovers if the allowance runs out**, in the same line, because it is decided now and not later. A `/pilot` orchestrator sits idle waiting on subagents, so when the limit lands it is a **background agent** that dies, and the turn that reports that death is not a task Claude Code's auto-continue can resume — measured twice: 2h19m and 2h53m of idle time after the allowance had already returned, once with `autoContinueAtUsageLimit` on and only a single refusal. **A bare `/pilot` therefore has no recovery at all.** The fixed-interval loop form is the only one that comes back by itself, and Step 0's own resume clause is what makes it safe. So on a run of 3+ tasks started bare at a terminal, say in one line: this run will not resume itself; `/loop 30m /pilot --items <the list> --max-tasks 1` would, and `caffeinate -i` stops the machine sleeping through the reset — the branch that waits for a keypress instead of continuing.
-
-## Step 1 — Mission plan + single gate
-
-**Decompose.** Build the task list from whichever source applies:
-- **Pre-selected items** (`--items <id>[,<id>…]`, how `/roadmap` hands over a set): the ids **are** the selection, already ranked — take them in the given order and read each item's body in `docs/roadmap.md` for its description. Skip selection and ranking only; everything below still applies to each item, including the per-task derivation and the split rule. An id that matches no roadmap item is reported at the gate and dropped — never silently guessed at; an id whose item is no longer open (`done`, or closed by a later entry) is skipped and reported the same way, which is what lets a fixed-interval loop over `--items` take one id per firing and run out rather than repeat the first. **An id other items name as their `**Parent:**` is an umbrella** (what `/blueprint` writes): it expands in place to its open children in `**Depends on:**` order and is never run itself — its body is the plan's context and decisions. A child whose `**Depends on:**` names a sibling that failed in this run is skipped and reported, never started on top of it.
-
-  **The decisions block follows the child, not the address.** Any task whose item carries a `**Parent:**` reads that parent once and pastes its `**Decisions made here so the executor does not:**` block into the dev prompt under `Plan decisions:` — whether the mission was given the umbrella, the child list, or one child by name. A subagent then reads it from the cached prefix instead of re-deriving a choice the planner already made, and the plan's own executor rule (deviate-and-record when attended, `blocked — decision <n> contradicted` when not) travels with it. Keying the paste to the umbrella address instead left one child of eight dispatched with no decisions at all on a real mission, because the plan's `**Run:**` line named the children.
-- **A store of open claims** (`--gates` today): the flag names a store, the store's query returns the claims, and each returned claim is one task. Nothing else about the mission changes. A **claim** is a record plus the condition that would resolve it — a parked verdict, and later a deferral or a stalled item; they decay the same way, so they decompose the same way and this bullet takes each new store as another row, never as a second mechanism.
-
-  | Flag | Store | Query | Fallback when the query cannot run |
-  |---|---|---|---|
-  | `--gates [<name>…]` | the delivery log | `python3 .claude/graph/graph.py open-gates` | `grep -n '=parked' docs/project-log.md`, reconciled by hand exactly as `.claude/commands/whats-up.md § Step 2` describes |
-  | `--deferrals [<name>…]` | `custom-tests.yaml` and the delivery log | `python3 .claude/graph/graph.py open-deferrals` | read `custom-tests.yaml` for every `last.status` of `blocked` or `fail`; a deferral's condition is its `last.reason` |
-  | *(no goal, no flag)* — the **standing mission** | every store `/whats-up` reads | `.claude/commands/whats-up.md § Step 1–2` — the read and the reconcile, run once, exactly as that command runs them; its `Open` rows and `Emerged` counts are the claims | that command's own table names a fallback per store |
-
-  Each task **re-measures the claim's condition and states one verdict from the ladder in Step 2** — that is its acceptance statement. A `--deferrals` task's condition is the verification's `last.reason`, and its verdict is the verification's outcome: it re-walks the check exactly as `<PREFIX>-test` would and records `last:` through `run-checks.py record`; `pass` closes it, `blocked` restates the trigger, and a `fail` is a pipeline task on the next run, not this one's problem to fix. A check the re-measure finds **cannot be walked by anyone** — its baseline code is gone, its subject removed, a newer check owns the assertion — is the ladder's `superseded` / `expired` / `moot`: the run records it `retired` with the measurement that decided it as the `reason`, `(pilot-auto)`, and it closes. Never `pass` for a walk that did not happen, never left `blocked` to be re-raised by every later run, never deleted from `custom-tests.yaml` — the log entry that deferred it still names it. A check that *could* be walked but costs money or a person is not moot; it stays `blocked` and its cost is the trigger.
-
-  **The standing mission's tasks are `/whats-up`'s rows, filtered to what a run can do.** Take its `Open` rows in their order and keep each one whose `Next` this run could execute, mapped onto the shapes above rather than onto anything new: a parked gate becomes a claim task exactly as `--gates` shapes it; a recorded `fail` or a closable `blocked` becomes a pipeline task whose acceptance statement is the verification's own `assert`; a deferral whose recorded trigger has since fired becomes a re-walk task as `--deferrals` shapes it; an in-progress roadmap item becomes an item task as `--items` shapes it. Then append the `Emerged` roadmap backlog ranked per `.claude/commands/roadmap.md § Rank` as further item tasks, up to `max_tasks` — features included; the roadmap's own `**Priority:**` and `**Status:**` are the only ordering, and a person changes what a run picks by changing those, never by editing this command. A row only a person can act on — `verify live`, a `resume here`, a decision with nothing left to re-measure — is carried to the mission report untouched: never turned into a task, never dropped. The task is read-only, so it needs no serve-env and no QA cycle; route it to the lane that owns whatever the condition measures, else the lane named in the claim's own log entry, else `pipeline`, and let it exit at that lane's declared `close-out`. **Claims whose refreshed evidence is the same set are one task, and that task answers every one of their names verbatim** — one repair is routinely parked under two names, and one lane routinely parks the same name once per run; answering only the name you happened to read leaves the others parked forever. A named claim the query does not return is reported at the gate and dropped, never guessed at.
-- **Roadmap-shaped goal** (the goal names the roadmap or matches its items): read `docs/roadmap.md`, select the open items the goal covers, and rank them per `.claude/commands/roadmap.md § Rank` — one rank rule, stated once, so the order a user saw in `/roadmap` is the order a mission runs.
-- **Target-state goal** ("improve X until Y"): derive 2–3 **success criteria** — measurable checks, each with a command or observable that decides pass/fail — then derive the initial tasks that most plausibly move toward them. The loop re-plans between tasks; the criteria, not the initial list, define done.
-- **Plain batch** (an explicit list of things to do): one task per item.
-
-Cap at `max_tasks`. For each task derive: a one-line description, an **acceptance statement** (the end state in the user's terms — where the journey lands, not what changes), 1–3 verifications derived *from that statement* (`{assert, type}` — UX / Integration / E2E, same vocabulary and same mandatory end-state rule as `/code` Step 0.5), and a **lane**. The end-state check matters more here than anywhere: this lane runs unattended, so a task that ships a half-journey has no one present to notice it dead-ends.
+# Lanes
 
 **Lane registry — discovered, not hardcoded.** Two lanes are always present:
 - `pipeline` — features, bug fixes, schema/API/auth changes, anything needing review depth. Default when unsure.
 - `tweak` — small inline-verifiable changes (pixel nudges, copy, config values) per the `/tweak` lane rules.
 
-Projects add their own. Scan `.claude/commands/*.md` frontmatter for a `pilot-lane:` key; each one that declares it is a lane this mission may route to:
+Projects add their own. Scan `.claude/skills/*/SKILL.md` and `.claude/commands/*.md` frontmatter for a `pilot-lane:` key; each one that declares it is a lane this mission may route to:
 
 ```yaml
 pilot-lane:
@@ -692,32 +632,16 @@ pilot-lane:
 The lane's **name is the command's filename** (`<command>.md` → lane `<command>`) — there is no separate name field to drift. Route a task to a discovered lane only when its `routing` rule matches better than `pipeline`/`tweak`; `pipeline` remains the default when unsure. A lane whose frontmatter is malformed or whose `spend` is unparseable is **skipped with a warning at the gate**, never guessed at. Show each task's lane in the gate list so the user sees the routing before launch.
 
 Discovered lanes are project-owned: this command knows how to *find and dispatch* them, never what they do.
+```
 
-**Split broad tasks (do this before the gate).** A single item that applies **one uniform change across an enumerable set** — phrased with "~N", "each", "all/every X", plural targets, "across the <collection>" — is really N sub-tasks. Bundled into one pipeline task it balloons the dev agent past a healthy context window and hands QA an unreviewable diff (the observed failure: one "invert ~9 modules" item ran 49 turns / 222k context / 41 min and had to spawn its own sub-agents to cope). For each such task, enumerate the concrete target set, then:
-- **Split into bounded chunks** — group the set so each chunk is one coherent review unit (rule of thumb: ≤~5 files of the same uniform change per chunk), one `pipeline` task per chunk, sharing the parent's verifications. This is the **default** — a bounded pipeline unit keeps context healthy and the per-task diff reviewable.
-- **Cap tension:** if splitting would exceed `max_tasks`, don't silently drop chunks — keep the item **whole** but tag it `[large]` in the gate list with the target count, so the user sees the ballooning risk and can raise `--max-tasks` or pre-split via "Other". Never split a task whose changes are genuinely interdependent (a single edit touching N files together) — that's one review unit, not a set; tag it `[large]` instead. **An unattended run does not run a `[large]` item at all**: with nobody to raise the cap or pre-split, it becomes an Open row in the report with `Next: /pilot --items <id> --max-tasks <N>`, because a 49-turn dev nobody watches is the failure this rule exists to prevent.
+---
 
-**Gate.** Ask everything in **one AskUserQuestion call** — the only planned interaction of the run, and the last: nothing after it asks, except an irreversible gate that parks on silence and, on a `--gates` mission, the disposition table at `(a0)`. The scorecard's `Questions` row counts what was actually asked against this:
+## § /pilot — references/allowance.md
 
-1. **Confirm**:
-   - question: "Fly this mission? <goal> — <N> tasks: <numbered task list with lanes and verifications; split chunks shown as sub-items; any `[large]` tag with its target count; success criteria if any> · Regression: <the mission scope> — <N> tasks x <scope>"
-   - header: "Confirm"
-   - options:
-     - label: "Launch (Recommended)" — description: "Run all tasks unattended; everything holds at UAT until close-out"
-     - label: "No, cancel" — description: "Stop here"
-   - The automatic "Other" field lets the user reorder, drop, or add tasks and amend verifications or criteria — incorporate, restate the updated plan, and re-ask the full gate once.
-   - **A claim's disposition is never stated here.** On a store-targeted mission this question settles *scope* — which claims get re-measured — and nothing else. The only evidence available now is the parked evidence, which is the evidence this lane exists to distrust: a disposition offered from it is a guess the run is about to contradict, and the user who accepts it then gets asked the same question again at `(a0)` and reasonably reads it as a repeat. List each claim with its age and what it currently says would answer it, and say in one clause that the recommendations come after the re-measure. Scope once, dispositions once — never the same decision twice.
-2. **Ship** (omit when `--prod` or `--no-push` already decided it):
-   - question: "Ship after the mission completes clean?"
-   - header: "Ship"
-   - options:
-     - label: "Ship (Recommended)" — description: "If every task signs off clean, deploy/push to prod at close-out without asking again. On projects where push fires prod CI, shipping = prod deploy."
-     - label: "Hold at UAT" — description: "End committed but not pushed/deployed; ship later with /code --prod or by asking"
+The resource ledger, the regression price quoted in tokens, the allowance line in the gate, and why a run stops between tasks. Read while composing the Step 1 gate.
 
-3. **Budget** (include only when the task list routes to a lane whose `spend` is `metered:<unit>` **and** no `--grant` already covered that unit):
-   - question: "Grant a budget for <unit>? <M> task(s) route to metered lanes."
-   - header: "Budget"
-   - options: two or three concrete grants sized to the task count (e.g. "20", "50"), plus "None — skip those tasks". The automatic "Other" accepts an exact number.
+```markdown
+# Allowance and budget
 
 **Resource ledger.** Each granted unit starts at its grant and is decremented by the spend a metered lane reports at task exit. Before dispatching any metered task, check the ledger: **at 0 or below, the lane is closed** — remaining tasks in it are marked `skipped — budget exhausted` and the loop continues with the others. **No grant for a unit means every lane metered in that unit is off for the whole mission** — those tasks are dropped at the gate, not silently attempted.
 
@@ -734,52 +658,18 @@ Be precise about what this enforces: the ledger governs **dispatch**, not consum
 
 Timeout → same risk split as the `/code` Gate policy: launch on the recommended defaults labeled `auto-selected on timeout — not user-confirmed`, **except Ship, whose timeout default is always Hold, and Budget, whose timeout default is always None** (an unattended run must not spend a resource nobody granted). Regression scope is fixed at `smart` for every task unless `--regression` said otherwise — a full regression per task would multiply cost across the mission, and `auto` would escalate on evidence nobody is present to read; each task's QA already runs prior verifications for the files it touched. This is a deliberate asymmetry with `/code`/`/fix`, whose default is `auto`: there, a person sees the resolved scope and its reason. Do not count on the timeout to make a run unattended — it did not fire once in 60 measured questions. The two ways a run is unattended are the standing mission and the loop rule below, and both ask nothing.
 
-**A loop asks once.** On a fixed-interval loop every firing is a fresh invocation of this command with the same `--items` list, so the gate would otherwise be asked every half hour — and with nobody present it waits until someone returns, which is the one failure a loop exists to avoid (measured: a firing asked at 20:15 and started at 23:27, when the user came back and said "don't ask"). Ask the gate on the **first** firing of a list in this session. A later firing whose list is the same set of ids — closed ids skipped, per the Decompose bullet — **inherits** that answer for Confirm, Ship and Budget, records it as `(user)` naming the firing that gave it, and says so in one line instead of asking. A list that changed, or a session holding no answer for it, asks. `--no-push` and `--grant` on the loop line settle Ship and Budget before any firing, which is why `/whats-up`'s `Loop:` line carries them.
-
-**Standing-mission gate.** A standing mission asks **nothing here**. Every task came from a record the project already keeps — a parked gate, a blocked verification, a roadmap item with its own priority — so there is no scope for a person to confirm, and nobody is assumed present: Ship is Hold, Budget is None unless `--grant` came on the command, regression is `smart`, and the run is **unattended** from its first task. A task that routes to a metered lane whose unit no `--grant` covers is dropped exactly as the ledger says — but with no gate to report the drop at, each such task is an **Open** row in the mission report, `Next: /pilot --grant <unit>=<N>` sized to the cohort the task states, because a drop nobody sees here is a row `/whats-up` re-proposes every day and nothing ever runs. The escalation line that would have gone into Confirm (the same fixable blocker behind 3+ deferrals) becomes an Open row in the report instead, with `Next` naming what would build the blocker. A flagged or goal mission asks exactly as above; `/pilot --gates` at a check-in is the way to be asked everything the standing runs parked, and `/whats-up`'s closing line already names it.
-
-## Step 2 — The loop
-
-Work the task list in order until: tasks exhausted, all success criteria pass, `max_tasks` tasks completed, or the allowance runs out (below). No user gates inside the loop.
-
-**Stop between tasks, never inside one.** Run `bash ~/.claude/usage-snapshot.sh --read` before and after each task. The rise in `% used` is what that task cost. Before dispatching the next task, do this arithmetic **per window** and write the numbers in the progress line:
-
-> `left` is what the read prints. `cost` is the rise across the task just finished. **Start the next task only while `left > cost`.**
-
-Worked, from a real run: 7-day printed `91% used, 9% left` and the task that had just finished cost 3 points. `9 > 3`, so the mission continues — with two more tasks of headroom. **A percentage is not a threshold.** 91% "feels" empty and a run stopped there on that feeling, three tasks early; the rule is the comparison and nothing else. Conversely 60% used with a task that costs 40 is a stop.
-
-| Condition | What the run does |
-|---|---|
-| `five_hour.left ≤ cost` | **Stop the mission here.** Close out per Step 3 over the tasks that finished, state the reset time, and make the closing line `/loop 30m /pilot --items <the ids still open> --max-tasks 1 --no-push` — closed ids are skipped by the Decompose bullet, so it resumes exactly what remains and idles once done |
-| `seven_day.left ≤ cost` | **Stop and say when it returns.** No loop: one idling for days is a worse answer than a sentence |
-| Either window `unknown`, or the measured cost ≤ 0 | That window decides nothing — carry on. Unknown is never read as empty, and a window that moved less than its own resolution says nothing |
-
-**A reading that contradicts an earlier one is discarded, not obeyed — and never voids the signal.** Within one window `% used` can only rise; a drop means the reader saw a stale session, which the script's own aggregation should already have removed. If a printed figure is *lower* than one this run printed earlier for the same window, keep the earlier figure, say in one line that the reading was discarded, and go on using the higher number. The cost of getting this backwards is measured: a mission read 5-hour at 75%, decided correctly to stop, then took a contradicting read one minute later, **reversed its own decision**, ran into the wall, and had a subagent killed mid-write against production Firestore. Abandoning the signal on a contradiction is how a correct stop gets undone.
-
-Record each task's measured cost **as that task finishes** — not at close-out — into the `per_task_cost` object of the `.claude/pilot/last-run.json` skeleton Step 0 wrote for this run, in the exact per-task shape Step 3 `(d)` defines (`five_hour_pts`, `seven_day_pts`, `commit`, `regression_mode`, optional `reason`), stamped with the commit and the `regression_mode` it was measured under. A run killed mid-mission then still leaves what it learned, and Step 1's price quote gets a figure measured on *this* project instead of another one. A figure stamped with a different scope is quoted as indicative and never used to stop a run. **Write the field even when the cost is unmeasurable**, with the reason — a run that leaves `per_task_cost` as a note saying it could not measure has told the next mission something; an absent field has not.
 
 **Why stop rather than push on.** A mission that dies mid-task leaves a half-reviewed change, a running server, no log entry, and — once, in production — a half-finished write that had already spent more billed calls than the whole plan was approved for. A mission that stops between tasks leaves a closed-out record and one command. Recovery afterwards cannot be assumed: this orchestrator is idle while its subagents work, so the limit kills an **agent**, and the turn that reports that death is not a task auto-continue can pick up — two real runs sat idle 2h19m and 2h53m past their own reset, one of them with a single refusal and the setting on. The fixed-interval loop is the only form that comes back on its own.
+```
 
-**Models.** An **unattended** run dispatches every subagent — `<PREFIX>-dev`, `<PREFIX>-qa`, `<PREFIX>-pm`, a discovered lane's command, a claim's re-measure — with the Agent tool's per-call `model: sonnet`. An attended run passes **no model to any agent**, so each runs on its own frontmatter or the session's. **`<PREFIX>-pm` is never passed a model in either case** — its frontmatter says Sonnet and a per-call value overrides frontmatter, which is how two attended runs sent pm to Opus three times while applying a `Size:` rule that belongs to unattended dispatch alone. The orchestrator — this command, doing the planning, gating, routing and close-out — never changes model in either case, and fan-out children are `<PREFIX>-verify` agents in both, whose own frontmatter fixes Sonnet, a 60-turn cap and no CLAUDE.md — no caller passes them anything (the dispatch rule lives in `custom-tests.md § Splitting`). One override, and it comes from the record rather than from any agent file: a task whose roadmap item declares `**Size:** medium` is dispatched with `model: opus` on an unattended run **only** — the planner that wrote the item sized it, which is one of the decisions a `/blueprint` makes so the run does not; `small`, or no `**Size:**` line, takes Sonnet as above, and on an attended run `Size:` changes nothing because nothing is passed. Name every override in the `Models` row. The split is deliberate and priced: the work a person is not watching is the fan-out, and the judgment that decides what to fan out stays where it was. Record the three models as dispatched in the scorecard's `Models` row; never assume them.
+---
 
-**(a) Pipeline lane** — run the `/code` machinery without its interactive steps (`.claude/commands/code.md` holds the exact mechanics; reuse them, replacing every mid-run AskUserQuestion with the autonomous branch below):
-1. Spawn `<PREFIX>-dev` with the task + its verifications (`/code` Step 1 prompt shape). The salvage protocol and the no-top-level-edits rule apply verbatim. **A decision the task turns out to need that the gate did not settle** — a product choice, a design direction, a pricing value — is never asked mid-run, attended or not: the task is marked `blocked — needs decision <name>`, the question is parked as a gate with that name and the evidence gathered so far, and the loop moves on. Measured: the mid-run "pick a direction" and "refund or not" questions were half of what made a one-gate contract ask 2.4 times per run.
-2. On `Status: complete`, persist the task's verifications exactly as `/code` Step 1.5 (single-quoted scalars, `paths` reduced to behavioral surface, `test:` commit). On `Status: blocked`, mark the task **failed** with dev's `Notes:` and go to (c).
-3. Ensure the verification stack as `/code` Step 1.7 — except on an unreachable env, don't ask: leave the affected verifications to report blocked and continue (they surface as deferrals below).
-4. Spawn `<PREFIX>-qa` `mode=initial`, `regression_mode:` the mission scope (`smart` unless `--regression` set it), with the new verification names + changed paths + the `Graph blast:` pack (`/code` Step 2 says how it is produced — one call here, pasted into this prompt and pm's). Branch on its handoff:
-   - `signed-off` → continue to 5.
-   - `signed-off-with-deferrals` → **auto-accept the deferral, but first route each deferred verification by declared project fact** — the same three branches as `/code` Step 2, read from `deploy-config.yaml`, not judged. Auto-accept means no mid-run *gate*; it does not mean every unrun check is equivalent:
-     - **A non-prod env declaring a `url:` exists and the end state still wasn't walked** → this is not a deferral, it is an unproven feature. Treat it exactly like `blocked`: re-spawn dev, spend a fix cycle, and if it still can't be walked mark the task **failed**. Never auto-accept this branch — an unattended run is the worst place to let a feature ship unwalked, because nobody is present to notice.
-     - **No non-prod env declares a `url:`** (ships only to prod, or its non-prod envs are all run-to-completion jobs) → carry it forward as `prod-walk: <verification name>` into Step 3(a) and walk it **after** the prod deploy. It is not discharged here.
-     - **The end state is triggered out-of-band** (schedule, webhook, external callback) → defer with a named trigger, expected observable, and where to look. Without those three it is not a deferral; send it back to qa's `Notes:` rather than accepting a shrug.
-     Carry `UAT-deferred: <names> (auto-accepted — pilot run, not user-confirmed)` into the pm prompt and the mission report for the branches that were genuinely deferred, then continue to 5.
-   - `blocked` with code-fix `Notes:` → re-spawn `<PREFIX>-dev` with the fix, then `<PREFIX>-qa` `mode=retest`. At most **2 fix cycles per task**; still blocked → mark the task **failed** with qa's notes. If the failure leaves the tree broken (smoke fails), `git revert` the task's commits before moving on. If later tasks depend on this one, stop the loop and go to Step 3.
-5. Spawn `<PREFIX>-pm` with the feature commit, any UAT-deferred line, the changed paths, the same `Graph blast:` pack, and the verbatim QA-evidence block (`/code` Step 3 prompt shape). Its `Decisions:` line carries the mission gate's answers plus anything decided inside the loop — every autonomous branch is labelled `(pilot-auto)`, never `(user)`; an auto-accepted deferral is `defer=accept (pilot-auto)`. The mission gate's own Ship answer keeps its true origin (`user` or `timeout`).
-6. Stop the verification stack exactly as `/code` Step 3 does, once pm has returned — the next task restarts it on its own commits anyway, so nothing is lost and no server outlives the task that needed it.
+## § /pilot — references/verdicts.md
 
-**(b) Tweak lane** — top-level inline work under the `/tweak` lane rules: load the owning domain skill first, verify every change inline with shown evidence, commit in small named steps. Task exit: use the `<PREFIX>-review` skill on the task's diff (fix non-source nits directly; a source finding needing review depth → reclassify the task to the pipeline lane and run (a)), then one `<PREFIX>-log` entry for the task. **Scope guard:** if the work grows into schema/API/auth/migrations, reclassify to the pipeline lane before continuing.
+The five-verdict ladder and the unattended rows. Read when a task re-measures a claim or a lane returns one.
 
-**(b2) Discovered lane** — invoke the lane's command with the task, then hold it to its declared contract. It owes whatever its `close-out` names (a log entry, an artifact, a parked verdict, or nothing) and, if its `spend` is metered, a spend figure to decrement the ledger — a metered lane that reports no spend is treated as having exhausted its remaining balance, so an unreported burn closes the lane instead of running free. The lane's own steps are project-owned and not restated here; the salvage protocol applies to it exactly as to any subagent. If the lane's work turns out to need review depth (it changed source), reclassify to the pipeline lane and run (a).
+```markdown
+# Verdicts
 
 **Verdicts — what the run may conclude on its own.** A lane may produce measurements and artifacts autonomously, and any **keep / ship / adopt decision it marks human-gated is still never decided in-run** — not by the lane, not by this command, not by a default. Park it: carry it into the mission report with the evidence needed to answer it, and record it as `**Decisions:** <name>=parked (human-gated — <what would answer it>)`. An unanswered gate is never recorded as decided, exactly as a timeout is never recorded as `user`. A parked verdict does not fail the task and does not stop the loop.
 
@@ -790,16 +680,22 @@ The rule that decides who concludes is **not** who raised the question — it is
 | `superseded` / `expired` / `moot` | what it would change is gone; the payoff it stated does not exist at today's numbers; nothing reads what it would alter — including an acknowledgement with no action behind it | **the run**, `(pilot-auto)`, recording the measurement that decided it |
 | `waiting` | the condition it recorded has not fired | **the run**: it stays parked and the run restates the trigger. Not a decision anyone is being asked to make |
 | `drifted` | the evidence moved — a count changed, or a record's verdict changed shape | **the user**, on a recommendation re-derived from today's evidence, never from the parked proposal |
-| `live` | re-measured, and the proposal still holds | **the user**, at the `--gates` sitting, on a recommendation to approve — or **the run**, `(pilot-auto)`, when the lane declares `reversal:` (Step 1, *lane registry*): the apply is undoable, so this is a reversible decision |
+| `live` | re-measured, and the proposal still holds | **the user**, at the `--gates` sitting, on a recommendation to approve — or **the run**, `(pilot-auto)`, when the lane declares `reversal:` (`references/lanes.md`): the apply is undoable, so this is a reversible decision |
 | `judgment` | no measurable condition was recorded — the question is a preference, not a measurement | **the user**; the run gathers evidence and recommends, and never closes it |
 
 Two things this exists to prevent. A claim whose proposal died weeks ago is re-offered as a decision every time anyone looks, which is how a handful of them becomes a backlog nobody reads. And a proposal applied as written after its cohort moved does damage the parked evidence gave no warning of — so `drifted` is a **stop**, not a smaller `live`.
 
 **Unattended runs take the top two rows and nothing else** of the ladder — plus `live` from a lane declaring `reversal:`, which the ladder itself assigns to the run. A run with nobody present concludes what the measurement concludes and carries every `drifted` / `judgment` claim, and every `live` from a lane without `reversal:`, forward untouched, to the next run that has a person in it. They are not defaulted, not skipped, and not recorded as decided — they are parked at Step 3 `(a0)` under their names, ranked high-or-critical first, for the next `/pilot --gates` sitting; no close-out asks them, attended or not. Beyond claims, an unattended run **also** re-walks deferrals whose recorded trigger has fired and works the ranked roadmap tasks the standing mission derived — that is the whole of what it may start — with Ship at Hold and prod never touched, so everything it builds waits for a person before it ships. Two further bounds follow from nobody being present: a dirty tree overlapping a task means that task is **skipped and reported**, never routed to `/tidy` (which asks); and a reference sync at `(a3)` that would have to ask — a skill author's interview, a docs decision — is recorded `not done — needs you`, never skipped silently.
+```
 
-**(c) Progress + re-plan.** Keep each task's `<PREFIX>-dev` handoff `Roadmap:` ids — they are the mission report's Emerged rows. Then emit one status line — `task k/N · <title> · <status> · <commit> · <evidence pointer>` — a report, not a question. Then re-plan: drop later tasks the outcome obsoleted, insert a revealed prerequisite (within `max_tasks`), and if success criteria exist, evaluate them with evidence — stop the loop when all pass. Record every plan amendment for the mission report. For roadmap-driven runs, verify pm flipped the item's status.
+---
 
-**Context health:** keep the top level thin — never read source files or heavy references at the top level; work from handoff blocks. If context is clearly degrading (earlier tasks summarized away, repeated re-derivation), finish the current task, then go to Step 3 and list the remaining tasks as resumable — a degraded pilot ships worse code than a fresh session.
+## § /pilot — references/close-out.md
+
+Step 3 and the mission report. Read once, at close-out.
+
+```markdown
+# Mission close-out
 
 ## Step 3 — Close out (once per mission)
 
@@ -847,28 +743,31 @@ Two things this reliably catches, both observed on the first real mission: a pat
 
 **(d) Restore stashed WIP and clear the run marker.** If pre-existing WIP was stashed at Step 0, `git stash pop` it now; report any conflict instead of resolving it silently. Then finalise `.claude/pilot/last-run.json` — the skeleton Step 0 wrote, completed to **exactly** this shape and no other (two installs once improvised two different `per_task_cost` layouts from a prose description, so one reader broke on one of them): `{"ts": "<close-out time>", "session_id": "<id>", "mode": "standing|flagged|goal", "unattended": true|false, "verdict": "<Verdict line's word>", "tasks": {"done": N, "failed": N, "skipped": N}, "parked": N, "asked": N, "runnable_left": N, "models": {"orchestrator": "<model>", "agents": "<model|session>", "children": "verify"}, "per_task_cost": {"<task id>": {"five_hour_pts": <number|null>, "seven_day_pts": <number|null>, "commit": "<sha7|null>", "regression_mode": "smart|full", "reason": "<why a figure is null, else omit>"}}}` — and remove `.claude/pilot/running`. It is a **run marker, not mission state**: the roadmap and the log remain the state, and this file only lets the next reader — `/whats-up`'s store row, a loop deciding whether to back off — see that a run happened and how it ended. If `PILOT_NOTIFY_URL` is set in the environment, `curl` the Verdict line, the Open table and the `Next shift` rows to it as one message (`{"content": "<text>"}` works for a Discord or Slack incoming webhook) — that is how an unattended run reaches a phone; unset means nothing is posted, silently.
 
+**(e) Continue, if `then`.** Only when every task signed off clean and nothing is parked for a person: report first, then invoke the `pilot` skill again with `--unattended --max-tasks 3` and no goal — the standing mission, same session, Ship held. The three-task cap is the whole of what one answer may authorise until a window-wide budget exists; a continuation never re-reads this flag, so it runs once and stops.
+
 ## Done — mission report
 
-Report per `code.md § Done` — the same five blocks (Verdict · Learned · Status · Open · Emerged) and closing line, the same closed status words, the same writing rules. A mission covers more work, so it needs **more rows, not more prose**.
+Report per `.claude/skills/code/references/close-out.md` — the same five blocks (Verdict · Learned · Status · Open · Emerged) and closing line, the same closed status words, the same writing rules. A mission covers more work, so it needs **more rows, not more prose**.
 
 **This mission's rows.**
 
 - **Verdict** — one line: goal met, partly met, or stopped, plus the ship state. On a mission with success criteria, the criteria decide that word and their evidence goes in Status.
 - **Status** — one row per task first (`task · status · evidence`, where evidence is the feature commit and the log-entry title), then the mission-level rows: prod deploy, push, roadmap statuses flipped, prod walk, reference sync, and one row per granted unit as `<spent>/<grant>`. A task whose end state was walked is `proven`; a task that shipped with a check nobody could run is `not proven`, never `done`.
-- **Open** — every verdict still parked after (a0), one row each, carrying the evidence needed to answer it and where that evidence lives; these are the reason the user is reading this at all, so they are never folded into the task rows and never shown as decided. A verdict the run **closed on its own** is a Status row, not this — `done`, with the measurement that decided it as evidence — and so is a `waiting` one, carrying its trigger, because nobody is being asked anything. Work the run **applied** at (a0) — a `(pilot-auto)` reversible apply, or on a `--gates` mission an approval — is `proven` in Status, and Open when the preflight blocked it: `Next` is the filed id's command, and the row names the blocker. Every parked verdict's `Next` is `/pilot --gates <name>`. Then: each failed or unreached task with enough state to resume, each lane that stopped on an exhausted budget, and each gate this run decided on a `timeout`. For an `--items` mission the resume row's `Next` is `/pilot --items <id>,<id>` — the ids are permanent, so that line is exact and copy-pasteable. A **goal-shaped or plain-batch** mission has no such handle, so file the remaining goal as a roadmap item per `code.md § Done` block 4 and make its id the resume row's `Next`; a goal restated only in this report dies with the session.
-- **Emerged** — ranked, each with its priority and recommendation per `code.md § Done` block 5; each deferral **with its route** (walked at prod in (a2), or still open on a named out-of-band trigger — "deferred" must never cover both facts), the roadmap ids each task's `<PREFIX>-dev` reported on its `Roadmap:` field, scope the mission filed itself, and follow-ups a failed task created. Every row names its home, per `code.md § Done`. On the standing mission add **`Next shift:`** — the top `max_tasks` runnable rows the next standing run would take, by rank, each with its id. It is the veto point: one word at a check-in changes an item's status or priority before a run nobody watches starts it.
+- **Open** — every verdict still parked after (a0), one row each, carrying the evidence needed to answer it and where that evidence lives; these are the reason the user is reading this at all, so they are never folded into the task rows and never shown as decided. A verdict the run **closed on its own** is a Status row, not this — `done`, with the measurement that decided it as evidence — and so is a `waiting` one, carrying its trigger, because nobody is being asked anything. Work the run **applied** at (a0) — a `(pilot-auto)` reversible apply, or on a `--gates` mission an approval — is `proven` in Status, and Open when the preflight blocked it: `Next` is the filed id's command, and the row names the blocker. Every parked verdict's `Next` is `/pilot --gates <name>`. Then: each failed or unreached task with enough state to resume, each lane that stopped on an exhausted budget, and each gate this run decided on a `timeout`. For an `--items` mission the resume row's `Next` is `/pilot --items <id>,<id>` — the ids are permanent, so that line is exact and copy-pasteable. A **goal-shaped or plain-batch** mission has no such handle, so file the remaining goal as a roadmap item per `.claude/skills/code/references/close-out.md` block 4 and make its id the resume row's `Next`; a goal restated only in this report dies with the session.
+- **Emerged** — ranked, each with its priority and recommendation per `.claude/skills/code/references/close-out.md` block 5; each deferral **with its route** (walked at prod in (a2), or still open on a named out-of-band trigger — "deferred" must never cover both facts), the roadmap ids each task's `<PREFIX>-dev` reported on its `Roadmap:` field, scope the mission filed itself, and follow-ups a failed task created. Every row names its home, per `.claude/skills/code/references/close-out.md`. On the standing mission add **`Next shift:`** — the top `max_tasks` runnable rows the next standing run would take, by rank, each with its id. It is the veto point: one word at a check-in changes an item's status or priority before a run nobody watches starts it.
 - A serve-env still up at close-out — only when you asked to keep it — is a **Status** row with its url, not an Open one.
 - The closing line carries "in a fresh session" — a completed pilot has consumed most of this one. A standing mission's closing line also states `runnable rows left: <N>` — **everything the next standing run could take**: the Open rows a run can execute *plus* the Emerged roadmap backlog it may start, since the standing mission appends that backlog by rank. Counting only the Open rows reads as "done" while a hundred items wait (the first real loop reported 14 with 97 behind them). A loop that fires this command paces itself on that number alone: at 0, the longest idle it allows; above 0, the **shortest** delay it allows — the next task is already known, so an idle gap between tasks is throughput lost, not caution (the first real loop idled 25 minutes between 20-minute tasks). Rows the next tick will take are `Next shift` rows, never Open ones: nothing about them needs a person. On a fixed-interval loop the number is information only — the interval fires either way, which is the property that carries it across a usage-limit reset.
 ```
 
 ---
 
-## § /design — design.md (Claude Code only)
+## § /design — skills/design/SKILL.md
 
 **Install condition:** Only install if a design domain skill was discovered in Phase 1 (e.g. a `<PREFIX>-design`, `<PREFIX>-frontend`, or `<PREFIX>-ui` skill that owns UI/component paths).
 
 ```markdown
 ---
+name: design
 description: Generate design variants for a UI feature using the <PREFIX>-design skill
 ---
 
@@ -926,10 +825,11 @@ Route based on selection:
 
 ---
 
-## § /whats-up — whats-up.md (Claude Code)
+## § /whats-up — skills/whats-up/SKILL.md
 
 ```markdown
 ---
+name: whats-up
 description: Where the project stands and what to do next — reads every store that outlives a session, diagnoses whether the project can take on new work, and ranks what to do about it. Read-only.
 ---
 
@@ -964,7 +864,7 @@ Read-only, in parallel. **A store that is absent or errors gets a `not done` Sta
 | Repo | the `/tidy` **Step 1** sweep — run it, do not restate it here | none |
 | Project health | every store the project declares (below). None declared → the row is `n/a` | the declaring command's own fallback |
 
-**A seventh store, discovered, not hardcoded.** Six stores are universal because every install has them. A project that runs something unattended — a scheduled job, a background loop, an external pipeline — has a seventh question nobody else can ask for it: *is it broken, or is it running right now?* Scan `.claude/commands/*.md` frontmatter for a `whats-up-store:` key, exactly as `/pilot` discovers its lanes:
+**A seventh store, discovered, not hardcoded.** Six stores are universal because every install has them. A project that runs something unattended — a scheduled job, a background loop, an external pipeline — has a seventh question nobody else can ask for it: *is it broken, or is it running right now?* Scan `.claude/skills/*/SKILL.md` and `.claude/commands/*.md` frontmatter for a `whats-up-store:` key, exactly as `/pilot` discovers its lanes:
 
 ```yaml
 whats-up-store:
@@ -1021,34 +921,35 @@ Ask these in order, from Step 1's numbers as reconciled by Step 2, and stop at t
 
 ## Done
 
-Report per `code.md § Done` — the same five blocks (Verdict · Learned · Status · Open · Emerged) and closing line, the same closed status words, the same writing rules. **This command runs no work, so the report is the whole of its output**: no separate plan, no numbered action list, no summary after the blocks. The ranked `Open` table *is* the plan, and a second list of the same rows in prose is the bloat this shape exists to remove.
+Report per `.claude/skills/code/references/close-out.md` — the same five blocks (Verdict · Learned · Status · Open · Emerged) and closing line, the same closed status words, the same writing rules. **This command runs no work, so the report is the whole of its output**: no separate plan, no numbered action list, no summary after the blocks. The ranked `Open` table *is* the plan, and a second list of the same rows in prose is the bloat this shape exists to remove.
 
 **This run's rows.**
 
 - **Verdict** — Step 3's diagnosis and the two numbers behind it.
 - **Learned** — what Step 2's reconcile changed, at most 3 bullets: a gate that reads `parked` and is not, a roadmap item already delivered, a `blocked` whose trigger has since happened. Nothing to correct → `None`. This is the block that makes the command worth running rather than reading the stores yourself.
 - **Status** — one row per store, `done` with the number it returned or `not done` with why it could not be read. Held commits are a Status row carrying the count **and what holds them**. The repo sweep is one row: `clean`, or the counts with `/tidy` as its evidence. Each declared store is its own row carrying what it observed against its `healthy:` line; a store whose block would not parse is a `not done` row naming the file. Fold every store in a good state into a single row.
-- **Open** — the ranked plan, and the only block that proposes work. **Order it so a row that unblocks a later one comes first**, then per `code.md § Done`: the parked gate, then `failed`, then the rest. This lane routinely has several actionable rows, so the closing line is usually the **batch** form — and each row must therefore state the disposition this run would take, because that recommendation is what a mission's single gate confirms. A row you cannot recommend on is still Open; it just does not join the batch. `Why it is open` carries the one line of why; `Next` is the command that does it. A row needing a decision only you can make states the options **and which one this run would pick** — a gate reported without a recommendation is how gates sit for weeks. When Step 2's classify says the evidence is too old to recommend on, the recommendation *is* the re-measure: `Next` is `/pilot --gates <name>`. That is still a recommendation; what is forbidden is a row that names a decision and offers nothing. **Every in-progress roadmap item is a row here** — one each, carrying what remains and the command that finishes it, and marked **stalled** with its day count when Step 2's reconcile says so. More than five: list the five closest to done and fold the rest into one count row, so the block stays a plan. An in-progress item with a `**Parent:**` names it in the row, and siblings in progress under one umbrella are **one row** whose `Next` is `/pilot --items <umbrella-id>` — that expands to the open children, so a plan never reads as six unrelated rows. A parked gate's row **names the items it releases** — `open-gates` returns them — because a gate holding the blocked half of started work is the shortest way back into that work, and reported as a bare chore it reads like the cheapest row in the table instead of the most valuable.
-- **Emerged** — the backlog that already has a reader, **counted per store, never listed**: roadmap items **nobody has started** → `/roadmap`, carrying the status breakdown `roadmap-open` returns rather than one number (in-progress items are Open rows and are not part of this count; an item with no `**Status:**` line is counted separately, because it is backlog nobody has classified rather than backlog nobody has started; an umbrella and its open children are **one plan**, counted once by the umbrella id with its children count beside it — `roadmap-open` prints the plan count for exactly this); structurally unprovable deferrals → the prod walk; a named stash → `/tidy`. These are the rows that do not need you now. Listing them is the inventory this command exists to replace. This lane produces no scope of its own, so it never files anything here. **This is the one sanctioned inversion of `code.md § Done`'s *only what this run produced* rule**: there is no run, the standing backlog is the subject, and the counted form is what keeps it from becoming the dump that rule prevents.
+- **Open** — the ranked plan, and the only block that proposes work. **Order it so a row that unblocks a later one comes first**, then per `.claude/skills/code/references/close-out.md`: the parked gate, then `failed`, then the rest. This lane routinely has several actionable rows, so the closing line is usually the **batch** form — and each row must therefore state the disposition this run would take, because that recommendation is what a mission's single gate confirms. A row you cannot recommend on is still Open; it just does not join the batch. `Why it is open` carries the one line of why; `Next` is the command that does it. A row needing a decision only you can make states the options **and which one this run would pick** — a gate reported without a recommendation is how gates sit for weeks. When Step 2's classify says the evidence is too old to recommend on, the recommendation *is* the re-measure: `Next` is `/pilot --gates <name>`. That is still a recommendation; what is forbidden is a row that names a decision and offers nothing. **Every in-progress roadmap item is a row here** — one each, carrying what remains and the command that finishes it, and marked **stalled** with its day count when Step 2's reconcile says so. More than five: list the five closest to done and fold the rest into one count row, so the block stays a plan. An in-progress item with a `**Parent:**` names it in the row, and siblings in progress under one umbrella are **one row** whose `Next` is `/pilot --items <umbrella-id>` — that expands to the open children, so a plan never reads as six unrelated rows. A parked gate's row **names the items it releases** — `open-gates` returns them — because a gate holding the blocked half of started work is the shortest way back into that work, and reported as a bare chore it reads like the cheapest row in the table instead of the most valuable.
+- **Emerged** — the backlog that already has a reader, **counted per store, never listed**: roadmap items **nobody has started** → `/roadmap`, carrying the status breakdown `roadmap-open` returns rather than one number (in-progress items are Open rows and are not part of this count; an item with no `**Status:**` line is counted separately, because it is backlog nobody has classified rather than backlog nobody has started; an umbrella and its open children are **one plan**, counted once by the umbrella id with its children count beside it — `roadmap-open` prints the plan count for exactly this); structurally unprovable deferrals → the prod walk; a named stash → `/tidy`. These are the rows that do not need you now. Listing them is the inventory this command exists to replace. This lane produces no scope of its own, so it never files anything here. **This is the one sanctioned inversion of `.claude/skills/code/references/close-out.md`'s *only what this run produced* rule**: there is no run, the standing backlog is the subject, and the counted form is what keeps it from becoming the dump that rule prevents.
 
-**The Open/Emerged split is the whole command.** Coming from a store is not what makes a row `Emerged` — every row here comes from a store. What places it is `code.md § Done`'s test: needs a decision or an action from you now → `Open` with its command; does not → `Emerged` as a count naming its reader.
+**The Open/Emerged split is the whole command.** Coming from a store is not what makes a row `Emerged` — every row here comes from a store. What places it is `.claude/skills/code/references/close-out.md`'s test: needs a decision or an action from you now → `Open` with its command; does not → `Emerged` as a count naming its reader.
 
-**In-progress work is the one documented exception to that test.** Every roadmap item carries an `**Id:**`, so every item technically has a reader — which sends *started* work to Emerged inside the same count as work nobody has ever picked up, and the state that most needs naming gets the least. Started and unfinished is the definition of needing you now. So this command reads the test by status: `in-progress` → `Open`, one row each; `open` → `Emerged`, as a count. Nothing else in the test moves, and the exception is stated here rather than in `code.md § Done` because that section is shared by seven commands whose scope is one run they just performed — this is the only lane whose subject is the standing backlog.
+**In-progress work is the one documented exception to that test.** Every roadmap item carries an `**Id:**`, so every item technically has a reader — which sends *started* work to Emerged inside the same count as work nobody has ever picked up, and the state that most needs naming gets the least. Started and unfinished is the definition of needing you now. So this command reads the test by status: `in-progress` → `Open`, one row each; `open` → `Emerged`, as a count. Nothing else in the test moves, and the exception is stated here rather than in `.claude/skills/code/references/close-out.md` because that section is shared by seven commands whose scope is one run they just performed — this is the only lane whose subject is the standing backlog.
 
-**Closing block — four commands, each runnable as printed.** `code.md § Done` derives one closing line from the Open rows, and its table assumes one command closes them. This lane's reader wants to paste something and leave, and there are exactly four things they might want to run: the next item, everything unfinished in one sitting, everything unfinished as a loop that survives a usage limit and then stops, or the whole queue for the day. So this lane ends with four lines instead of one — its second sanctioned inversion, alongside Emerged — and **every one of them is a command exactly as a `Next` cell is**: no prose path, no `Then:`, no stage the reader has to expand into commands themselves. A closing line that says "then the two repair rows" has made the reader the batching mechanism, which is the failure the batch rule exists to prevent.
+**Closing block — four commands, each runnable as printed.** `.claude/skills/code/references/close-out.md` derives one closing line from the Open rows, and its table assumes one command closes them. This lane's reader wants to paste something and leave, and there are exactly four things they might want to run: the next item, everything unfinished in one sitting, everything unfinished as a loop that survives a usage limit and then stops, or the whole queue for the day. So this lane ends with four lines instead of one — its second sanctioned inversion, alongside Emerged — and **every one of them is a command exactly as a `Next` cell is**: no prose path, no `Then:`, no stage the reader has to expand into commands themselves. A closing line that says "then the two repair rows" has made the reader the batching mechanism, which is the failure the batch rule exists to prevent.
 
-- **`Next:`** — the top Open row's `Next`, verbatim; the ordering rule above already put the row that unblocks the others first. No Open row a run can execute → the top-ranked backlog item per `roadmap.md § Rank`: `/pilot --items <umbrella-id>` when it is a plan, else `/fix <id>` or `/code <id>` classified as `roadmap.md § Step 3` does — never a bare `/roadmap`, which would ask the reader what this line already knows.
+- **`Next:`** — the top Open row's `Next`, verbatim; the ordering rule above already put the row that unblocks the others first. No Open row a run can execute → the top-ranked backlog item per `.claude/skills/roadmap/SKILL.md § Rank`: `/pilot --items <umbrella-id>` when it is a plan, else `/fix <id>` or `/code <id>` classified as `roadmap.md § Step 3` does — never a bare `/roadmap`, which would ask the reader what this line already knows.
 - **`All:`** — one command that runs every Open row a run can execute, in this table's order, and stops: `/pilot --max-tasks <N>`, with `N` the count of those rows. The standing mission takes exactly this report's rows before it appends the backlog (`pilot.md § Step 1`, *the standing mission's tasks*), so the cap is what makes "all unfinished business" mean that and not "the first ten of everything". Rows a run cannot take — `verify live`, `none — leave held`, `/tidy`, a `[large]` item, and the in-progress items a still-parked gate `releases` — are outside `N` and stay in the table; one trailing clause says they are yours (the released items run on the firing after the gate is answered). No executable Open row → `/pilot --items <id>,…`, the ranked top of the backlog up to ten, so the reader sees which neighbours the `Next:` item would run with. **Append `--grant <unit>=<M>` for every metered lane an executable row routes to** — read from the `pilot-lane:` `spend:` of the command that row's `Next` names, in the same frontmatter scan Step 1 already runs — with `M` the sum of the cohort sizes those rows state in `Why it is open`. The standing mission asks no Budget question and drops a metered task nobody granted for, so without this flag the second half of the queue does not run and nothing would have said so.
-- **`Loop:`** — `/loop 30m /pilot --items <id>,… --max-tasks 1 --no-push` with the same `--grant` flags, the ids being every executable Open row that carries a roadmap `**Id:**`, in table order: one id per firing, a closed id skipped and reported, so the loop works exactly those rows across usage-limit resets and then idles at zero instead of starting the backlog. A trailing clause names the executable rows **without** an id (a `fail` nothing tracks, a re-walk) and their `Next`, because `--items` cannot carry them and dropping them silently is the error `code.md § Done` warns of. Carry `--no-push`, so Ship is settled on the line itself. The first firing asks Confirm once for the list and every later firing inherits the answer (`pilot.md § Step 1`, *A loop asks once*), so nothing waits on a person overnight.
-- **`Loop all:`** — `/loop 30m /pilot --max-tasks 1` with the same `--grant` flags: the same rows, then the ranked backlog, one task per firing for as long as the session is left open. Both loops are a fixed interval, never self-paced — the only loop shape the workflow proposes anywhere, for the reason `pilot.md § Usage` gives.
+- **`Loop:`** — `/loop 30m /pilot --items <id>,… --max-tasks 1 --unattended --no-push` with the same `--grant` flags, the ids being every executable Open row that carries a roadmap `**Id:**`, in table order: one id per firing, a closed id skipped and reported, so the loop works exactly those rows across usage-limit resets and then idles at zero instead of starting the backlog. A trailing clause names the executable rows **without** an id (a `fail` nothing tracks, a re-walk) and their `Next`, because `--items` cannot carry them and dropping them silently is the error `.claude/skills/code/references/close-out.md` warns of. Carry `--unattended --no-push`, so Confirm and Ship are settled on the line itself: the ids typed are the confirmation, and no firing ever asks.
+- **`Loop all:`** — `/loop 30m /pilot --max-tasks 1` with the same `--grant` flags (the standing mission is unattended by definition): the same rows, then the ranked backlog, one task per firing for as long as the session is left open. Both loops are a fixed interval, never self-paced — the only loop shape the workflow proposes anywhere, for the reason `pilot.md § Usage` gives.
 ```
 
 ---
 
-## § /roadmap — roadmap.md (Claude Code)
+## § /roadmap — skills/roadmap/SKILL.md
 
 ```markdown
 ---
+name: roadmap
 description: Rank the open roadmap items and either run the top ones as a <PREFIX> mission or start one through the full pipeline
 ---
 
@@ -1101,10 +1002,11 @@ Recommend the mission when 2+ items qualify, and the single item when only one d
 
 ---
 
-## § /blueprint — blueprint.md (Claude Code)
+## § /blueprint — skills/blueprint/SKILL.md
 
 ```markdown
 ---
+name: blueprint
 description: Plan on the strongest model, execute elsewhere — turn a goal, or a roadmap item that is only a name, into one umbrella plus /pilot-shaped child items in docs/roadmap.md, with every decision the executor would otherwise face made here. Writes the roadmap only; never edits source, never runs /code or /pilot.
 model: fable
 ---
@@ -1124,7 +1026,7 @@ model: fable
 
 ## Gate policy
 
-The `.claude/commands/code.md § Gate policy` applies, with one addition. A plan whose **user-owned decisions** went unanswered is **not written**: a value defaulted on timeout would be executed by a run that treats the plan as authoritative, which is the executor's guess moved one level up. Park it — print the plan, say which decisions await, stop. A plan with no user-owned decisions proceeds on a Confirm timeout, with `auto-selected on timeout — not user-confirmed` on the umbrella's `**Planned by:**` line.
+The `.claude/skills/code/SKILL.md § Gate policy` applies, with one addition. A plan whose **user-owned decisions** went unanswered is **not written**: a value defaulted on timeout would be executed by a run that treats the plan as authoritative, which is the executor's guess moved one level up. Park it — print the plan, say which decisions await, stop. A plan with no user-owned decisions proceeds on a Confirm timeout, with `auto-selected on timeout — not user-confirmed` on the umbrella's `**Planned by:**` line.
 
 ## Step 0 — Flags + entry hygiene
 
@@ -1142,7 +1044,7 @@ Read-only. Every project rule of the form "read X before proposing Y" applies he
 |---|---|---|
 | `docs/roadmap.md` | **Prior art** — an open or closed item on the same ground. Name its id, or write "no prior art found" | none — the file is the store |
 | `docs/project-log.md` and `git log --grep=^Revert --oneline` | **Reverted levers** — a change the record shows tried and reverted is off-limits unless this plan carries new evidence, and the umbrella's Out of scope names it | `git log` alone |
-| `.claude/commands/whats-up.md § Step 1–2` | the stores and their reconcile, run once as that command runs them — a gate holding the area, a stalled in-progress item, a `blocked` check on its paths | that command's per-store fallbacks |
+| `.claude/skills/whats-up/SKILL.md § Step 1–2` | the stores and their reconcile, run once as that command runs them — a gate holding the area, a stalled in-progress item, a `blocked` check on its paths | that command's per-store fallbacks |
 | `python3 .claude/graph/graph.py blast <paths the goal touches> --ids <prior-art ids>` | owners, verifications with status, deliveries, deferrals, affine items and the gates holding them | inference from `governed-paths.conf` and the log |
 | auto-memory already in context | project rules and findings that bear on the goal — cite the memory by name where it decides something | none |
 
@@ -1190,7 +1092,7 @@ Match the metadata convention `docs/roadmap.md` already uses — list items, bar
 - `**Out of scope:**` — including every reverted lever Step 1 found, by name
 
 **Each child** — `**Id:**` (umbrella-prefixed, `<abbr>-<n>-<slug>`, so a sibling set sorts and reads as one), `**Category:**`, `**Priority:**`, `**Status:** open`, `**Added:**`, then:
-- `**Parent:**` the umbrella id · `**Depends on:**` sibling ids, or `nothing` · `**Lane:**` from the registry `.claude/commands/pilot.md § Lane registry` discovers — `pipeline` | `tweak` | any `pilot-lane:` command, by filename · `**Size:**` `small` (one Sonnet subagent, unattended) | `medium` (`/pilot` dispatches it on Opus)
+- `**Parent:**` the umbrella id · `**Depends on:**` sibling ids, or `nothing` · `**Lane:**` from the registry `.claude/skills/pilot/references/lanes.md` discovers — `pipeline` | `tweak` | any `pilot-lane:` command, by filename · `**Size:**` `small` (one Sonnet subagent, unattended) | `medium` (`/pilot` dispatches it on Opus)
 - `**What:**` — WHERE (the verified `file:line`, or the new path) + HOW (the literal `before → after` where known; the mechanism reused) + WHY
 - `**Acceptance statement:**` — the end state in the user's terms, where they land, exactly as `/code` Step 0.5 defines it
 - `**Verifications:**` — 1–3 as `{assert, type: UX | Integration | E2E}` with **concrete expected values** — counts the record already knows, exit codes, a known-bad input that must be flagged — and the end state among them, mandatory as in `/code` Step 0.5. A verification whose number **feeds a later decision** asserts the discriminator too: which rule produced each count, recorded alongside it. A share that is the union of two rules cannot be split afterwards, and where the evidence is one run nobody can re-take, the field has to exist before the run — the plan is the last place that can require it
@@ -1205,7 +1107,7 @@ Against the draft, before any write:
 - **Dependencies** — every `**Depends on:**` resolves to an id in the file (a sibling, the umbrella, or an existing item) with no cycle; the `**Run:**` order respects them.
 - **Landing sites** — re-grep every `file:line` any child cites; one that fails is repaired or removed, never left.
 - **Probes** — every prescribed literal, enumerated set and branch argument in the draft carries a Step 2 result, or a stated reason it could not be probed plus the verification that covers it. An unprobed value with neither is the one thing this lane cannot write.
-- **Dry-decompose** each child the way `.claude/commands/pilot.md § Step 1` would: derive its lane, acceptance statement and verifications from the child's body alone. A child that derivation cannot read is not written — rewrite it until it is.
+- **Dry-decompose** each child the way `.claude/skills/pilot/SKILL.md § Step 1` would: derive its lane, acceptance statement and verifications from the child's body alone. A child that derivation cannot read is not written — rewrite it until it is.
 - **Decisions** — every choice a child's `**What:**` depends on appears in the umbrella's block; a child that says "pick a threshold" is a child with a missing decision.
 
 Then write the draft to a scratch copy of the roadmap and run `python3 .claude/graph/graph.py build` against it — it warns on a `**Parent:**` or `**Depends on:**` naming an id it cannot find, and on a headless item — and proceed only on a clean build. No `python3` → check the ids and dependencies by hand and say so.
@@ -1235,7 +1137,7 @@ Timeout → the Gate policy above.
 
 ## Done
 
-Report per `code.md § Done` — the same five blocks (Verdict · Learned · Status · Open · Emerged) and closing line, the same closed status words, the same writing rules.
+Report per `.claude/skills/code/references/close-out.md` — the same five blocks (Verdict · Learned · Status · Open · Emerged) and closing line, the same closed status words, the same writing rules.
 
 **This run's rows.**
 
@@ -1244,15 +1146,16 @@ Report per `code.md § Done` — the same five blocks (Verdict · Learned · Sta
 - **Status** — the record read (`done`, with the prior-art id or "none"), landing sites (`proven`, N refs grepped), prescribed values (`proven`, N probed / M reasoned — the reasoned ones named), items written (`done`, umbrella + N), the commit (`done`, sha), the graph build (`done`, or `not done — no python3`), the model this session ran on.
 - **Open** — one row for the plan: it needs a person to launch it. `Next` is the umbrella's `**Run:**` line verbatim — `/pilot --items <umbrella-id> --no-push`; the why cell names the alternative for a run someone wants to sit in on, `/code <first child id>`. A gate this run parked outranks it.
 - **Emerged** — `None` as a rule: the items are what was asked for, so they are Status rows, not scope that appeared.
-- The closing line derives from Open as `code.md § Done` states — normally the `/pilot --items … --no-push` line, which is the whole point of the run.
+- The closing line derives from Open as `.claude/skills/code/references/close-out.md` states — normally the `/pilot --items … --no-push` line, which is the whole point of the run.
 ```
 
 ---
 
-## § /tweak — tweak.md (Claude Code)
+## § /tweak — skills/tweak/SKILL.md
 
 ```markdown
 ---
+name: tweak
 description: Sanctioned lightweight lane for iterative work — pixel nudges, copy rounds, small hotfixes — at the top level, without the full pipeline. Close-out is batched and enforced at push time.
 ---
 
@@ -1281,15 +1184,16 @@ Run when the user says done, or asks to push or deploy. (The `close-out-gate` ho
 3. **Docs + references** — use `<PREFIX>-docs` to check staleness; use `<PREFIX>-skill` for reference sync scoped to the affected skills.
 3.5. **Stop the servers this burst started** — as `/code` Step 3 stops its verification stack, with the same exception.
 4. **Push + scorecard** — same close-out as `/code` Step 5: push policy via the `<PREFIX>-deploy` skill § Push policy (a push that fires prod CI is an irreversible gate — ask, park on timeout), then the verified scorecard (committed / pushed / logged / docs / ref-sync, each evidence-checked).
-5. **Report** — per `code.md § Done`: the same five blocks (Verdict · Learned · Status · Open · Emerged), the closing line, the same closed status words. The burst is one Status row per tweak plus the close-out rows; the end-state walk from step 1.5 is the row that carries `proven` or `not proven` for the journey as a whole. This lane runs no `<PREFIX>-dev`, so scope the burst uncovered has no writer but this one — file it per `code.md § Done` block 4 and cite the id, or leave it Open with the command that picks it up.
+5. **Report** — per `.claude/skills/code/references/close-out.md`: the same five blocks (Verdict · Learned · Status · Open · Emerged), the closing line, the same closed status words. The burst is one Status row per tweak plus the close-out rows; the end-state walk from step 1.5 is the row that carries `proven` or `not proven` for the journey as a whole. This lane runs no `<PREFIX>-dev`, so scope the burst uncovered has no writer but this one — file it per `.claude/skills/code/references/close-out.md` block 4 and cite the id, or leave it Open with the command that picks it up.
 ```
 
 ---
 
-## § /audit — audit.md (Claude Code)
+## § /audit — skills/audit/SKILL.md
 
 ```markdown
 ---
+name: audit
 description: Assess the project's dependency advisories — give each one a VEX status, block only on the exploitable ones, and never re-decide a settled one. `--deep` runs the built-in /security-review over the commits no deep pass has covered.
 pilot-lane:
   routing: A task that assesses dependency advisories, or runs the deep security pass over commits no pass has covered — evidence gathering against the audit tool and the repo, never code work. Fixing an advisory is a `pipeline` task, not this lane. A task invokes it as `/audit --max-packages 5`, so one mission task never spends a window on a large backlog.
@@ -1352,17 +1256,18 @@ Set the base ref first — `git remote set-head origin <default-branch>` — or 
 
 ## Done
 
-Report per `code.md § Done` — the five blocks, the closing line, the same closed status words. `<N> assessed` is a Status row. Anything still unassessed — `--max-packages` or the allowance stopped the run — is an Open row with `Next: /audit`, **naming the packages it sits in** and what stopped the run, since a bare count tells the next run nothing about what it is ranking. Each `affected` one filed is an Emerged row naming its roadmap id, and the closing line carries its fix command; an `affected` one you could not trace to a sink stays Open, because nobody else will pick it up.
+Report per `.claude/skills/code/references/close-out.md` — the five blocks, the closing line, the same closed status words. `<N> assessed` is a Status row. Anything still unassessed — `--max-packages` or the allowance stopped the run — is an Open row with `Next: /audit`, **naming the packages it sits in** and what stopped the run, since a bare count tells the next run nothing about what it is ranking. Each `affected` one filed is an Emerged row naming its roadmap id, and the closing line carries its fix command; an `affected` one you could not trace to a sink stays Open, because nobody else will pick it up.
 
-This lane runs no `<PREFIX>-dev`, so scope it uncovers has no writer but this one — file it per `code.md § Done` block 4 and cite the id.
+This lane runs no `<PREFIX>-dev`, so scope it uncovers has no writer but this one — file it per `.claude/skills/code/references/close-out.md` block 4 and cite the id.
 ```
 
 ---
 
-## § /revert — revert.md (Claude Code)
+## § /revert — skills/revert/SKILL.md
 
 ```markdown
 ---
+name: revert
 description: Sanctioned rollback — git revert (never reset), scoped re-verification via <PREFIX>-test, and a logged reversal.
 ---
 
@@ -1388,15 +1293,16 @@ Use `<PREFIX>-log`: one entry naming what was reverted and why. Flip any roadmap
 
 ## Step 4 — Close out
 
-Push + verified scorecard, same as `/code` Step 5. If the original change was deployed, redeploy the reverted state to the same envs via `<PREFIX>-deploy` (prod requires its gate — park on timeout). Then report per `code.md § Done` — the same five blocks (Verdict · Learned · Status · Open · Emerged), the closing line and the same status words, with a Status row for the re-verification: a reverted state nobody re-checked is `not proven`. What the revert re-opened belongs in Emerged, and Step 3's flip back to `open` is what earns it that block — the row cites the roadmap id.
+Push + verified scorecard, same as `/code` Step 5. If the original change was deployed, redeploy the reverted state to the same envs via `<PREFIX>-deploy` (prod requires its gate — park on timeout). Then report per `.claude/skills/code/references/close-out.md` — the same five blocks (Verdict · Learned · Status · Open · Emerged), the closing line and the same status words, with a Status row for the re-verification: a reverted state nobody re-checked is `not proven`. What the revert re-opened belongs in Emerged, and Step 3's flip back to `open` is what earns it that block — the row cites the roadmap id.
 ```
 
 ---
 
-## § /tidy — tidy.md (Claude Code)
+## § /tidy — skills/tidy/SKILL.md
 
 ```markdown
 ---
+name: tidy
 description: Resolve leftover WIP — sweep the dirty working tree, stashes, worktrees and stale branches, investigate history to establish what each item actually is, then route every item to commit / deliver / discard / ignore.
 ---
 
@@ -1461,17 +1367,18 @@ In this order, so nothing is destroyed before it is recoverable:
 
 ## Done
 
-Report per `code.md § Done` — the same five blocks (Verdict · Learned · Status · Open · Emerged) and closing line, the same closed status words, the same writing rules.
+Report per `.claude/skills/code/references/close-out.md` — the same five blocks (Verdict · Learned · Status · Open · Emerged) and closing line, the same closed status words, the same writing rules.
 
-**This run's rows.** Re-run the Step 1 sweep and make it the Status block — working tree, unpushed commits, stashes, worktrees, branches, CI — each row an observed fact, never a claim about what was applied. Every item you touched gets a row carrying its disposition. `deliver` and `keep` items are still dirty **by design**: they are Open rows naming the command they go to, so "clean" is never overstated. A `tidy-discard-*` stash is an **Emerged** row — it is named, and this command's own Step 1 sweep is what surfaces it again. Work you found that belongs to someone else's backlog is an Emerged row too, filed per `code.md § Done` block 4 and cited by id — this lane has no `<PREFIX>-dev` to file it for you.
+**This run's rows.** Re-run the Step 1 sweep and make it the Status block — working tree, unpushed commits, stashes, worktrees, branches, CI — each row an observed fact, never a claim about what was applied. Every item you touched gets a row carrying its disposition. `deliver` and `keep` items are still dirty **by design**: they are Open rows naming the command they go to, so "clean" is never overstated. A `tidy-discard-*` stash is an **Emerged** row — it is named, and this command's own Step 1 sweep is what surfaces it again. Work you found that belongs to someone else's backlog is an Emerged row too, filed per `.claude/skills/code/references/close-out.md` block 4 and cited by id — this lane has no `<PREFIX>-dev` to file it for you.
 ```
 
 ---
 
-## § /wrap — wrap.md (Claude Code)
+## § /wrap — skills/wrap/SKILL.md
 
 ```markdown
 ---
+name: wrap
 description: Manually trigger post-change close-out — <PREFIX>-log + <PREFIX>-docs + <PREFIX>-skill reference sync. Use when work happened outside the /code or /fix pipelines.
 ---
 
@@ -1513,7 +1420,7 @@ Skip if `--no-push` was passed or no remote is configured. Resolve pushability v
 
 ## Done
 
-Report per `code.md § Done` — the same five blocks (Verdict · Learned · Status · Open · Emerged) and closing line, the same closed status words, the same writing rules. This is the shortest lane, so most runs are a one-line Verdict, a five-row Status, two `None`s, and a closing line saying it is safe to start fresh.
+Report per `.claude/skills/code/references/close-out.md` — the same five blocks (Verdict · Learned · Status · Open · Emerged) and closing line, the same closed status words, the same writing rules. This is the shortest lane, so most runs are a one-line Verdict, a five-row Status, two `None`s, and a closing line saying it is safe to start fresh.
 
-**This run's rows.** Status: the change being wrapped, the delivery-log entry, docs, reference sync, and the push — the last three from the Step 4 checks, each verified against reality. The change itself is `done`, not `proven`, unless something actually exercised it — ad-hoc work usually has nothing that did, and saying so is the point of wrapping it. Open: a source finding from Step 0 with `Next: /fix <it>`, anything left unpushed and why, docs left stale. This lane runs no `<PREFIX>-dev`, so **scope it uncovered has no writer but this one** — file it as a roadmap item per `code.md § Done` block 4 and make it an Emerged row citing the id, or leave it Open with the command that would pick it up. Naming it in prose alone is how ad-hoc scope disappears. Do not describe what `<PREFIX>-log`, `<PREFIX>-docs` or `<PREFIX>-skill` did — the log entry is that record.
+**This run's rows.** Status: the change being wrapped, the delivery-log entry, docs, reference sync, and the push — the last three from the Step 4 checks, each verified against reality. The change itself is `done`, not `proven`, unless something actually exercised it — ad-hoc work usually has nothing that did, and saying so is the point of wrapping it. Open: a source finding from Step 0 with `Next: /fix <it>`, anything left unpushed and why, docs left stale. This lane runs no `<PREFIX>-dev`, so **scope it uncovered has no writer but this one** — file it as a roadmap item per `.claude/skills/code/references/close-out.md` block 4 and make it an Emerged row citing the id, or leave it Open with the command that would pick it up. Naming it in prose alone is how ad-hoc scope disappears. Do not describe what `<PREFIX>-log`, `<PREFIX>-docs` or `<PREFIX>-skill` did — the log entry is that record.
 ```

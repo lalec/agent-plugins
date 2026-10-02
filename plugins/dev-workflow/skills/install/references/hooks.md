@@ -12,6 +12,7 @@ Create `.claude/hooks/governed-paths.conf` from the template in `tpl-skill-guard
 - `<PATH_MAP_ENTRIES>` → one `'PATTERN:SKILL'` entry per confirmed domain skill **plus** one entry for `<PREFIX>-deploy` covering the IaC/CI/CD/Build/Deployment paths from `CATEGORY_MAP` (omit the `<PREFIX>-deploy` entry only when no such categories were discovered). Standard catch-alls go at the end (see `tpl-skill-guard.md § How to generate governed-paths.conf`).
 - `<SKILL_SELF_OWNERSHIP_ENTRIES>` → one `'^\.claude/skills/<PREFIX>-<name>/:<PREFIX>-<name>'` entry per installed skill (all lifecycle + domain skills from this run), placed before the `.claude/skills/` catch-all.
 - `<REF_WATCH>` → ERE alternation of reference-worthy source paths derived from `CATEGORY_MAP` (Backend route/handler dirs, schema/model files, Auth paths). Set `''` when nothing clearly reference-worthy is identifiable.
+- `<UNATTENDED_DENY>` → the `DEPLOY_PATHS` value plus the Auth category's paths from `CATEGORY_MAP` (and a discovered migrations directory), as `tpl-skill-guard.md` describes; `DEPLOY_PATHS` alone when auth paths are unknown, stated as such.
 - `<COPY_PATHS>` → the Frontend category's paths from `CATEGORY_MAP` when `<PREFIX>-design` was created; `''` otherwise.
 
 This is the **only** file that should contain path→skill mappings. Do not duplicate patterns in hook scripts.
@@ -82,3 +83,7 @@ On no, print the copy command and the exact settings block so the user can paste
 **One file per session is also not optional, and the reason is worth knowing.** A first version wrote one shared path. On a machine running 12 concurrent sessions — each re-rendering every 60 s — that file flipped between 46% and 7% for the same window four seconds apart, and published a missing window under a timestamp zero seconds old. A mission read it, reversed its own correct decision to stop, ran into the limit, and had a subagent killed mid-write against production. The script now writes `~/.claude/usage/<session id>.json` and `--read` reconciles them; **every caller must use `--read`** and never open those files, or it is reading one arbitrary session again.
 
 Never write this without asking — it is the second of only two things in this install that touch anything outside the repo. Never run the step from a non-interactive session. It is machine-scoped, so a second project's install finds it already wired and skips.
+
+**Step 6 — Let a long run compact itself at the right point (nothing to write)**
+
+`/pilot` reads its own context use at every task boundary (the snapshot from Step 5 tees it) and writes a handover at 20%; Claude Code's auto-compaction then does the compacting, and the run re-orients from the handover. For that to line up, the auto-compact window must sit near the same point. Tell the user once — this is a built-in command only a person can type — "Run `/autocompact 200k` once; it saves to your user settings and applies to every project. On a 200K model use `/autocompact 100k`." Never edit the user's settings for this, and never have a run type `/compact`: a built-in command reaches the model as plain text.

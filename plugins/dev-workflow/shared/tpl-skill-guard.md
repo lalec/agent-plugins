@@ -11,6 +11,7 @@ Replace these placeholders before writing the files:
 - `<REF_WATCH>` → optional ERE alternation of reference-worthy source files (API route/handler dirs, schema/model files, auth middleware) derived from the category map. Used by `ref-sync-check.sh` to decide whether a modify-only commit warrants a reference-sync warning. `''` when nothing clearly reference-worthy is identifiable — structural changes (add/delete/rename) in governed roots always warn regardless
 - `<DEPENDENCY_MANIFESTS>` → optional ERE alternation of the project's dependency manifests, matched by **filename, not layout** — `requirements*.txt`, `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `Gemfile` and their lock files, whichever of them this project actually has. Used by `ref-sync-check.sh` to warn when a dependency lands without its advisories being assessed. `''` when the project has none (the check is then silently skipped)
 - `<COPY_PATHS>` → optional ERE of the directories holding this project's **user-facing** source — the Frontend category's paths, only when a `<PREFIX>-design` skill is installed. Used by `ref-sync-check.sh` to warn when a commit adds an em dash to a user-readable string. `''` when there is no design skill (the check is then silently skipped)
+- `<UNATTENDED_DENY>` → ERE alternation of the paths an **unattended** `/pilot` run must never touch: `DEPLOY_PATHS` plus the Auth category's paths from `CATEGORY_MAP`, plus a migrations directory when one was discovered under Database/storage. Nobody is present to notice a change there, so a task whose paths intersect it is skipped and reported, never started unattended. When the auth paths are unknown, set it to the `DEPLOY_PATHS` value and say so — the project widens it.
 - `<LINT_CMD>` → project lint command (e.g. `pnpm exec biome check .` or `npm run lint`)
 - `<TYPECHECK_CMD>` → project typecheck command (e.g. `pnpm exec tsc --noEmit` or `npm run typecheck`)
 
@@ -60,6 +61,7 @@ DEPLOY_PATHS='<DEPLOY_PATHS>'
 REF_WATCH='<REF_WATCH>'
 DEPENDENCY_MANIFESTS='<DEPENDENCY_MANIFESTS>'
 COPY_PATHS='<COPY_PATHS>'
+UNATTENDED_DENY='<UNATTENDED_DENY>'
 
 PATH_MAP=(
   '^docs/roadmap\.md$:EXEMPT'
@@ -106,6 +108,7 @@ DEPLOY_PATHS='^(infra/|\.github/workflows/|scripts/deploy\.sh$|fly\.toml$)'
 REF_WATCH='^(api/routes/|api/models/|api/auth/)'
 DEPENDENCY_MANIFESTS='(^|/)(package\.json|package-lock\.json|pnpm-lock\.yaml|requirements[^/]*\.txt|pyproject\.toml|uv\.lock)$'
 COPY_PATHS='^app/'
+UNATTENDED_DENY='^(infra/|\.github/workflows/|scripts/deploy\.sh$|fly\.toml$|api/auth/)'
 
 PATH_MAP=(
   '^docs/project-log\.md$:EXEMPT'
@@ -134,6 +137,7 @@ For projects with no deploy mechanism (e.g. a static prototype), set `DEPLOY_PAT
 
 Rules:
 - `docs/project-log.md` is always `EXEMPT` (written by `<PREFIX>-log` without skill loading)
+- `UNATTENDED_DENY` is read by `/pilot` only (Step 2, the unattended skip); no hook enforces it, because the run that would violate it is the one deciding what to start, and a hook on `Edit` would fire inside the agent after the work had begun.
 - The entry-point skills (`code`, `fix`, `pilot`, … — the fixed names in `preflight.md § Where the entry points live`) are `OPEN`, exactly as `.claude/commands/` always was: they are commands in Rules 1–2's sense and no lifecycle skill owns them. The entry sits **before** the `.claude/skills/` catch-all, or every edit to one would demand `<PREFIX>-skill` loaded.
 - `.claude/pilot/` is always `EXEMPT` and gitignored whole — `/pilot` writes its run markers there at the top level and the lifecycle hooks write `limit-hit`; nothing in it is tracked. (Legacy note, kept so a grep finds it: the directory once held a tracked `shift.sh`, a verbatim plugin copy that no skill authors
 - `<PREFIX>-test/references/custom-tests.yaml` is always `EXEMPT` — the `/code`/`/fix` Step 1.5 persist step writes it at the top level and carries the schema itself; gating it forces a full skill load per pipeline run for a 10-line append

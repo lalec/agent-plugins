@@ -359,7 +359,7 @@ For each confirmed domain skill `<PREFIX>-<name>`:
 
 ### 3b. Hooks + governed-paths.conf + settings.json
 
-Read `references/hooks.md` now and run its five steps in order: `governed-paths.conf`, the hook scripts, `settings.json`, the standing mission on a schedule, the opt-in allowance snapshot. Nothing in it is optional to read — the substitution rules for the conf and the bare-shell rule for `pre-handoff-check.sh` are where installs go wrong.
+Read `references/hooks.md` now and run its six steps in order: `governed-paths.conf`, the hook scripts, `settings.json`, the standing mission on a schedule, the opt-in allowance snapshot, the one-line auto-compact instruction. Nothing in it is optional to read — the substitution rules for the conf and the bare-shell rule for `pre-handoff-check.sh` are where installs go wrong.
 
 ---
 

@@ -4,6 +4,11 @@
 #   write (status line):  statusLine.command = bash ~/.claude/usage-snapshot.sh <your original command>
 #   read  (a run):        bash ~/.claude/usage-snapshot.sh --read
 #
+# Also tees the session's own context_window.used_percentage, printed as `context: N% used` — the
+# figure /pilot's context ladder reads at every task boundary. Context is per session, so it is never
+# aggregated across siblings. Each window line also carries `resets_at=<epoch>`, the key /pilot's
+# weekly-budget ledger joins on (a formatted time would change with locale and break the join).
+#
 # Claude Code publishes the live subscription figures — percent of the 5-hour window used, percent of
 # the week used, and when each resets — to exactly one place: the status-line command's stdin. No hook
 # receives them and no endpoint serves them, so a run that wants to know how much allowance is left
@@ -129,10 +134,16 @@ for kind, label in (("five_hour", "5-hour"), ("seven_day", "7-day")):
     hrs = (resets - now) / 3600.0
     lines.append(
         f"{label}: {used:.0f}% used, {100 - used:.0f}% left, resets "
-        f"{time.strftime('%H:%M %d-%b', time.localtime(resets))} (in {hrs:.1f}h)"
+        f"{time.strftime('%H:%M %d-%b', time.localtime(resets))} (in {hrs:.1f}h) · resets_at={resets}"
         f" · {len(agree)} session(s) on this window"
         + (" · borrowed: this session reports no such window" if borrowed else "")
     )
+# Context is per session, so no sibling aggregation: this session's own last figure, or unknown.
+ctx = own.get("context") if isinstance(own.get("context"), dict) else None
+if ctx and isinstance(ctx.get("used_percentage"), (int, float)):
+    lines.append(f"context: {ctx['used_percentage']:.0f}% used (this session)")
+else:
+    lines.append("context: unknown")
 print("\n".join(lines))
 PY
   exit 0
@@ -147,8 +158,9 @@ if command -v jq >/dev/null 2>&1; then
     (.rate_limits // {}) as $r
     | (.session_id // $envsid) as $sid
     | select(($sid | length) > 0)
-    | select(($r.five_hour // $r.seven_day) != null)
+    | select((($r.five_hour // $r.seven_day) != null) or (.context_window.used_percentage != null))
     | {sid: $sid, written_at: (now | floor)}
+      + (if .context_window.used_percentage != null then {context: {used_percentage: .context_window.used_percentage}} else {} end)
       + (if $r.five_hour then {five_hour: {used_percentage: $r.five_hour.used_percentage, resets_at: $r.five_hour.resets_at}} else {} end)
       + (if $r.seven_day then {seven_day: {used_percentage: $r.seven_day.used_percentage, resets_at: $r.seven_day.resets_at}} else {} end)
     ' 2>/dev/null)

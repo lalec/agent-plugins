@@ -17,7 +17,7 @@ Replace these placeholders before writing the files:
 
 **Hook conduct rules (apply to every script below):**
 - *Gates* (skill-guard, path-coverage, dependency-guard, package-edit-guard, pre-handoff, close-out-gate) exit 2 with an actionable message on violation, 0 otherwise. `agent-mark` is the one gate on a lifecycle event: it blocks a stop through `decision: block` JSON (exit codes carry no meaning on `SubagentStop`), and only once per agent.
-- *Lifecycle recorders* (pilot-cleanup on `SessionEnd`, limit-mark on `StopFailure`) write a file and exit 0; Claude Code ignores their output entirely, so the file is their whole effect.
+- *Lifecycle recorders* (pilot-cleanup on `SessionEnd`, limit-mark on `StopFailure`, precompact-handover on `PreCompact`) write a file and exit 0; Claude Code ignores their output entirely, so the file is their whole effect.
 - *Recorders* (ref-sync-check, skill-mark, post-commit) must **always exit 0** — a recorder that exits non-zero makes successful commands surface as errors and burns a reasoning turn. A recorder with something to tell the model prints it as `hookSpecificOutput.additionalContext` JSON on stdout. Stderr from a hook that exits 0 goes to the debug log only, so a warning written there reaches neither the model nor the user.
 
 ---
@@ -604,9 +604,41 @@ exit 0
 
 ---
 
+## § precompact-handover.sh
+
+Fires on `PreCompact`. Writes a **fallback** handover from files alone — git log, status, branch, `.claude/pilot/last-run.json`, the `running` marker — so a compaction that lands mid-task, before the run reached a boundary, still leaves a record `/proceed` can read. It is the brute half's safety net, not a replacement for the run's own handover, which is written at 30% context and refreshed at every boundary after. Output is ignored on this event except `decision: block`, which this hook never returns: blocking compaction would exhaust the context instead.
+
+```bash
+#!/bin/bash
+# PreCompact hook — writes a file-derived fallback handover before Claude Code compacts.
+INPUT=$(cat) || exit 0
+ROOT="${CLAUDE_PROJECT_DIR:-.}"
+DIR="$ROOT/.claude/handovers"
+mkdir -p "$DIR" 2>/dev/null || exit 0
+TS=$(date +%Y-%m-%dT%H%M)
+TRIGGER=$(echo "$INPUT" | jq -r '.what_triggered_compaction // "auto"' 2>/dev/null)
+OUT="$DIR/${TS}_precompact.md"
+{
+  echo "# Handover — fallback written by precompact-handover.sh ($TRIGGER compaction)"
+  echo
+  echo "This file was written by a hook from files alone, at the moment the context was compacted. If a newer run-written handover exists beside it, prefer that one. Files win over both."
+  echo
+  echo "## Branch"; git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null
+  echo; echo "## Commits (last 10)"; git -C "$ROOT" log --oneline -10 2>/dev/null
+  echo; echo "## Working tree"; git -C "$ROOT" status --short 2>/dev/null
+  echo; echo "## Held commits"; git -C "$ROOT" rev-list --count @{upstream}..HEAD 2>/dev/null || echo "no upstream"
+  if [ -f "$ROOT/.claude/pilot/running" ]; then echo; echo "## Run in flight"; cat "$ROOT/.claude/pilot/running"; fi
+  if [ -f "$ROOT/.claude/pilot/last-run.json" ]; then echo; echo "## last-run.json"; cat "$ROOT/.claude/pilot/last-run.json"; fi
+  echo; echo "## How to resume"; echo "1. /proceed — then compare this file with git and the delivery log; files win."
+} > "$OUT" 2>/dev/null
+exit 0
+```
+
+---
+
 ## § settings.json
 
-Wire all 12 hook scripts — 14 entries, since `skill-guard.sh` sits under both `Edit` and `Write` and `pre-handoff-check.sh` under both `Skill` and `Task|Agent`. If the file already exists, merge the `hooks` key without removing unrelated settings. Timeout unit: **seconds**. The `Task|Agent` matcher is what makes `pre-handoff-check.sh` fire when qa is spawned as a subagent — without it the gate never runs in the pipeline. The `SubagentStop` matcher names the four pipeline agents so a research fork or an Explore child never gets blocked for lacking a handoff block.
+Wire all 13 hook scripts — 15 entries, since `skill-guard.sh` sits under both `Edit` and `Write` and `pre-handoff-check.sh` under both `Skill` and `Task|Agent`. If the file already exists, merge the `hooks` key without removing unrelated settings. Timeout unit: **seconds**. The `Task|Agent` matcher is what makes `pre-handoff-check.sh` fire when qa is spawned as a subagent — without it the gate never runs in the pipeline. The `SubagentStop` matcher names the four pipeline agents so a research fork or an Explore child never gets blocked for lacking a handoff block.
 
 ```json
 {
@@ -681,6 +713,13 @@ Wire all 12 hook scripts — 14 entries, since `skill-guard.sh` sits under both 
         "matcher": "rate_limit",
         "hooks": [
           { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/limit-mark.sh", "timeout": 5 }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/precompact-handover.sh", "timeout": 10 }
         ]
       }
     ]

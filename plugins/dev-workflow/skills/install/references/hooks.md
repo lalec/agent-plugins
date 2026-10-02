@@ -19,7 +19,7 @@ This is the **only** file that should contain path→skill mappings. Do not dupl
 
 **Step 2 — Create hook scripts**
 
-Create all 12 hooks from their templates in `tpl-skill-guard.md`. Substitute `<PREFIX>` throughout:
+Create all 13 hooks from their templates in `tpl-skill-guard.md`. Substitute `<PREFIX>` throughout:
 
 | Hook | Template section |
 |---|---|
@@ -35,10 +35,11 @@ Create all 12 hooks from their templates in `tpl-skill-guard.md`. Substitute `<P
 | `agent-mark.sh` | § agent-mark.sh |
 | `pilot-cleanup.sh` | § pilot-cleanup.sh |
 | `limit-mark.sh` | § limit-mark.sh |
+| `precompact-handover.sh` | § precompact-handover.sh |
 
 For `pre-handoff-check.sh`, also substitute `<LINT_CMD>` and `<TYPECHECK_CMD>` with the commands discovered in Phase 1 — following the **Bare-shell rule** in `tpl-skill-guard.md § pre-handoff-check.sh`: the hook runs without the project's activated environment, so a bare interpreter/tool command (`ruff check .`, `python -m ruff`, `eslint .`, `tsc`) that works in a terminal will silently fail the gate. Substitute an env-launcher (`uv run …`, `poetry run …`, `pnpm exec …`, `npx --no-install …`) or an absolute project-env path (`.venv/bin/…`, `node_modules/.bin/…`); when the interpreter path itself may or may not exist, resolve it defensively at the top of the hook (the venv-fallback snippet in the template Note). If no lint/typecheck command was discovered, leave the `<fill in>` stub and tell the user. A command counts as *discovered* only if it **verifiably resolves** — the `lint` script exists under `scripts` in `package.json`, or the linter is an installed dependency; a conventional-but-unwired `npm run lint` errors on every run, so stub it rather than substitute it.
 
-Make all 12 executable:
+Make all 13 executable:
 ```bash
 chmod +x .claude/hooks/skill-guard.sh
 chmod +x .claude/hooks/path-coverage-check.sh
@@ -52,6 +53,7 @@ chmod +x .claude/hooks/post-commit.sh
 chmod +x .claude/hooks/agent-mark.sh
 chmod +x .claude/hooks/pilot-cleanup.sh
 chmod +x .claude/hooks/limit-mark.sh
+chmod +x .claude/hooks/precompact-handover.sh
 ```
 
 **Step 3 — Wire `settings.json`**
@@ -86,4 +88,4 @@ Never write this without asking — it is the second of only two things in this 
 
 **Step 6 — Let a long run compact itself at the right point (nothing to write)**
 
-`/pilot` reads its own context use at every task boundary (the snapshot from Step 5 tees it) and writes a handover at 20%; Claude Code's auto-compaction then does the compacting, and the run re-orients from the handover. For that to line up, the auto-compact window must sit near the same point. Tell the user once — this is a built-in command only a person can type — "Run `/autocompact 200k` once; it saves to your user settings and applies to every project. On a 200K model use `/autocompact 100k`." Never edit the user's settings for this, and never have a run type `/compact`: a built-in command reaches the model as plain text.
+`/pilot` reads its own context use at every task boundary (the snapshot from Step 5 tees it), writes a handover at 30% and refreshes it at every boundary after; Claude Code's auto-compaction is the fallback and must fire **later**, so the intelligent handover carries as much of a long run as possible and the brute summary as little. Tell the user once — this is a built-in command only a person can type — "Run `/autocompact 450k` once; it saves to your user settings and applies to every project. On a 200K model use `/autocompact 90k`." The `precompact-handover.sh` hook covers the moment compaction fires anyway. Never edit the user's settings for this, and never have a run type `/compact`: a built-in command reaches the model as plain text.

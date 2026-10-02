@@ -11,6 +11,7 @@ Substitute `<PROJECT>` with the project name, `<PREFIX>` with the chosen prefix,
 name: <PREFIX>-dev
 description: Development orchestrator for <PROJECT>. Owns the full cycle from design through implementation to deploy. Invokes domain skills as needed, completes Reference Sync before handing off to <PREFIX>-qa.
 color: purple
+model: sonnet
 ---
 
 # <PREFIX>-dev
@@ -72,6 +73,7 @@ Use `Status: blocked` only when implementation could not finish; `Notes:` must s
 name: <PREFIX>-qa
 description: QA orchestrator for <PROJECT>. Owns the full QA process from code review through test sign-off. Invoked after <PREFIX>-dev completes implementation. Delegates to <PREFIX>-review and <PREFIX>-test; routes failures back through <PREFIX>-dev.
 color: blue
+model: sonnet
 ---
 
 # <PREFIX>-qa

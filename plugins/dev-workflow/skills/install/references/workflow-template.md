@@ -91,6 +91,7 @@ All hooks wired in `.claude/settings.json`.
 | `post-commit.sh` | PostToolUse Bash | Reminds to run `<PREFIX>-log` after every commit |
 | `agent-mark.sh` | SubagentStop (pipeline agents) | Records every pipeline-agent stop to a session marker; blocks a stop **once** when the agent's last message lacks its `## Handoff` block |
 | `pilot-cleanup.sh` | SessionEnd | Removes `.claude/pilot/running` when its second line is this session's id |
+| `precompact-handover.sh` | PreCompact | Writes a file-derived fallback handover to `.claude/handovers/` the moment compaction starts, so `/proceed` always has a record |
 | `limit-mark.sh` | StopFailure `rate_limit` | Writes `.claude/pilot/limit-hit` (ts · session id · error_type) so the next `/pilot` resumes a limit-killed run instead of waiting it out |
 
 ## Delivery Log Format

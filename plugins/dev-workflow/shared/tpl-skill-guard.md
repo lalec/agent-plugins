@@ -312,7 +312,7 @@ exit 0
 
 ## § pre-handoff-check.sh
 
-Blocks invocation of `<PREFIX>-qa` if the working tree has uncommitted changes, lint fails, or typecheck fails. Enforces commit-before-review and clean-code gates mechanically. **Must match both invocation paths:** the Skill tool (`tool_input.skill`) *and* an Agent/Task spawn (`tool_input.subagent_type`) — in the pipeline qa is spawned as a subagent, so a Skill-only match makes this gate dead code.
+Blocks invocation of `<PREFIX>-qa` if the working tree has uncommitted changes, lint fails, or typecheck fails — and blocks **every** pipeline-agent dispatch while `.claude/pilot/stop` exists, so a stop dropped from a phone lands at the next subagent boundary. Enforces commit-before-review and clean-code gates mechanically. **Must match both invocation paths:** the Skill tool (`tool_input.skill`) *and* an Agent/Task spawn (`tool_input.subagent_type`) — in the pipeline qa is spawned as a subagent, so a Skill-only match makes this gate dead code.
 
 ```bash
 #!/bin/bash
@@ -321,6 +321,14 @@ Blocks invocation of `<PREFIX>-qa` if the working tree has uncommitted changes, 
 INPUT=$(cat) || exit 0
 SKILL=$(echo "$INPUT" | jq -r '.tool_input.skill // empty' 2>/dev/null)
 AGENT_TYPE=$(echo "$INPUT" | jq -r '.tool_input.subagent_type // empty' 2>/dev/null)
+
+# A stop file refuses every pipeline-agent dispatch: a /pilot stop dropped mid-task lands at the next
+# subagent boundary instead of the next task boundary. The run deletes the file when it honours it.
+STOP="${CLAUDE_PROJECT_DIR:-.}/.claude/pilot/stop"
+if [ -f "$STOP" ] && [ -n "$AGENT_TYPE" ] && echo "$AGENT_TYPE" | grep -qE '^<PREFIX>-(dev|qa|pm|verify)$'; then
+  echo "Stop gate: .claude/pilot/stop exists ($(head -1 "$STOP")) — no further agent is dispatched; close out the run, which removes the file." >&2
+  exit 2
+fi
 
 # Fire when qa is invoked as a skill OR spawned as a subagent
 [ "$SKILL" != "<PREFIX>-qa" ] && [ "$AGENT_TYPE" != "<PREFIX>-qa" ] && exit 0

@@ -291,6 +291,9 @@ A plan written by `/blueprint` is one umbrella item plus children that carry `**
 umbrella's id) and `**Depends on:**` (sibling ids, or `nothing`). Readers nest children under their
 umbrella; the umbrella closes when its last child does.
 
+A closed item is shrunk to its heading and ids plus `**Body:** <commit>` once it is committed; read
+its full text with `python3 .claude/graph/graph.py item <id>`.
+
 ---
 
 ## Improvements

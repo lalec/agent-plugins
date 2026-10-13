@@ -2485,7 +2485,13 @@ python3 .claude/graph/graph.py roadmap-open [--for <path>...]   open items + sta
 python3 .claude/graph/graph.py open-deferrals [--with-fail] [<path>...] deferred or blocked, not passing since
 python3 .claude/graph/graph.py open-gates             every parking no later decision answered — with what would
                                                       answer it, its age in days, and what it releases
+python3 .claude/graph/graph.py item <roadmap-id>      one item's full text — a stub's body read from its commit
+python3 .claude/graph/graph.py compact [--dry-run]    stub every closed roadmap item already committed
 ```
+
+**`compact` is the graph's one write** — it shrinks closed roadmap items to stubs and keeps their
+bodies in git; what a stub keeps and why every query answers the same afterwards is in
+`references/graph-schema.md § Roadmap stubs`.
 
 Add `--json` to any query for machine-readable output. Queries rebuild automatically when the
 index is missing or behind `HEAD`, so `build` is only needed after a manual artifact edit.
@@ -2497,6 +2503,7 @@ SITUATION?
 │
 ├─ Need an answer from the graph        → run the query above; no reading required
 ├─ Adding/changing an edge or query     → references/graph-schema.md
+├─ Reading or changing a roadmap stub   → references/graph-schema.md § Roadmap stubs
 ├─ A query returns something surprising → references/graph-schema.md § Provenance, then the cited artifact
 └─ Index looks stale or corrupt         → `graph.py build`; it is always safe to reproject
 ```
@@ -2635,4 +2642,19 @@ The log parser accepts entry headings that predate the current format — missin
 hashes joined by `+` or `,`, and non-commit placeholders such as `uncommit`. An entry with no
 usable sha still contributes its `ADDRESSES` edge; commit-keyed edges need a commit.
 `custom-tests.yaml` `paths:` is read in both the block-list and inline-flow-list forms.
+
+## Roadmap stubs
+
+`compact` shrinks a closed item — status `done`, `closed`, `removed`, `resolved`, `cancelled` or
+`shipped`, the same set that makes `roadmap-open` drop it — to its `### ` heading plus one line:
+`**Id:**`, `**Status:**` (up to its first ` — `), `**Priority:**`, `**Parent:**`, `**Depends on:**`,
+`**Category:**`, then `**Body:** <commit>`. Those are every field the projector reads from a
+roadmap item, so ids still resolve for `**Addresses:**`, `**Parent:**` and `**Depends on:**`, and a
+plan still nests. Before writing, `compact` parses the file both ways and compares each item's id,
+title, section, status, priority, parent and dependencies; any difference and it writes nothing.
+
+An item is stubbed only when its text matches `HEAD` exactly, so `**Body:**` always names a commit
+holding the final closed body — an item closed in the working copy waits for the next run. An item
+that already carries `**Body:**` is left alone, so a second run changes nothing. `item <id>` reads
+the body back from that commit and prints the one item.
 ~~~

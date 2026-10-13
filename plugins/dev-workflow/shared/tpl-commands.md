@@ -1206,7 +1206,7 @@ Read-only. Every project rule of the form "read X before proposing Y" applies he
 
 | Read | For | Fallback |
 |---|---|---|
-| `docs/roadmap.md` | **Prior art** — an open or closed item on the same ground. Name its id, or write "no prior art found" | none — the file is the store |
+| `docs/roadmap.md` | **Prior art** — an open or closed item on the same ground. Name its id, or write "no prior art found". A closed item is a stub (heading + ids + `**Body:**`), so a search matches its title, not its decisions — read a hit whole with `python3 .claude/graph/graph.py item <id>` | none — the file is the store |
 | `docs/project-log.md` and `git log --grep=^Revert --oneline` | **Reverted levers** — a change the record shows tried and reverted is off-limits unless this plan carries new evidence, and the umbrella's Out of scope names it | `git log` alone |
 | `.claude/skills/whats-up/SKILL.md § Step 1–2` | the stores and their reconcile, run once as that command runs them — a gate holding the area, a stalled in-progress item, a `blocked` check on its paths | that command's per-store fallbacks |
 | `python3 .claude/graph/graph.py blast <paths the goal touches> --ids <prior-art ids>` | owners, verifications with status, deliveries, deferrals, affine items and the gates holding them | inference from `governed-paths.conf` and the log |

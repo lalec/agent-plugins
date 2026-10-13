@@ -8,6 +8,8 @@ across every project.
 The index is DERIVED and DISPOSABLE. git and the six source artifacts stay canonical;
 `build` with no args discards edges.jsonl and reprojects from scratch. Every read site
 must fall back to its pre-graph behaviour if this script is absent or exits non-zero.
+`compact` is the one write: it shrinks closed roadmap items to the fields the graph reads,
+and refuses to write if the graph's view of any item would change.
 
     graph.py build                   reproject the index from scratch (<1s on a 200-entry log)
     graph.py covers <path>...        verifications whose paths intersect these
@@ -23,6 +25,9 @@ must fall back to its pre-graph behaviour if this script is absent or exits non-
                                      condition and age in days
     graph.py open-advisories [<path>...]      advisories assessed exploitable and not yet
                                               fixed, plus the count still unassessed
+    graph.py item <roadmap-id>       one item's full text; a stub's body is read from git
+    graph.py compact [--dry-run]     stub every closed roadmap item already committed;
+                                     the body stays in git behind its `**Body:**` commit
 
 Add --json to any query for machine-readable output.
 """
@@ -428,6 +433,81 @@ def dangling_roadmap_refs(items: list[dict]) -> list[tuple[str, str, str]]:
             if d not in ids:
                 out.append((it["id"], "Depends on", d))
     return out
+
+
+# ------------------------------------------------------------------ roadmap compaction
+
+# Every field the graph reads from a roadmap item, in the order a stub writes them. A closed
+# item keeps exactly these plus `**Body:**`; the rest of its text lives in git. Measured on
+# jobzeeker: 45% of the roadmap text agents pulled into context came from closed item bodies.
+STUB_FIELDS = ("Id", "Status", "Priority", "Parent", "Depends on", "Category")
+# The invariant `compact` checks before it writes: the graph's view of every item is unchanged.
+VIEW_KEYS = ("id", "title", "section", "status", "open", "priority", "parent", "depends_on")
+
+
+def roadmap_spans(text: str) -> list[tuple[int, int]]:
+    """(start, end) line ranges of each `### ` item, in `parse_roadmap` order.
+
+    Same boundaries as the parser — an item runs to the next `### ` or `## ` — on the
+    fence-stripped lines, so a fenced format example is never taken for an item."""
+    lines = strip_fences(text).splitlines()
+    heads = [n for n, ln in enumerate(lines) if ln.strip().startswith("### ")]
+    out = []
+    for n in heads:
+        end = next(
+            (k for k in range(n + 1, len(lines)) if lines[k].strip().startswith(("### ", "## "))),
+            len(lines),
+        )
+        out.append((n, end))
+    return out
+
+
+def roadmap_view(text: str) -> list[tuple]:
+    return [tuple(str(it[k]) for k in VIEW_KEYS) for it in parse_roadmap(text)]
+
+
+def item_bodies(text: str) -> dict[str, list[str]]:
+    """id → the item's raw lines. First occurrence wins, as ids are unique by contract."""
+    lines = text.splitlines()
+    out: dict[str, list[str]] = {}
+    for it, (s, e) in zip(parse_roadmap(text), roadmap_spans(text)):
+        out.setdefault(it["id"], lines[s:e])
+    return out
+
+
+def stub_lines(item: dict, raw: list[str], sha: str) -> list[str]:
+    """Heading + one packed metadata line; a trailing `---` separator is kept."""
+    f = item["fields"]
+    vals = {"Id": item["id"], **{k: f[k] for k in STUB_FIELDS[1:] if f.get(k)}}
+    # `done · 2026-09-18 — closed by its own stated rule …`: the prose after the dash is
+    # body, and kept it made 36 of 407 measured stubs longer than 400 characters.
+    vals["Status"] = vals.get("Status", "").split(" — ")[0]
+    meta = " · ".join(f"**{k}:** {vals[k]}" for k in STUB_FIELDS if k in vals)
+    tail = [ln for ln in raw[1:] if ln.strip()][-1:]
+    sep = ["---", ""] if tail == ["---"] else []
+    return [raw[0], "", f"{meta} · **Body:** {sha}", "", *sep]
+
+
+def compact_roadmap(text: str, head_text: str, sha: str) -> tuple[str, int, int]:
+    """Stub every closed item whose exact text is already committed at `sha`.
+
+    An item is stubbed only once its closed form is in `head_text`, so `**Body:** <sha>`
+    always points at the full final body — a status flip or note still in the working copy
+    waits for the next run. Returns (new text, stubbed, closed items left waiting)."""
+    committed = item_bodies(head_text)
+    lines = text.splitlines()
+    out, last, stubbed, waiting = [], 0, 0, 0
+    for it, (s, e) in zip(parse_roadmap(text), roadmap_spans(text)):
+        if it["open"] or "Body" in it["fields"]:
+            continue
+        if committed.get(it["id"]) != lines[s:e]:
+            waiting += 1
+            continue
+        out += lines[last:s] + stub_lines(it, lines[s:e], sha)
+        last, stubbed = e, stubbed + 1
+    out += lines[last:]
+    new = "\n".join(out) + ("\n" if text.endswith("\n") else "")
+    return new, stubbed, waiting
 
 
 def _scalar(v: str) -> str:
@@ -1342,6 +1422,52 @@ def emit(payload, as_json: bool, lines: list[str]) -> None:
     print(json.dumps(payload, indent=2) if as_json else "\n".join(lines) or "(none)")
 
 
+def compact_cmd(src: Sources, dry_run: bool) -> int:
+    """The graph's one write: closed roadmap items become stubs, bodies stay in git."""
+    rel = src.roadmap.relative_to(src.root).as_posix()
+    sha = run_git(src.root, "rev-parse", "--short", "HEAD").strip()
+    head_text = run_git(src.root, "show", f"HEAD:{rel}") if sha else ""
+    if not head_text:
+        print(f"compact needs {rel} committed in git — nothing compacted", file=sys.stderr)
+        return 1
+    text = read(src.roadmap)
+    new, stubbed, waiting = compact_roadmap(text, head_text, sha)
+    if roadmap_view(new) != roadmap_view(text):
+        print("compact would change what the graph reads — nothing written", file=sys.stderr)
+        return 1
+    print(
+        f"{'would stub' if dry_run else 'stubbed'} {stubbed} closed items · "
+        f"{len(text.encode())} → {len(new.encode())} bytes"
+        + (f" · {waiting} closed but not yet committed, left for the next run" if waiting else "")
+    )
+    if stubbed and not dry_run:
+        src.roadmap.write_text(new, encoding="utf-8")
+        write_index(src, project(src))
+    return 0
+
+
+def item_cmd(src: Sources, rest: list[str]) -> int:
+    """One item's full text — from git when the item is a stub. Never the whole file."""
+    if not rest:
+        print("item needs a roadmap id", file=sys.stderr)
+        return 2
+    rid, text = rest[0], read(src.roadmap)
+    it = next((i for i in parse_roadmap(text) if i["id"] == rid), None)
+    if it is None:
+        print(f"no roadmap item with id {rid!r}", file=sys.stderr)
+        return 1
+    sha = it["fields"].get("Body", "").strip()
+    if sha:
+        rel = src.roadmap.relative_to(src.root).as_posix()
+        text = run_git(src.root, "show", f"{sha}:{rel}")
+    body = item_bodies(text).get(rid)
+    if body is None:
+        print(f"{rid!r} is not in {sha or 'the roadmap'} — try git log -S'{rid}'", file=sys.stderr)
+        return 1
+    print("\n".join(body).rstrip())
+    return 0
+
+
 # --------------------------------------------------------------------------------- cli
 
 
@@ -1392,6 +1518,12 @@ def main(argv: list[str]) -> int:
                 file=sys.stderr,
             )
         return 0
+
+    if cmd == "compact":
+        return compact_cmd(src, "--dry-run" in rest)
+
+    if cmd == "item":
+        return item_cmd(src, rest)
 
     edges = load(src)
 

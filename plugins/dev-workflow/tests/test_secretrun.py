@@ -317,6 +317,22 @@ def test_redactor_full_hook_emits_updated_output(monkeypatch):
     assert "redacted 1" in hso["additionalContext"]
 
 
+def test_redactor_keeps_the_response_shape(monkeypatch):
+    bash = {"stdout": "leak ghp_012345678901234567890123456789abcd", "stderr": "",
+            "interrupted": False}
+    read = {"type": "text", "file": {"filePath": "/x", "content": "key: sk-proj-abcdef0123456789abcdef"}}
+    for resp, get in ((bash, lambda o: o["stdout"]), (read, lambda o: o["file"]["content"])):
+        monkeypatch.setattr(redact.sys, "stdin", io.StringIO(json.dumps(
+            {"tool_name": "Bash", "tool_response": resp})))
+        buf = io.StringIO()
+        monkeypatch.setattr(redact.sys, "stdout", buf)
+        redact.main()
+        out = json.loads(buf.getvalue())["hookSpecificOutput"]["updatedToolOutput"]
+        assert set(out) == set(resp)
+        assert "[REDACTED]" in get(out)
+    assert out["file"]["filePath"] == "/x"
+
+
 def test_redactor_leaves_normal_text():
     assert redact._scrub("a normal sentence 12 34") == ("a normal sentence 12 34", 0)
 

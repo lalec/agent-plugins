@@ -60,6 +60,8 @@ chmod +x .claude/hooks/precompact-handover.sh
 
 Use `tpl-skill-guard.md § settings.json`. If the file does not exist, create it from the template. If it already exists, merge the `hooks` key — add all hook entries without removing unrelated settings. Do not tell the user to wire hooks manually; write the file in this step.
 
+Then run `python3 .claude/secretrun/secretrun init`. It merges the secrets wrapper's own hooks (PATH on session start, the Bash guard, the output redactor) and the `.env` read-deny rules into the same file, idempotently; show the lines it printed.
+
 **Step 4 — The standing mission on a schedule (nothing to install)**
 
 `.claude/loop.md` is already written (Phase 2), so a bare `/loop 30m` in any session of this project runs `/pilot --max-tasks 1` every half hour — the attended form. For the form that needs no open session, tell the user, do not do it: in Claude Code Desktop open **Routines → New routine → Local**, folder = this repo, instructions `/pilot --max-tasks 1`, schedule hourly, permission mode as they prefer. It fires only while the app is open and the machine is awake, and it never creates a session this workflow did not ask for — the plugin schedules nothing itself, by design. There is no launchd job, no background process and no dollar cap to configure: the run's own `--budget` and allowance read bound what one firing may spend.

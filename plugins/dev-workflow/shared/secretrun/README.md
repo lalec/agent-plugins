@@ -1,0 +1,87 @@
+# secretrun
+
+**Keep secret values out of Claude Code.** The agent handles secret *names*;
+`secretrun` resolves each name to its value inside its own process, hands the
+value to one child command, and masks it — plus its base64, URL-encoded and
+JSON-escaped forms — out of that command's output as `[REDACTED:NAME]`. Nothing
+reaches the command line, the agent's context, or the session transcript.
+
+One folder, Python standard library only. dev-workflow installs it into every
+project; any other project can use it on its own.
+
+## Use it in any project
+
+1. Copy this folder into the project, e.g. to `.claude/secretrun/`.
+2. Wire it: `python3 .claude/secretrun/secretrun init` — adds the hooks below to
+   `.claude/settings.json`. Takes effect in new sessions. Commit both.
+3. Declare the project's secrets by name in `.secretrun.json` at the repo root
+   (committed — it never holds values):
+
+```json
+{ "secrets": {
+    "E2E_EMAIL":    { "backend": "keychain" },
+    "E2E_PASSWORD": { "backend": "keychain" },
+    "DB_URL":       { "backend": "aws", "id": "dev/db/url" },
+    "STRIPE_KEY":   { "cmd": "aws ssm get-parameter --with-decryption --name /dev/stripe --query Parameter.Value --output text" },
+    "OPENAI_KEY":   { "cmd": "op read op://dev/openai/key" },
+    "MAPS_KEY":     { "cmd": "sed -n 's/^MAPS_KEY=//p' .env" }
+} }
+```
+
+4. Store each value yourself: `secretrun add NAME` opens a hidden prompt (in a
+   terminal) or a macOS dialog (inside Claude Code). For a `cmd` entry, store it
+   in that secret manager instead.
+
+For one copy that serves every project (and global skills that call `secretrun`
+by name), put the folder somewhere stable and run `secretrun init --global`.
+
+## Stores
+
+| Store | Entry | Notes |
+|---|---|---|
+| macOS Keychain | `{"backend": "keychain"}` (default) | `add`, `rm`, `ls` |
+| AWS Secrets Manager | `{"backend": "aws", "id": "<secret id>"}` | `add` writes a new version of an existing secret |
+| GCP Secret Manager | `{"backend": "gcp", "id": "<secret>"}` | same |
+| Any command | `{"cmd": "<prints the value>"}` | an env file, AWS Parameter Store, 1Password, Vault, Doppler — read-only here |
+
+A `cmd` runs from the folder holding `.secretrun.json`; its error output is
+discarded and one trailing newline is stripped. It is committed code, so it
+carries the same trust as a `package.json` script.
+
+## Commands
+
+```
+secretrun NAME [NAME...] [--stdin NAME] -- cmd args...   run cmd with the values
+secretrun check [NAME...]     OK / MISS per name (default: every manifest entry)
+secretrun add NAME            store a value — the user types it, never the agent
+secretrun rm NAME | ls | sync
+secretrun init [--global]     wire the hooks
+```
+
+A tool that reads a variable needs nothing else; a shell expansion goes inside
+`sh -c` so the value expands in the child, not on the command line:
+
+```
+secretrun E2E_EMAIL E2E_PASSWORD -- sh -c 'agent-browser fill @e1 "$E2E_EMAIL" && agent-browser fill @e2 "$E2E_PASSWORD" && agent-browser click @e3'
+secretrun GH_TOKEN --stdin GH_TOKEN -- gh auth login --with-token
+```
+
+An MCP server takes `secretrun` as its launcher (`"command": "<absolute path>/secretrun"`,
+`"args": ["TOKEN", "--", "npx", "<server>"]`), so the token is never in the config file.
+
+## What `init` wires
+
+| Hook | Does |
+|---|---|
+| SessionStart | puts this folder on `PATH`, so `secretrun` works by name |
+| PreToolUse · Bash (`guard.py`) | denies printing a `.env` file (`grep -c` still counts), `security … -w`, `dump-keychain`, `env`/`printenv` dumps, and a value on the `add` command line |
+| PostToolUse (`redact.py`) | replaces credential-*shaped* strings (`sk-…`, `ghp_…`, `AKIA…`, JWTs, keys) in any tool output |
+| `permissions.deny` | the Read tool on `.env` files (never `.env.example`), `~/.aws`, `~/.ssh`, `~/.config/gcloud` |
+
+Session transcripts stay readable — debugging across sessions keeps working.
+
+## Limits
+
+- Masking covers output, not intent: a child that sends a value over the network sends the real value.
+- Any process you own can read a child's environment while it runs; `--stdin` avoids that for tools that accept it.
+- Python cannot guarantee a value is wiped from memory; the process is short-lived, core dumps are off, and tracebacks never print.

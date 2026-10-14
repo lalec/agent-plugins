@@ -100,6 +100,7 @@ Walk the checklist before declaring done:
 - [ ] `<PREFIX>-review/references/security-review.md` carries `## Triage` (the four VEX statuses, the five justifications, the compensating-control rule) and a `## Escalate` naming the first push and the new-input-surface deploy plus the `git remote set-head` line — its checklist section A blocks on `affected`, not on high/critical
 - [ ] `tidy.md` carries the history-probe rule (no `discard`/`ignore` without a probe backing it), the 5-term disposition vocabulary, `discard` as a named stash (never `checkout --`/`rm`), and `git branch -d` never `-D`
 - [ ] Both `<PREFIX>-dev.md` and `<PREFIX>-qa.md` end with a `## Response Requirements` section (the **last** section of the file) containing the imperative "Every response MUST end with the `## Handoff` block" — terminal placement leverages prompt-recency so agents reliably emit the block
+- [ ] `.claude/secretrun/` is byte-identical to `../../shared/secretrun/` and tracked; `.claude/settings.json` wires `secretrun/guard.py` and `secretrun/redact.py`; `echo '{"tool_name":"Bash","tool_input":{"command":"cat .env"}}' | python3 .claude/secretrun/guard.py` exits 2; `CLAUDE.md § Secrets` names `secretrun`
 - [ ] No placeholder text (`<PROJECT>`, `<PREFIX>`, `<fill in>`, etc.) left in any installed file — prompt the user to fill these in
 
 Report a summary: what was installed, what stubs need filling in, and how to test the hooks:

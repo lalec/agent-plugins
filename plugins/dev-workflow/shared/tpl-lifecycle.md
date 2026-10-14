@@ -2481,17 +2481,25 @@ python3 .claude/graph/graph.py blast <path>... [--ids <roadmap-id>...]
                                                       one pack a task's qa and pm prompts carry inline
 python3 .claude/graph/graph.py history <path>             what shipped, was verified, or was reverted here
 python3 .claude/graph/graph.py roadmap-open [--for <path>...]   open items + status breakdown; ~match = path-affine;
-                                                      a plan's children nested under their umbrella
+                                                      a plan's children nested under their umbrella;
+                                                      `waiting on <repo>:<id>` = held by a sibling checkout
 python3 .claude/graph/graph.py open-deferrals [--with-fail] [<path>...] deferred or blocked, not passing since
 python3 .claude/graph/graph.py open-gates             every parking no later decision answered — with what would
                                                       answer it, its age in days, and what it releases
-python3 .claude/graph/graph.py item <roadmap-id>      one item's full text — a stub's body read from its commit
+python3 .claude/graph/graph.py item <roadmap-id>      one item's full text — a stub's body read from its commit;
+                                                      `<repo>:<id>` reads it from the sibling checkout
+python3 .claude/graph/graph.py dependents <roadmap-id>  open items in sibling checkouts that name this id — who
+                                                      to signal when it closes
 python3 .claude/graph/graph.py compact [--dry-run]    stub every closed roadmap item already committed
 ```
 
 **`compact` is the graph's one write** — it shrinks closed roadmap items to stubs and keeps their
 bodies in git; what a stub keeps and why every query answers the same afterwards is in
 `references/graph-schema.md § Roadmap stubs`.
+
+**`<repo>:<id>`** in a `**Parent:**` or `**Depends on:**` names an item in the sibling checkout
+`../<repo>` — a plan spanning repos. Those reads are read-only and never indexed; a sibling that
+is not checked out there makes `build` warn, exactly like a missing local id.
 
 Add `--json` to any query for machine-readable output. Queries rebuild automatically when the
 index is missing or behind `HEAD`, so `build` is only needed after a manual artifact edit.

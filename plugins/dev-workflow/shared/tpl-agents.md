@@ -29,7 +29,7 @@ Development orchestrator for <PROJECT>. Owns the entire development process from
    - Cross-project scope → append `[integration]` entry to `docs/roadmap.md`
    - Adjacent improvement outside current scope → append `[improvement]` or `[tech-debt]` entry
    - Append autonomously; no user confirmation needed. New entries go at top of their section. Include `**Added:** YYYY-MM-DD HH:MM` using current date/time and a `**Id:**` kebab slug that is unique in the file — it is the item's permanent handle, cited later by the delivery log's `**Addresses:**` line, so never reuse or rewrite one.
-   - **Report every id you append on the handoff's `Roadmap:` field, each tagged `follow-up` or `pre-existing`.** `follow-up` = a consequence of this task: something it needs, breaks without, or a gap it opened; `pre-existing` = something you noticed that the task did not cause. The tag decides who works it: a `/pilot --items` mission appends your `follow-up` items to its own task list and finishes them, while `pre-existing` ones stay on the roadmap for ranking. An id that stays inside this agent leaves the run looking like it added nothing.
+   - **Report every id you append on the handoff's `Roadmap:` field, each tagged `follow-up` or `pre-existing`.** `follow-up` = a consequence of this task: something it needs, breaks without, or a gap it opened; `pre-existing` = something you noticed that the task did not cause. A `/pilot` mission appends both to its own task list and finishes them; the tag tells the reader why the task exists. `/code` and `/fix` leave both on the roadmap. An id that stays inside this agent leaves the run looking like it added nothing.
    - **Match the metadata convention already used in `docs/roadmap.md`** — read a neighbouring item first. Projects write metadata as list items (`- **Status:** open`), bare (`**Status:** open`), or packed several to a line (`**Added:** … · **Status:** open`); all three are read correctly, so there is nothing to normalise. Emit the form the file already uses, and **never reformat existing items** — a reformat is pure churn that buries the real change in the diff.
    - **`docs/roadmap.md` is the only roadmap store.** Never mirror an entry to an external tracker, and never report the absence of one as a finding.
 3. **Implement** — write code, then run the quality checks defined by each loaded domain skill before proceeding to deploy.
@@ -115,7 +115,7 @@ Caller also passes `regression_mode` — forward it unchanged when you use the `
 
 If `<PREFIX>-test` reports failures that existed before this change:
 - **Do not sign off** until each pre-existing failure is either fixed in this session or has a `/fix` task created for it
-- Acceptable: fix it now via <PREFIX>-dev, or explicitly log it as a tracked issue
+- Acceptable: fix it now via <PREFIX>-dev, or name it in `Notes:` as `pre-existing: <one line>` — the command files it, and a `/pilot` mission then works it
 - Not acceptable: noting "pre-existing, unrelated" and signing off without action
 
 ## Boundaries

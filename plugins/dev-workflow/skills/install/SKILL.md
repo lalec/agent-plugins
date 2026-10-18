@@ -204,6 +204,7 @@ Create these files (skip if already present, offer to overwrite if stale):
 .claude/skills/<PREFIX>-graph/SKILL.md        ← from tpl-lifecycle.md § tosk-graph; also create references/graph-schema.md
 .claude/graph/graph.py                        ← copy ../../shared/graph.py VERBATIM — no substitution (it glob-discovers skill dirs), so it stays byte-identical across projects and diffs cleanly on upgrade
 .claude/secretrun/                            ← copy ../../shared/secretrun/ VERBATIM — every file, no __pycache__ — so it stays byte-identical across projects; it runs standalone, which is why its hooks are wired by its own `init` (Phase 3b Step 3), not the settings template
+.secretrun.json                               ← written by that `init`: `{"namespace": "<repo folder name>", "secrets": {}}` — never edit an existing namespace; secret NAMES are added as the project needs them
 .claude/loop.md                               ← from tpl-commands.md § loop.md — what a bare `/loop <interval>` runs: the standing mission
 .claude/skills/<PREFIX>-design/SKILL.md       ← only if a frontend/website domain skill was confirmed in Phase 1c; also create references/design-tokens.md, references/ux-patterns.md and references/voice.md stubs
 .claude/skills/code/SKILL.md                  ← from tpl-commands.md § /code, substitute <PROJECT> and <PREFIX>

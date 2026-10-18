@@ -5,12 +5,9 @@ Defence-in-depth against tokens that arrive via channels the secretrun wrapper
 never saw (an API error body, a config file the user asked to read, a webpage).
 It matches well-known credential SHAPES; it never reads the real stored values.
 
-Version-adaptive:
-  * Claude Code 2.1.199+  -> emits `updatedToolOutput`, hard-replacing the output.
-  * older                 -> the field is ignored, so we also emit
-                             `additionalContext` naming the count (no value) so
-                             the redaction is at least visible.
-Either way, nothing is blocked (exit 0).
+Emits `updatedToolOutput` in the same shape as the tool's own response, which
+replaces the output of any tool before the model sees it, plus `additionalContext` naming the count (never a value).
+Nothing is blocked (exit 0).
 """
 import json
 import re
@@ -54,16 +51,27 @@ def _scrub(text):
     return text, n
 
 
-def _as_text(resp):
-    if isinstance(resp, str):
-        return resp
-    if isinstance(resp, dict):
-        parts = [str(resp[k]) for k in ("stdout", "stderr", "output", "content",
-                                        "text") if resp.get(k)]
-        if parts:
-            return "\n".join(parts)
-        return json.dumps(resp)
-    return "" if resp is None else str(resp)
+def _scrub_tree(node):
+    """Scrub every string inside a tool response, keeping its shape. Claude Code
+    discards a rewrite whose shape differs from the original (a Bash response is
+    an object with stdout/stderr, a Read response nests the file content), so the
+    output must come back as the same kind of value it went in as."""
+    if isinstance(node, str):
+        return _scrub(node)
+    if isinstance(node, dict):
+        out, n = {}, 0
+        for k, v in node.items():
+            out[k], c = _scrub_tree(v)
+            n += c
+        return out, n
+    if isinstance(node, list):
+        out, n = [], 0
+        for v in node:
+            sv, c = _scrub_tree(v)
+            out.append(sv)
+            n += c
+        return out, n
+    return node, 0
 
 
 def main():
@@ -72,10 +80,7 @@ def main():
     except (ValueError, OSError):
         return 0
     resp = data.get("tool_response", data.get("tool_output"))
-    text = _as_text(resp)
-    if not text:
-        return 0
-    scrubbed, n = _scrub(text)
+    scrubbed, n = _scrub_tree(resp)
     if n == 0:
         return 0
     out = {

@@ -638,7 +638,7 @@ exit 0
 
 ## § settings.json
 
-Wire all 13 hook scripts — 15 entries, since `skill-guard.sh` sits under both `Edit` and `Write` and `pre-handoff-check.sh` under both `Skill` and `Task|Agent`. If the file already exists, merge the `hooks` key without removing unrelated settings. Timeout unit: **seconds**. The `Task|Agent` matcher is what makes `pre-handoff-check.sh` fire when qa is spawned as a subagent — without it the gate never runs in the pipeline. The `SubagentStop` matcher names the four pipeline agents so a research fork or an Explore child never gets blocked for lacking a handoff block.
+Wire all 13 hook scripts — 15 entries, since `skill-guard.sh` sits under both `Edit` and `Write` and `pre-handoff-check.sh` under both `Skill` and `Task|Agent`. If the file already exists, merge the `hooks` key without removing unrelated settings. Timeout unit: **seconds**. The `Task|Agent` matcher is what makes `pre-handoff-check.sh` fire when qa is spawned as a subagent — without it the gate never runs in the pipeline. The `SubagentStop` matcher names the four pipeline agents so a research fork or an Explore child never gets blocked for lacking a handoff block. The secrets wrapper's hooks are not in this file: `python3 .claude/secretrun/secretrun init` merges them, with its `.env` read-deny rules, itself — so the same folder works in a project without dev-workflow.
 
 ```json
 {

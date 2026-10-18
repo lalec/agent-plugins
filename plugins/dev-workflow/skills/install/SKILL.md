@@ -29,6 +29,7 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 - `.claude/graph/graph.py` — delivery-graph projector + query engine (copied verbatim from `../../shared/graph.py`); `edges.jsonl` is generated and gitignored
 - `.claude/skills/<PREFIX>-test/scripts/run-checks.py` — batched execution of resolved Integration commands and `last:` recording for every type (copied verbatim from `../../shared/run-checks.py`); returns observations, never verdicts
 - `.claude/secretrun/` — the secrets wrapper and its two hooks (copied verbatim from `../../shared/secretrun/`, wired by its own `init`): agents use a secret by NAME and never see its value
+- `.secretrun.json` — written by that `init`: the project's `namespace` (from the repo folder name), so its secrets get their own store ids, and the secret NAMES with their stores — never values
 - `~/.claude/usage-snapshot.sh` — **outside the repo, opt-in** (Phase 3 Step 5): wraps the status line so a run can read the account's remaining allowance, writing one file per session under `~/.claude/usage/` and aggregating them on `--read`. Account-scoped, so one machine needs it once
 - `.claude/settings.json` — wires all hooks
 - `CLAUDE.md` workflow sections
@@ -328,7 +329,7 @@ never *what* it decided (that lives in the log and the roadmap), so nothing in i
 
 **`graph.py` itself must be committed** — stage it explicitly:
 ```bash
-git add .claude/graph/graph.py .claude/secretrun .claude/loop.md .gitignore
+git add .claude/graph/graph.py .claude/secretrun .secretrun.json .claude/loop.md .gitignore
 ```
 An untracked `graph.py` has no protection: any `git clean`, a `/tidy` discard, or a stray `rm -rf`
 deletes it, and because every call site is required to fall back silently, the workflow keeps

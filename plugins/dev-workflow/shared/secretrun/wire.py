@@ -8,8 +8,11 @@ unrelated settings:
   deny          Read of .env files (never .env.example), ~/.aws, ~/.ssh, gcloud
 
 Project scope (default) writes <repo>/.claude/settings.json with paths relative
-to $CLAUDE_PROJECT_DIR, so a committed settings file works in every clone.
---global writes ~/.claude/settings.json with absolute paths and backs it up.
+to $CLAUDE_PROJECT_DIR, so a committed settings file works in every clone, and
+gives <repo>/.secretrun.json a namespace from the repo folder name when it has
+none (creating the file if missing) — committed, so every clone and worktree
+uses the same store ids. --global writes ~/.claude/settings.json with absolute
+paths, backs it up, and touches no manifest.
 Nothing here restricts reading session transcripts.
 """
 import json
@@ -17,6 +20,9 @@ import os
 import shutil
 import subprocess
 import time
+
+from manifest import ensure_namespace
+from stores import MANIFEST, SecretrunError
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 ENV_FILES = [".env", ".env.local", ".env.development", ".env.development.local",
@@ -85,28 +91,45 @@ def init(args):
     if unknown:
         print(f"secretrun init: unknown argument {unknown[0]}")
         return 1
-    if "--global" in args:
-        path, ref = os.path.expanduser("~/.claude/settings.json"), _folder_ref(None)
-    else:
-        root = _repo_root()
-        path, ref = os.path.join(root, ".claude", "settings.json"), _folder_ref(root)
+    glob = "--global" in args
+    root = None if glob else _repo_root()
+    path = (os.path.expanduser("~/.claude/settings.json") if glob
+            else os.path.join(root, ".claude", "settings.json"))
     try:
         settings = _load(path)
     except (OSError, ValueError) as e:
         print(f"secretrun init: cannot read {path}: {e}")
         return 1
-    changed = merge(settings, ref)
-    if not changed:
+    changed = merge(settings, _folder_ref(root))
+    if changed:
+        _write(path, settings, backup=glob)
+        print(f"wired {path}:")
+        for c in changed:
+            print(f"  + {c}")
+        print("Applies to new sessions.")
+    else:
         print(f"already wired: {path}")
-        return 0
-    if "--global" in args and os.path.isfile(path):
+    if not glob:
+        return _namespace(root)
+    return 0
+
+
+def _write(path, settings, backup):
+    if backup and os.path.isfile(path):
         shutil.copy2(path, f"{path}.bak-{time.strftime('%Y%m%d-%H%M%S')}")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
         json.dump(settings, f, indent=2)
         f.write("\n")
-    print(f"wired {path}:")
-    for c in changed:
-        print(f"  + {c}")
-    print("Applies to new sessions.")
+
+
+def _namespace(root):
+    try:
+        ns = ensure_namespace(root)
+    except (SecretrunError, OSError) as e:
+        print(f"secretrun init: {e}")
+        return 1
+    if ns:
+        print(f'set "namespace": "{ns}" in {os.path.join(root, MANIFEST)} — '
+              f"store ids are {ns}/NAME (gcp: {ns}_NAME). Commit it.")
     return 0

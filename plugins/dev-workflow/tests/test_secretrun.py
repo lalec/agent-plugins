@@ -9,13 +9,11 @@ from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
 
 import pytest
-
-SR_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                      "shared", "secretrun")
-sys.path.insert(0, SR_DIR)
+from conftest import SR_DIR, write_manifest as _manifest
 
 import guard  # noqa: E402
 import manage  # noqa: E402
+import manifest  # noqa: E402
 import masking  # noqa: E402
 import names  # noqa: E402
 import prompt  # noqa: E402
@@ -27,17 +25,6 @@ _loader = SourceFileLoader("secretrun_cli", os.path.join(SR_DIR, "secretrun"))
 sr = module_from_spec(spec_from_loader("secretrun_cli", _loader))
 _loader.exec_module(sr)
 
-
-@pytest.fixture(autouse=True)
-def _isolate(tmp_path_factory, monkeypatch):
-    # Keep the keychain-name index off the real ~/.secretrun, and start every
-    # test outside any real .secretrun.json.
-    monkeypatch.setenv("SECRETRUN_HOME", str(tmp_path_factory.mktemp("srhome")))
-    monkeypatch.chdir(tmp_path_factory.mktemp("cwd"))
-
-
-def _manifest(path, secrets):
-    (path / ".secretrun.json").write_text(json.dumps({"secrets": secrets}))
 
 
 # ----------------------------------------------------------------- masker ---- #
@@ -78,22 +65,27 @@ def test_mask_skips_ultra_short_value():
 
 
 # ------------------------------------------------------------ store plan ---- #
+M = manifest.Manifest
+
+
 def test_plan_manifest_wins_over_cli_backend():
-    assert stores.plan("DB", "keychain", {"DB": {"backend": "aws", "id": "p/db"}}) == ("aws", "p/db")
+    assert manifest.plan("DB", "keychain", M({"DB": {"backend": "aws", "id": "p/db"}})) \
+        == ("aws", "p/db")
 
 
 def test_plan_default_and_cli_backend():
-    assert stores.plan("K", None, {}) == ("keychain", "K")
-    assert stores.plan("K", "gcp", {}) == ("gcp", "K")
+    assert manifest.plan("K", None, M({})) == ("keychain", "K")
+    assert manifest.plan("K", "gcp", M({})) == ("gcp", "K")
 
 
 def test_plan_cmd_entry_is_the_cmd_store():
-    assert stores.plan("K", "aws", {"K": {"cmd": "op read x"}}) == ("cmd", "op read x")
+    assert manifest.plan("K", "aws", M({"K": {"cmd": "op read x"}})) == ("cmd", "op read x")
 
 
-def test_plan_unknown_backend_raises():
+@pytest.mark.parametrize("backend", ["vault", "cmd"])
+def test_plan_unknown_backend_or_cmd_without_entry_raises(backend):
     with pytest.raises(stores.SecretrunError):
-        stores.plan("K", "vault", {})
+        manifest.plan("K", backend, M({}))
 
 
 def test_load_manifest_walks_up(tmp_path, monkeypatch):
@@ -101,7 +93,8 @@ def test_load_manifest_walks_up(tmp_path, monkeypatch):
     sub = tmp_path / "a" / "b"
     sub.mkdir(parents=True)
     monkeypatch.chdir(sub)
-    assert stores.load_manifest() == {"A": {}}
+    m = manifest.load_manifest()
+    assert m.secrets == {"A": {}} and m.namespace is None
 
 
 # ------------------------------------------------------------- cmd store ---- #
@@ -147,6 +140,7 @@ def test_check_reports_ok_and_miss_without_values(tmp_path, monkeypatch, capsys)
     assert manage.cmd_check([]) == 1
     out = capsys.readouterr().out
     assert "OK    A  (cmd)" in out and "MISS  B  (cmd)" in out
+    assert "printf" not in out
     assert "value-aaaa" not in out
     assert manage.cmd_check(["A"]) == 0
 

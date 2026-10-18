@@ -1,14 +1,16 @@
-"""`secretrun add | rm | ls | sync | check` — manage stored values by NAME.
+"""`secretrun add | rm | ls | sync | check | migrate` — manage stored values by NAME.
 
 Values are typed by the user (prompt.py) and go straight to the store; `check`
-resolves each value only to zero it unread. Nothing here prints a value.
+resolves each value only to zero it unread; `migrate` moves one store entry to
+another inside this process. Output names the NAME, store and id — never a value.
 """
 import sys
 
 from names import index_load, index_save, index_update, keychain_dump_names, list_names
 from prompt import read_hidden
-from stores import (CURRENT_NAMES, DEFAULT_BACKEND, SecretrunError, delete,
-                    load_manifest, not_writable, plan, resolve, store, zero)
+from manifest import load_manifest, plan, resolve
+from stores import (CURRENT_NAMES, DEFAULT_BACKEND, MANIFEST, RESOLVERS,
+                    SecretrunError, delete, not_writable, store, zero)
 
 
 def _parse_name_backend(rest, name_optional=False):
@@ -43,8 +45,8 @@ def cmd_add(rest):
     finally:
         zero(vb)
     if backend == "keychain":
-        index_update(name, add=True)
-    print(f"stored {name} in {backend}")
+        index_update(sid, add=True)
+    print(f"stored {name} in {backend} as {sid}")
     return 0
 
 
@@ -54,8 +56,8 @@ def cmd_rm(rest):
     backend, sid = plan(name, cli_backend, load_manifest())
     delete(backend, name, sid)
     if backend == "keychain":
-        index_update(name, add=False)
-    print(f"removed {name} from {backend}")
+        index_update(sid, add=False)
+    print(f"removed {name} from {backend} ({sid})")
     return 0
 
 
@@ -86,22 +88,79 @@ def cmd_check(rest):
     """OK/MISS per NAME — the named ones, else every manifest entry. Prints
     names and stores only; a resolved value is zeroed unread."""
     manifest = load_manifest()
-    names = [t for t in rest if not t.startswith("-")] or list(manifest)
+    names = _names(rest, manifest)
     if not names:
-        print("no .secretrun.json manifest found in this project")
+        print(f"no {MANIFEST} in this project" if not manifest.path
+              else f"no secrets declared in {MANIFEST}")
         return 0
     missing = 0
     for name in names:
-        b, _ = plan(name, None, manifest)
+        b, sid = plan(name, None, manifest)
+        where = b if b == "cmd" else f"{b} {sid}"
         CURRENT_NAMES[:] = [name]
         try:
             zero(resolve(name, None, manifest))
-            print(f"OK    {name}  ({b})")
+            print(f"OK    {name}  ({where})")
         except SecretrunError:
             missing += 1
-            print(f"MISS  {name}  ({b})")
+            print(f"MISS  {name}  ({where})")
     return 1 if missing else 0
 
 
+def _names(rest, manifest):
+    bad = [t for t in rest if t.startswith("-")]
+    if bad:
+        raise SecretrunError(f"unknown option: {bad[0]}")
+    return rest or list(manifest.secrets)
+
+
+def _move(name, manifest):
+    """(status, detail) for moving one keychain value from the bare NAME to its
+    namespaced id: resolve old, store new, read new back, delete old."""
+    backend, sid = plan(name, None, manifest)
+    if backend == "cmd":
+        return "skipped", "cmd entry: nothing is stored here"
+    if backend != "keychain":     # moving needs create/delete rights there
+        return "skipped", f"{backend} store: move it in {backend} itself"
+    if (manifest.secrets.get(name) or {}).get("id"):
+        return "skipped", f"explicit id {sid}"
+    get = RESOLVERS["keychain"]
+    try:
+        zero(get(name, sid))
+        return "kept", f"already under {sid}"     # never clobber a namespaced value
+    except SecretrunError:
+        pass
+    try:
+        old = get(name, name)
+    except SecretrunError:
+        return "not stored", ""
+    try:
+        store("keychain", name, sid, old)
+        new = get(name, sid)
+        same = new == old
+        zero(new)
+    finally:
+        zero(old)
+    if not same:
+        raise SecretrunError(f"moved value did not read back; bare entry kept: {name}")
+    delete("keychain", name, name)
+    index_update(name, add=False)
+    index_update(sid, add=True)
+    return "moved", f"-> {sid}"
+
+
+def cmd_migrate(rest):
+    """Move keychain values stored under the bare NAME to <namespace>/NAME, for
+    the named NAMEs or every manifest entry."""
+    manifest = load_manifest()
+    if not manifest.namespace:
+        raise SecretrunError(f'no "namespace" in {MANIFEST}; nothing to move')
+    for name in _names(rest, manifest):
+        CURRENT_NAMES[:] = [name]
+        status, detail = _move(name, manifest)
+        print(f"{status:<10}  {name}  {detail}".rstrip())
+    return 0
+
+
 COMMANDS = {"add": cmd_add, "rm": cmd_rm, "ls": cmd_ls, "sync": cmd_sync,
-            "check": cmd_check}
+            "check": cmd_check, "migrate": cmd_migrate}

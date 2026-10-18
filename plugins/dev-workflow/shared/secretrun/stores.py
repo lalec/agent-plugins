@@ -152,37 +152,3 @@ def find_manifest(start=None):
         if parent == d:
             return None
         d = parent
-
-
-def load_manifest():
-    """{NAME: entry} from the nearest .secretrun.json — names and stores only,
-    never values."""
-    path = find_manifest()
-    if not path:
-        return {}
-    try:
-        with open(path) as f:
-            data = json.load(f)
-    except (OSError, ValueError):
-        raise SecretrunError(f"unreadable manifest: {MANIFEST}")
-    secrets = data.get("secrets", {}) if isinstance(data, dict) else {}
-    return secrets if isinstance(secrets, dict) else {}
-
-
-def plan(name, cli_backend, manifest):
-    """Decide (backend, id) for a NAME. The manifest entry is authoritative; `-b`
-    only sets the store for names the manifest doesn't mention. An entry with a
-    `cmd` key is the cmd store, and the command is its id."""
-    entry = manifest.get(name) or {}
-    if entry.get("cmd"):
-        return "cmd", entry["cmd"]
-    backend = entry.get("backend") or cli_backend or DEFAULT_BACKEND
-    sid = entry.get("id") or name
-    if backend not in RESOLVERS:
-        raise SecretrunError(f"unknown backend '{backend}' for {name}")
-    return backend, sid
-
-
-def resolve(name, cli_backend, manifest):
-    backend, sid = plan(name, cli_backend, manifest)
-    return RESOLVERS[backend](name, sid)

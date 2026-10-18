@@ -1,4 +1,4 @@
-"""List stored secret NAMES — never values.
+"""List stored secret ids — the NAME, or <namespace>/NAME — never values.
 
 The keychain is listed from a local names-only index so a steady-state `ls`
 never dumps the keychain. NAMES are not secret (the manifest commits them), so a

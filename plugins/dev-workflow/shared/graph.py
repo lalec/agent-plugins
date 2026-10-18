@@ -9,7 +9,8 @@ The index is DERIVED and DISPOSABLE. git and the six source artifacts stay canon
 `build` with no args discards edges.jsonl and reprojects from scratch. Every read site
 must fall back to its pre-graph behaviour if this script is absent or exits non-zero.
 `compact` is the one write: it shrinks closed roadmap items to the fields the graph reads,
-and refuses to write if the graph's view of any item would change.
+and refuses to write if the graph's view of any item would change. A `<repo>:<id>` ref is
+read from the sibling checkout beside this one — read-only, never written, never indexed.
 
     graph.py build                   reproject the index from scratch (<1s on a 200-entry log)
     graph.py covers <path>...        verifications whose paths intersect these
@@ -19,13 +20,18 @@ and refuses to write if the graph's view of any item would change.
                                      pack a task's qa and pm prompts carry inline
     graph.py history <path>          what has been delivered, verified and reverted here
     graph.py roadmap-open [--for <path>...]   open items, path-affine ones marked ~match,
-                                              a plan's children nested under their umbrella
+                                              a plan's children nested under their umbrella,
+                                              each `waiting on` any open `<repo>:<id>` dependency
     graph.py open-deferrals [--with-fail] [<path>...]   deferred or blocked, not passing since
     graph.py open-gates              every parking no later decision answered, with its
                                      condition and age in days
     graph.py open-advisories [<path>...]      advisories assessed exploitable and not yet
                                               fixed, plus the count still unassessed
-    graph.py item <roadmap-id>       one item's full text; a stub's body is read from git
+    graph.py item <roadmap-id>       one item's full text; a stub's body is read from git;
+                                     `<repo>:<id>` reads it from the sibling checkout
+    graph.py dependents <roadmap-id> open items in sibling checkouts whose Parent or
+                                     Depends-on names this repo's id — who to signal when it
+                                     closes
     graph.py compact [--dry-run]     stub every closed roadmap item already committed;
                                      the body stays in git behind its `**Body:**` commit
 
@@ -118,6 +124,9 @@ MULTI_FIELD_RE = re.compile(
     r"\*\*([A-Za-z][A-Za-z -]*?):\*\*\s*(.*?)(?=\s*·\s*\*\*[A-Za-z][A-Za-z -]*?:\*\*|$)"
 )
 TOKEN_RE = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)+$")
+# A roadmap id in a sibling checkout: `<repo>:<id>`, `<repo>` being that checkout's directory
+# name next to this one. Only `**Parent:**` / `**Depends on:**` carry it — a plan spanning repos.
+QUALIFIED_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*:[a-z0-9]+(?:[-_][a-z0-9]+)*$")
 BACKTICK_RE = re.compile(r"`([^`]+)`")
 # Name/reason boundary in `UAT-deferred:` — a *spaced* dash. Unspaced hyphens are
 # inside verification names themselves, so the spaces are load-bearing.
@@ -245,8 +254,38 @@ def id_refs(value: str) -> list[str]:
     """
     ticked = [c.strip() for c in re.findall(r"`([^`]+)`", value)]
     if ticked:  # explicit — a one-word id (`consent`) is legal here
-        return [c for c in ticked if re.match(r"^[a-z0-9][a-z0-9_-]*$", c)]
-    return [c for c in re.split(r"[,\s·]+", value) if TOKEN_RE.match(c)]
+        return [
+            c for c in ticked if re.match(r"^[a-z0-9][a-z0-9_-]*$", c) or QUALIFIED_RE.match(c)
+        ]
+    return [
+        c for c in re.split(r"[,\s·]+", value) if TOKEN_RE.match(c) or QUALIFIED_RE.match(c)
+    ]
+
+
+def split_ref(ref: str, root: Path) -> tuple[Path | None, str]:
+    """(sibling root, id) for `<repo>:<id>`; (None, id) for a local id or one qualified
+    with this repo's own name. A sibling is the directory `<repo>` beside this checkout —
+    the side-by-side layout every multi-repo plan so far has used; no config names it."""
+    repo, sep, rid = ref.rpartition(":")
+    if not sep or repo == root.name:
+        return None, rid
+    return root.parent / repo, rid
+
+
+def sibling_items(sib: Path, cache: dict[Path, list[dict] | None]) -> list[dict] | None:
+    """A sibling's parsed roadmap, read-only and once per call; None when it is absent."""
+    if sib not in cache:
+        p = sib / "docs" / "roadmap.md"
+        cache[sib] = parse_roadmap(read(p)) if p.is_file() else None
+    return cache[sib]
+
+
+def resolve_ref(ref: str, root: Path, local: dict[str, dict], cache: dict) -> dict | None:
+    """The item a ref names, local or sibling, or None when nothing carries that id."""
+    sib, rid = split_ref(ref, root)
+    if sib is None:
+        return local.get(rid)
+    return next((i for i in sibling_items(sib, cache) or [] if i["id"] == rid), None)
 
 
 def parse_fields(lines: list[str]) -> dict[str, str]:
@@ -418,20 +457,48 @@ def parse_roadmap(text: str) -> list[dict]:
     return items
 
 
-def dangling_roadmap_refs(items: list[dict]) -> list[tuple[str, str, str]]:
-    """(item id, field, ref) for every Parent / Depends-on naming an id not in the file.
+def dangling_roadmap_refs(items: list[dict], root: Path) -> list[tuple[str, str, str]]:
+    """(item id, field, ref) for every Parent / Depends-on naming an id nobody carries.
 
     A child whose parent is missing is invisible to the plan grouping, and a dependency
     on an id that does not exist can never be ordered — both are the planner's typo,
-    and both are silent unless `build` says so."""
-    ids = {it["id"] for it in items}
+    and both are silent unless `build` says so. A `<repo>:<id>` ref is looked up in the
+    sibling checkout's roadmap; a sibling that is not checked out beside this one is
+    dangling too, since nothing here can then tell whether the wait is over."""
+    local, cache = {it["id"]: it for it in items}, {}
     out = []
     for it in items:
-        if it["parent"] and it["parent"] not in ids:
-            out.append((it["id"], "Parent", it["parent"]))
-        for d in it["depends_on"]:
-            if d not in ids:
-                out.append((it["id"], "Depends on", d))
+        refs = [("Parent", it["parent"])] if it["parent"] else []
+        for field, ref in refs + [("Depends on", d) for d in it["depends_on"]]:
+            if resolve_ref(ref, root, local, cache) is None:
+                out.append((it["id"], field, ref))
+    return out
+
+
+def dependents(items: list[dict], root: Path, rid: str) -> list[dict]:
+    """Open items in sibling checkouts whose Parent or Depends-on names `<this repo>:<rid>`.
+
+    The siblings asked are the ones this roadmap's own refs name — a plan spanning repos
+    names its siblings from both ends, so that set is complete without a registry. This is
+    who a session signals when `rid` closes."""
+    sibs = {
+        s
+        for it in items
+        for ref in [it["parent"], *it["depends_on"]]
+        if ref and (s := split_ref(ref, root)[0]) is not None
+    }
+    out, cache = [], {}
+    for sib in sorted(sibs):
+        for it in sibling_items(sib, cache) or []:
+            if not it["open"]:
+                continue
+            for field, ref in [("Parent", it["parent"])] + [
+                ("Depends on", d) for d in it["depends_on"]
+            ]:
+                if ref and split_ref(ref, sib) == (root, rid):
+                    out.append(
+                        {"repo": sib.name, "id": it["id"], "status": it["status"], "field": field}
+                    )
     return out
 
 
@@ -1325,6 +1392,20 @@ def roadmap_open(edges: list[dict], src: "Sources", changed: list[str]) -> dict:
     for it in everything:
         if it["parent"]:
             children.setdefault(it["parent"], []).append(it)
+    local, cache = {i["id"]: i for i in everything}, {}
+
+    def waiting_on(it: dict) -> list[str]:
+        # A dependency in a sibling checkout that is still open, or that nothing here can
+        # read: the item cannot start, and the line says on what — `<repo>:<id> [status]`.
+        out = []
+        for d in it["depends_on"]:
+            if split_ref(d, src.root)[0] is None:
+                continue
+            dep = resolve_ref(d, src.root, local, cache)
+            if dep is None or dep["open"]:
+                out.append(f"{d} [{dep['status'] if dep else 'unreadable'}]")
+        return out
+
     for it in everything:
         if not it["open"]:
             continue
@@ -1346,6 +1427,7 @@ def roadmap_open(edges: list[dict], src: "Sources", changed: list[str]) -> dict:
                 "affine": bool(changed and prior),
                 "parent": it["parent"],
                 "depends_on": it["depends_on"],
+                "waiting_on": waiting_on(it),
             }
         )
     # Children nest under their umbrella in dependency order: an item's slot in the
@@ -1451,10 +1533,15 @@ def item_cmd(src: Sources, rest: list[str]) -> int:
     if not rest:
         print("item needs a roadmap id", file=sys.stderr)
         return 2
-    rid, text = rest[0], read(src.roadmap)
+    # `<repo>:<id>` reads the sibling checkout's roadmap — how a child reaches the decisions
+    # block of an umbrella that lives in another repo. Read-only: nothing there is written.
+    sib, rid = split_ref(rest[0], src.root)
+    if sib is not None:
+        src = Sources(sib)
+    text = read(src.roadmap)
     it = next((i for i in parse_roadmap(text) if i["id"] == rid), None)
     if it is None:
-        print(f"no roadmap item with id {rid!r}", file=sys.stderr)
+        print(f"no roadmap item with id {rest[0]!r}", file=sys.stderr)
         return 1
     sha = it["fields"].get("Body", "").strip()
     if sha:
@@ -1503,7 +1590,7 @@ def main(argv: list[str]) -> int:
                 f"and contribute nothing to the graph — check the `### ` heading format",
                 file=sys.stderr,
             )
-        for rid, field, ref in dangling_roadmap_refs(parse_roadmap(read(src.roadmap))):
+        for rid, field, ref in dangling_roadmap_refs(parse_roadmap(read(src.roadmap)), src.root):
             print(
                 f"WARNING: roadmap item {rid!r} names `**{field}:** {ref}` and no item "
                 f"carries that id — a plan child with a missing parent is grouped "
@@ -1524,6 +1611,18 @@ def main(argv: list[str]) -> int:
 
     if cmd == "item":
         return item_cmd(src, rest)
+
+    if cmd == "dependents":
+        if not rest:
+            print("dependents needs a roadmap id", file=sys.stderr)
+            return 2
+        rows = dependents(parse_roadmap(read(src.roadmap)), src.root, rest[0])
+        emit(
+            {"dependents": rows},
+            as_json,
+            [f"{r['repo']}:{r['id']} [{r['status']}] via {r['field']}" for r in rows],
+        )
+        return 0
 
     edges = load(src)
 
@@ -1661,6 +1760,7 @@ def main(argv: list[str]) -> int:
                     else ""
                 )
                 + i["title"]
+                + (f" · waiting on {', '.join(i['waiting_on'])}" if i["waiting_on"] else "")
                 for i in report["items"]
             ],
         )

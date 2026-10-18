@@ -207,7 +207,7 @@ Create these files (skip if already present, offer to overwrite if stale):
 .claude/skills/code/references/close-out.md   ← from tpl-commands.md § /code — references/close-out.md (the report contract every lane cites)
 .claude/skills/fix/SKILL.md                   ← from tpl-commands.md § /fix (a thin delta over the code skill)
 .claude/skills/pilot/SKILL.md                 ← from tpl-commands.md § /pilot
-.claude/skills/pilot/references/{lanes,allowance,verdicts,close-out}.md  ← from tpl-commands.md § /pilot — references/*
+.claude/skills/pilot/references/{lanes,allowance,verdicts,signal,close-out}.md  ← from tpl-commands.md § /pilot — references/*
 .claude/skills/tweak/SKILL.md                 ← from tpl-commands.md § /tweak
 .claude/skills/audit/SKILL.md                 ← from tpl-commands.md § /audit
 .claude/skills/revert/SKILL.md                ← from tpl-commands.md § /revert

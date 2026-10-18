@@ -15,25 +15,32 @@ import sys
 
 REDACTED = "[REDACTED]"
 
-# High-confidence credential shapes. Ordered longest/most-specific first.
+# High-confidence credential shapes. Ordered longest/most-specific first. A
+# prefix only counts at the start of a token (_B): `sk-` inside `tosk-web-...`
+# is an identifier, not a key.
+_B = r"(?<![A-Za-z0-9_-])"
 PATTERNS = [
     re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----", re.S),
-    re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),  # JWT
-    re.compile(r"github_pat_[A-Za-z0-9_]{22,}"),
-    re.compile(r"gh[posru]_[A-Za-z0-9]{30,}"),                                  # gh* tokens
-    re.compile(r"sk-(?:proj-)?[A-Za-z0-9_-]{16,}"),                             # OpenAI
-    re.compile(r"(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{16,}"),                 # Stripe
-    re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}"),                                # Slack
-    re.compile(r"AIza[0-9A-Za-z_-]{35}"),                                       # Google API
+    re.compile(_B + r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),  # JWT
+    re.compile(_B + r"github_pat_[A-Za-z0-9_]{22,}"),
+    re.compile(_B + r"gh[posru]_[A-Za-z0-9]{30,}"),                             # gh* tokens
+    re.compile(_B + r"sk-(?:proj-)?[A-Za-z0-9_-]{16,}"),                        # OpenAI
+    re.compile(_B + r"(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{16,}"),            # Stripe
+    re.compile(_B + r"xox[baprs]-[A-Za-z0-9-]{10,}"),                           # Slack
+    re.compile(_B + r"AIza[0-9A-Za-z_-]{35}"),                                  # Google API
     re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),                              # AWS access key id
-    re.compile(r"Aic[0-9A-Za-z_-]{20,}"),                                      # generic Google
+    re.compile(_B + r"Aic[0-9A-Za-z_-]{20,}"),                                  # generic Google
 ]
-# Keyword-adjacent high-entropy value (api_key = "...", "token": "...", JSON).
-# The separator tolerates a closing key-quote, ':'/'=', and an opening value-quote.
-KEYWORD = re.compile(
-    r"(?i)(api[_-]?key|secret|token|passwd|password|bearer|authorization)"
-    r"(['\"]?\s*[:=]\s*['\"]?|\s+)"
-    r"([A-Za-z0-9/_+=.-]{16,})")
+# A high-entropy value right after a credential keyword: `api_key = "..."`,
+# `"token": "..."` (the separator tolerates a closing key-quote, ':'/'=' and an
+# opening value-quote), or `Bearer <value>` on the same line. Prose like
+# "a Bearer token" followed by a long word on the next line is not a credential.
+_VALUE = r"([A-Za-z0-9/_+=.-]{16,})"
+KEYWORDS = [
+    re.compile(r"(?i)(api[_-]?key|secret|token|passwd|password|bearer|authorization)"
+               r"(['\"]?\s*[:=]\s*['\"]?)" + _VALUE),
+    re.compile(r"(?i)\b(bearer)([ \t]+)" + _VALUE),
+]
 
 
 def _scrub(text):
@@ -47,7 +54,8 @@ def _scrub(text):
         n += 1
         return m.group(1) + m.group(2) + REDACTED
 
-    text = KEYWORD.sub(_kw, text)
+    for pat in KEYWORDS:
+        text = pat.sub(_kw, text)
     return text, n
 
 

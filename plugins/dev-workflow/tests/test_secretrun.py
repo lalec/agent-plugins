@@ -327,8 +327,27 @@ def test_redactor_keeps_the_response_shape(monkeypatch):
     assert out["file"]["filePath"] == "/x"
 
 
-def test_redactor_leaves_normal_text():
-    assert redact._scrub("a normal sentence 12 34") == ("a normal sentence 12 34", 0)
+@pytest.mark.parametrize("text", [
+    "a normal sentence 12 34",
+    "**Id:** tosk-web-must-read-techniques-fuzzing-as-an",      # sk- inside a word
+    "see task-runner-configuration-loader and disk-usage-report-generator",
+    "cannot mint a Bearer token\npost-body-injection-true-positive-live",
+    "the token budget-allocation-for-the-quarter",              # keyword, then prose
+])
+def test_redactor_leaves_normal_text(text):
+    assert redact._scrub(text) == (text, 0)
+
+
+@pytest.mark.parametrize("text", [
+    "key=sk-proj-abcdefghijklmnop1234",
+    "Authorization: Bearer abcdefghij0123456789",
+    '{"token": "abcdefghij0123456789"}',
+    "export OPENAI=sk-abcdefghijklmnopqrstuvwx",
+    "jwt eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.abcdefghijkl",
+])
+def test_redactor_still_catches_credentials(text):
+    out, n = redact._scrub(text)
+    assert n >= 1 and redact.REDACTED in out
 
 
 # ------------------------------------------------------------------ init ---- #

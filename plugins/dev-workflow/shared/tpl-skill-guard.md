@@ -14,6 +14,7 @@ Replace these placeholders before writing the files:
 - `<UNATTENDED_DENY>` → ERE alternation of the paths an **unattended** `/pilot` run must never touch: `DEPLOY_PATHS` plus the Auth category's paths from `CATEGORY_MAP`, plus a migrations directory when one was discovered under Database/storage. Nobody is present to notice a change there, so a task whose paths intersect it is skipped and reported, never started unattended. When the auth paths are unknown, set it to the `DEPLOY_PATHS` value and say so — the project widens it.
 - `<LINT_CMD>` → project lint command (e.g. `pnpm exec biome check .` or `npm run lint`)
 - `<TYPECHECK_CMD>` → project typecheck command (e.g. `pnpm exec tsc --noEmit` or `npm run typecheck`)
+- `<LINT_SCOPE>` / `<TYPECHECK_SCOPE>` → the directory each command checks, with a trailing slash (the component's root); `''` when it checks the whole repo
 
 **Hook conduct rules (apply to every script below):**
 - *Gates* (skill-guard, path-coverage, dependency-guard, package-edit-guard, pre-handoff, close-out-gate) exit 2 with an actionable message on violation, 0 otherwise. `agent-mark` is the one gate on a lifecycle event: it blocks a stop through `decision: block` JSON (exit codes carry no meaning on `SubagentStop`), and only once per agent.
@@ -312,7 +313,7 @@ exit 0
 
 ## § pre-handoff-check.sh
 
-Blocks invocation of `<PREFIX>-qa` if the working tree has uncommitted changes, lint fails, or typecheck fails — and blocks **every** pipeline-agent dispatch while `.claude/pilot/stop` exists, so a stop dropped from a phone lands at the next subagent boundary. Enforces commit-before-review and clean-code gates mechanically. **Must match both invocation paths:** the Skill tool (`tool_input.skill`) *and* an Agent/Task spawn (`tool_input.subagent_type`) — in the pipeline qa is spawned as a subagent, so a Skill-only match makes this gate dead code.
+Blocks invocation of `<PREFIX>-qa` if the working tree has uncommitted changes, or lint or typecheck fails for a part of the project the commits under review changed — and blocks **every** pipeline-agent dispatch while `.claude/pilot/stop` exists, so a stop dropped from a phone lands at the next subagent boundary. Enforces commit-before-review and clean-code gates mechanically. **Must match both invocation paths:** the Skill tool (`tool_input.skill`) *and* an Agent/Task spawn (`tool_input.subagent_type`) — in the pipeline qa is spawned as a subagent, so a Skill-only match makes this gate dead code.
 
 ```bash
 #!/bin/bash
@@ -341,14 +342,21 @@ if [ -n "$DIRTY" ]; then
   exit 2
 fi
 
+# Files the commits under review change: against the upstream, else origin's default branch.
+# Empty when neither resolves or nothing differs — then every check runs.
+BASE=$(git rev-parse -q --verify '@{upstream}' 2>/dev/null || git rev-parse -q --verify origin/HEAD 2>/dev/null)
+CHANGED=$([ -n "$BASE" ] && git diff --name-only "$BASE"...HEAD 2>/dev/null)
+# touches <dir/> — the commits change a file under it ('' = anywhere), or CHANGED is unknown
+touches() { [ -z "$CHANGED" ] || printf '%s\n' "$CHANGED" | grep -q "^$1"; }
+
 # Run lint check
-if ! <LINT_CMD> > /dev/null 2>&1; then
+if touches '<LINT_SCOPE>' && ! <LINT_CMD> > /dev/null 2>&1; then
   echo "Pre-handoff gate: lint check failed — fix lint errors, then retry <PREFIX>-qa." >&2
   exit 2
 fi
 
 # Run type check
-if ! <TYPECHECK_CMD> > /dev/null 2>&1; then
+if touches '<TYPECHECK_SCOPE>' && ! <TYPECHECK_CMD> > /dev/null 2>&1; then
   echo "Pre-handoff gate: type check failed — fix type errors, then retry <PREFIX>-qa." >&2
   exit 2
 fi
@@ -356,7 +364,9 @@ fi
 exit 0
 ```
 
-**Note:** Replace `<LINT_CMD>` and `<TYPECHECK_CMD>` with the project's actual commands. If the project has no typecheck, remove that block. If lint/typecheck commands aren't known at install time, leave `<fill in>` stubs and prompt the user to fill them in.
+**Note:** Replace `<LINT_CMD>` and `<TYPECHECK_CMD>` with the project's actual commands. If the project has no typecheck, remove that block. If lint/typecheck commands aren't known at install time, leave `<fill in>` stubs and prompt the user to fill them in. A project with several components gets **one `if touches '<dir>/' && ! <cmd>` block per component check**, each scoped to the directory it checks — a check of a component the task never changed can only fail for reasons the task cannot fix.
+
+**Self-contained rule.** A gate check must pass with no server running — no dev server, local API or emulator. A build that fetches live data while it builds (a static page generated from an API) is not self-contained: prefer a check that is (the component's lint or typecheck); when that build is the component's only real check, keep it scoped to its component and name the serve-env it needs in its failure message, so a failure reads as "start <env>", not as broken code. Measured: an unscoped frontend build that fetched the local API refused every backend-only task at the QA gate until someone started the backend by hand.
 
 **Bare-shell rule (critical).** This hook runs in a **bare, non-interactive shell that does not inherit the project's activated environment** — no virtualenv, no `nvm`/`asdf` shim, no `direnv`, none of the `PATH` your terminal has. A command that names a bare interpreter or tool (`ruff check .`, `python -m ruff`, `eslint .`, `tsc`) works in your terminal but **fails inside this hook** the moment it depends on an activated env — silently failing the gate on every handoff. Substitute a command that resolves its own toolchain from a bare shell, in this order of preference:
 1. An env-launcher that finds the project env itself: `uv run ruff check .`, `poetry run ruff check .`, `pnpm exec biome check .`, `npx --no-install eslint .`.

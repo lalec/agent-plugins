@@ -84,7 +84,7 @@ All hooks wired in `.claude/settings.json`.
 | `path-coverage-check.sh` | PreToolUse Write | Blocks new files in governed roots with no matching owner |
 | `dependency-guard.sh` | PreToolUse Bash | Requires `<PREFIX>-skill` before adding packages |
 | `package-edit-guard.sh` | PreToolUse Edit | Requires `<PREFIX>-skill` before editing package files directly |
-| `pre-handoff-check.sh` | PreToolUse Skill + Task/Agent | Blocks `<PREFIX>-qa` (skill call or subagent spawn) if uncommitted changes or lint fails |
+| `pre-handoff-check.sh` | PreToolUse Skill + Task/Agent | Blocks `<PREFIX>-qa` (skill call or subagent spawn) if uncommitted changes, or lint fails for a component the commits changed |
 | `close-out-gate.sh` | PreToolUse Bash | Blocks `git push` while governed commits lack a delivery-log entry (`CLOSEOUT_OVERRIDE=1` escape) |
 | `ref-sync-check.sh` | PostToolUse Bash | Warns on reference-worthy drift (structural / `REF_WATCH`), deploy-config drift, dependency drift, and em dashes added to user-facing copy |
 | `skill-mark.sh` | PostToolUse Skill | Records invoked skills to a session-scoped marker |

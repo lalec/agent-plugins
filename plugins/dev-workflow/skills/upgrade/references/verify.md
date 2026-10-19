@@ -101,6 +101,7 @@ Run these verification checks on the upgrade-affected items:
 - `<PREFIX>-test/references/custom-tests.md` contains "Freshness rule" and "Evidence trace"
 - `<PREFIX>-log/SKILL.md` Process step 1 contains "primary feature/fix commit"; entry format has the `UAT-deferred:` line
 - `pre-handoff-check.sh` contains `subagent_type` and no `GEMINI`; settings.json wires it under a `Task|Agent` matcher
+- `pre-handoff-check.sh` defines `touches()` and every lint/typecheck/build check line starts `if touches`
 - `pre-handoff-check.sh` lint/typecheck command is self-contained from a bare shell (env-launcher, absolute env path, or a resolved interpreter variable — not a bare `ruff`/`python -m ruff`/`eslint`/`tsc`)
 - `close-out-gate.sh` exists, is executable, and is wired under PreToolUse Bash
 - `ref-sync-check.sh` contains `REF_WATCH` and the A/D/R structural filter

@@ -254,7 +254,7 @@ Then one last line, and it's the one you act on: `none — nothing open, safe to
 | `path-coverage-check.sh` | Write | New file in a governed root with no matching PATH_MAP entry |
 | `dependency-guard.sh` | Bash | `pnpm add` / `pip install` without `myapp-skill` loaded |
 | `package-edit-guard.sh` | Edit | Adding packages to `package.json` directly without `myapp-skill` |
-| `pre-handoff-check.sh` | Skill + Task/Agent | Invoking or spawning `myapp-qa` with uncommitted changes, lint errors, or type errors |
+| `pre-handoff-check.sh` | Skill + Task/Agent | Invoking or spawning `myapp-qa` with uncommitted changes, or lint or type errors in a part of the project the commits changed — so a backend-only change never waits on a frontend build |
 | `close-out-gate.sh` | Bash | `git push` while commits since the last delivery-log entry touch governed/deploy paths (`CLOSEOUT_OVERRIDE=1` escape hatch) |
 | `ref-sync-check.sh` | Bash (post) | Warns after commit on reference-worthy drift — structural changes or `REF_WATCH` matches — without reference updates, deploy-mechanism drift without `deploy-config.yaml` updates, a dependency landing without its advisories assessed, or an em dash added to user-facing copy (comments and existing lines are left alone). Path patterns sourced from `governed-paths.conf`; warnings go to the agent, not a log nobody reads. |
 | `skill-mark.sh` | Skill (post) | Records loaded skills to a session-scoped marker (used by all guards, and by `myapp-log` to fill the delivery log's skills line) |

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """PreToolUse(Bash) guard — deny commands that would print secret values.
 
-Blocks the clear-cut leak vectors and teaches the secretrun form in the deny
-reason. Deliberately narrow: `secretrun NAME -- sh -c 'echo $NAME'` is allowed
+Blocks the clear-cut leak vectors and teaches the srun form in the deny
+reason. Deliberately narrow: `srun NAME -- sh -c 'echo $NAME'` is allowed
 (the wrapper masks it), and nothing here reads or restricts session transcripts.
 A backstop, not the primary control — deliberate exfiltration by a child that
 holds a value is outside what a command-line check can see.
@@ -28,7 +28,7 @@ _SHELL_OPS = {"|", "||", "&&", ";", "&"}
 
 
 def _deny(reason):
-    sys.stderr.write("secretrun guard: " + reason + "\n")
+    sys.stderr.write("srun guard: " + reason + "\n")
     raise SystemExit(2)
 
 
@@ -61,11 +61,11 @@ def _is_env_file(tok):
 
 def _env_file_read(toks):
     """The env file a reader prints, or None. `grep -c/-q/-l` only counts. Looks
-    inside `secretrun ... -- cmd` and `sh -c '...'`: other values in the file
+    inside `srun ... -- cmd` and `sh -c '...'`: other values in the file
     are not masked there."""
     for seg in _segments(toks):
         prog = os.path.basename(seg[0])
-        if prog == "secretrun" and "--" in seg:
+        if prog == "srun" and "--" in seg:
             hit = _env_file_read(seg[seg.index("--") + 1:])
             if hit:
                 return hit
@@ -92,25 +92,25 @@ def _check(command):
 
     if "dump-keychain" in low:
         _deny("`dump-keychain` exposes every stored credential. Use "
-              "`secretrun ls` for names, or `secretrun NAME -- cmd` to use one.")
+              "`srun ls` for names, or `srun NAME -- cmd` to use one.")
 
     if re.search(r"\bsecurity\b", low) and \
        re.search(r"find-(generic|internet)-password", low) and \
        re.search(r"(^|\s)-w(\s|$)", command):
         _deny("`security ... -w` prints a keychain password into the transcript. "
-              "Use `secretrun NAME -- cmd`; the value stays out of context.")
+              "Use `srun NAME -- cmd`; the value stays out of context.")
 
     env_file = _env_file_read(toks)
     if env_file:
         _deny(f"reading {env_file} prints secret values into the transcript. "
-              "Use the value by NAME: `secretrun NAME -- cmd` (a `cmd` entry in "
-              ".secretrun.json can read it from that file); `secretrun check "
+              "Use the value by NAME: `srun NAME -- cmd` (a `cmd` entry in "
+              ".srun.json can read it from that file); `srun check "
               "NAME` says whether it is set. `grep -c '^NAME=' FILE` counts "
               "without printing.")
 
-    if re.search(r"\bsecretrun\s+add\b", low):
-        if re.search(r"\|\s*\S*secretrun\s+add", low):
-            _deny("never pipe a value into `secretrun add`. Run `secretrun add "
+    if re.search(r"\bsrun\s+add\b", low):
+        if re.search(r"\|\s*\S*srun\s+add", low):
+            _deny("never pipe a value into `srun add`. Run `srun add "
                   "NAME` and the user types the value into a hidden prompt.")
         j = next((i for i, t in enumerate(toks) if t == "add"), -1)
         pos, k = [], j + 1
@@ -122,7 +122,7 @@ def _check(command):
             k += 1
         if len(pos) > 1:
             _deny("a secret value must never appear on the command line. Run "
-                  "`secretrun add NAME`; the user types the value into a hidden "
+                  "`srun add NAME`; the user types the value into a hidden "
                   "prompt.")
 
     if command.strip() in ("env", "printenv", "set", "export", "export -p"):

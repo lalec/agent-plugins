@@ -1,20 +1,20 @@
 """Secret stores — resolve, store, list and delete values by NAME.
 
-Every resolver returns a bytearray (zeroable) or raises SecretrunError. Only a
+Every resolver returns a bytearray (zeroable) or raises SrunError. Only a
 secret's NAME/id ever reaches a subprocess argv; values come back on the child's
-stdout pipe, which stays inside the secretrun process.
+stdout pipe, which stays inside the srun process.
 
 Stores: keychain (default, macOS), aws (Secrets Manager), gcp (Secret Manager),
 and cmd — any command that prints the value (an env file, AWS Parameter Store,
-1Password, Vault, Doppler, ...), declared per NAME in .secretrun.json.
+1Password, Vault, Doppler, ...), declared per NAME in .srun.json.
 """
 import json
 import os
 import subprocess
 
-SERVICE = "secretrun"        # dedicated Keychain generic-password service
+SERVICE = "srun"        # dedicated Keychain generic-password service
 DEFAULT_BACKEND = "keychain"
-MANIFEST = ".secretrun.json"
+MANIFEST = ".srun.json"
 
 
 # Names of the secret(s) in flight — the ONLY value-adjacent detail the scrubbing
@@ -22,7 +22,7 @@ MANIFEST = ".secretrun.json"
 CURRENT_NAMES = []
 
 
-class SecretrunError(Exception):
+class SrunError(Exception):
     """Carries a name-only, value-free message that is safe to print."""
 
 
@@ -42,7 +42,7 @@ def _resolve_keychain(name, sid):
         ["security", "find-generic-password", "-s", SERVICE, "-a", sid, "-w"],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     if p.returncode != 0:
-        raise SecretrunError(f"not found in keychain: {name}")
+        raise SrunError(f"not found in keychain: {name}")
     return bytearray(_strip_nl(p.stdout))   # `security -w` appends one newline
 
 
@@ -52,13 +52,13 @@ def _resolve_aws(name, sid):
          "--output", "json"],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     if p.returncode != 0:
-        raise SecretrunError(f"aws resolve failed: {name}")
+        raise SrunError(f"aws resolve failed: {name}")
     try:
         s = json.loads(p.stdout).get("SecretString")
     except ValueError:
-        raise SecretrunError(f"aws returned unparseable payload: {name}")
+        raise SrunError(f"aws returned unparseable payload: {name}")
     if s is None:
-        raise SecretrunError(f"aws secret has no SecretString: {name}")
+        raise SrunError(f"aws secret has no SecretString: {name}")
     return bytearray(s.encode("utf-8"))
 
 
@@ -67,7 +67,7 @@ def _resolve_gcp(name, sid):
         ["gcloud", "secrets", "versions", "access", "latest", "--secret", sid],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     if p.returncode != 0:
-        raise SecretrunError(f"gcp resolve failed: {name}")
+        raise SrunError(f"gcp resolve failed: {name}")
     return bytearray(p.stdout)     # gcloud emits the exact payload, no newline
 
 
@@ -81,7 +81,7 @@ def _resolve_cmd(name, sid):
                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     out = _strip_nl(p.stdout)
     if p.returncode != 0 or not out:
-        raise SecretrunError(f"command printed no value: {name}")
+        raise SrunError(f"command printed no value: {name}")
     return bytearray(out)
 
 
@@ -94,7 +94,7 @@ RESOLVERS = {
 
 
 def not_writable(name):
-    return SecretrunError(
+    return SrunError(
         f"{name} is read by a command in {MANIFEST}; store or remove it in that "
         "secret manager, not here")
 
@@ -117,12 +117,12 @@ def store(backend, name, sid, vb):
     elif backend == "cmd":
         raise not_writable(name)
     else:
-        raise SecretrunError(f"unknown backend: {backend}")
+        raise SrunError(f"unknown backend: {backend}")
     p = subprocess.run(cmd, input=blob, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL)
     if p.returncode != 0:
         hint = "" if backend == "keychain" else f" (does secret '{sid}' exist?)"
-        raise SecretrunError(f"{backend} store failed{hint}: {name}")
+        raise SrunError(f"{backend} store failed{hint}: {name}")
 
 
 def delete(backend, name, sid):
@@ -135,10 +135,10 @@ def delete(backend, name, sid):
     elif backend == "cmd":
         raise not_writable(name)
     else:
-        raise SecretrunError(f"unknown backend: {backend}")
+        raise SrunError(f"unknown backend: {backend}")
     p = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if p.returncode != 0:
-        raise SecretrunError(f"delete failed: {name}")
+        raise SrunError(f"delete failed: {name}")
 
 
 # ---------------------------------------------------------------- manifest -- #

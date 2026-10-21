@@ -8,7 +8,7 @@ import json
 import os
 import subprocess
 
-from stores import SERVICE, SecretrunError
+from stores import SERVICE, SrunError
 
 
 def _blob_val(line):
@@ -21,9 +21,9 @@ def _blob_val(line):
 
 
 def keychain_dump_names():
-    """Enumerate secretrun's stored NAMES via a single `security dump-keychain`.
+    """Enumerate srun's stored NAMES via a single `security dump-keychain`.
     Endpoint tools flag bulk keychain enumeration, so this runs only on the
-    first-run index bootstrap and on an explicit `secretrun sync`."""
+    first-run index bootstrap and on an explicit `srun sync`."""
     p = subprocess.run(["security", "dump-keychain"],
                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     names, acct = [], None
@@ -37,7 +37,7 @@ def keychain_dump_names():
 
 
 def index_path():
-    home = os.environ.get("SECRETRUN_HOME") or os.path.expanduser("~/.secretrun")
+    home = os.environ.get("SRUN_HOME") or os.path.expanduser("~/.srun")
     return os.path.join(home, "keychain-names.json")
 
 
@@ -86,6 +86,6 @@ def list_names(backend):
     elif backend == "gcp":
         cmd = ["gcloud", "secrets", "list", "--format", "value(name)"]
     else:
-        raise SecretrunError(f"cannot list backend: {backend}")
+        raise SrunError(f"cannot list backend: {backend}")
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     return sorted(p.stdout.decode().split()) if p.returncode == 0 else []

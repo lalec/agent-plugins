@@ -1,4 +1,4 @@
-"""Tests for shared/secretrun — the masker, store selection (incl. the cmd store),
+"""Tests for shared/srun — the masker, store selection (incl. the cmd store),
 run/spawn, add, check, the guard's deny rules, the redactor and `init` wiring.
 Maintainer-only: never copied into projects."""
 import io
@@ -21,8 +21,8 @@ import redact  # noqa: E402
 import stores  # noqa: E402
 import wire  # noqa: E402
 
-_loader = SourceFileLoader("secretrun_cli", os.path.join(SR_DIR, "secretrun"))
-sr = module_from_spec(spec_from_loader("secretrun_cli", _loader))
+_loader = SourceFileLoader("srun_cli", os.path.join(SR_DIR, "srun"))
+sr = module_from_spec(spec_from_loader("srun_cli", _loader))
 _loader.exec_module(sr)
 
 
@@ -84,7 +84,7 @@ def test_plan_cmd_entry_is_the_cmd_store():
 
 @pytest.mark.parametrize("backend", ["vault", "cmd"])
 def test_plan_unknown_backend_or_cmd_without_entry_raises(backend):
-    with pytest.raises(stores.SecretrunError):
+    with pytest.raises(stores.SrunError):
         manifest.plan("K", backend, M({}))
 
 
@@ -110,7 +110,7 @@ def test_cmd_store_reads_env_file_from_manifest_dir(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("cmd", ["exit 3", "true", "echo oops >&2; exit 1"])
 def test_cmd_store_without_value_is_missing(cmd):
-    with pytest.raises(stores.SecretrunError) as e:
+    with pytest.raises(stores.SrunError) as e:
         stores.RESOLVERS["cmd"]("K", cmd)
     assert "oops" not in str(e.value)
 
@@ -119,10 +119,10 @@ def test_cmd_store_is_read_only(tmp_path, monkeypatch):
     _manifest(tmp_path, {"K": {"cmd": "printf v"}})
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(manage, "read_hidden", lambda n: pytest.fail("prompted"))
-    with pytest.raises(stores.SecretrunError) as e:
+    with pytest.raises(stores.SrunError) as e:
         manage.cmd_add(["K"])
     assert "secret manager" in str(e.value)
-    with pytest.raises(stores.SecretrunError):
+    with pytest.raises(stores.SrunError):
         manage.cmd_rm(["K"])
 
 
@@ -169,7 +169,7 @@ def test_spawn_stdin_mode_keeps_value_out_of_env(capfdbinary):
 @pytest.mark.parametrize("argv", [["TOK", "echo", "hi"], ["TOK", "--stdin", "OTHER", "--", "echo"],
                                   ["--", "echo"], ["TOK", "--"]])
 def test_run_rejects_bad_argv(argv):
-    with pytest.raises(stores.SecretrunError):
+    with pytest.raises(stores.SrunError):
         sr.cmd_run(argv)
 
 
@@ -182,7 +182,7 @@ class _FakeProc:
 def test_add_refuses_when_no_tty_and_no_gui(monkeypatch):
     monkeypatch.setattr(prompt, "tty_available", lambda: False)
     monkeypatch.setattr(prompt.sys, "platform", "linux")
-    with pytest.raises(stores.SecretrunError) as e:
+    with pytest.raises(stores.SrunError) as e:
         manage.cmd_add(["TOK"])
     assert "terminal" in str(e.value)
 
@@ -214,13 +214,13 @@ def test_add_gui_cancel_or_empty_stores_nothing(monkeypatch):
     monkeypatch.setattr(prompt.sys, "platform", "darwin")
     for proc, word in ((_FakeProc(1), "cancelled"), (_FakeProc(0, b"\n"), "empty")):
         monkeypatch.setattr(prompt.subprocess, "run", lambda *a, p=proc, **k: p)
-        with pytest.raises(stores.SecretrunError) as e:
+        with pytest.raises(stores.SrunError) as e:
             manage.cmd_add(["TOK"])
         assert word in str(e.value)
 
 
 def test_add_rejects_value_on_command_line():
-    with pytest.raises(stores.SecretrunError):
+    with pytest.raises(stores.SrunError):
         manage._parse_name_backend(["TOK", "the-value"])
 
 
@@ -265,16 +265,16 @@ def test_index_update_only_when_bootstrapped():
 @pytest.mark.parametrize("cmd", [
     "security dump-keychain",
     "security find-generic-password -s foo -a bar -w",
-    "echo hunter2 | secretrun add TOK",
-    "secretrun add TOK hunter2",
+    "echo hunter2 | srun add TOK",
+    "srun add TOK hunter2",
     "printenv", "env",
     "cat .env",
     "cat web/.env.local",
     "sed -n 's/x/y/p' .env.production",
     "grep PASSWORD .env",
     "cd app && tail -5 .env",
-    "secretrun K -- sh -c 'cat .env'",
-    "secretrun K -- head .env",
+    "srun K -- sh -c 'cat .env'",
+    "srun K -- head .env",
     "bash -c 'grep X .env.local'",
 ])
 def test_guard_denies(cmd):
@@ -284,10 +284,10 @@ def test_guard_denies(cmd):
 
 
 @pytest.mark.parametrize("cmd", [
-    "secretrun OPENAI_API_KEY -- curl https://api.example.com",
-    "secretrun TOK -- sh -c 'echo \"$TOK\"'",
-    "secretrun add TOK", "secretrun add TOK -b aws",
-    "secretrun add TOK && secretrun check TOK",
+    "srun OPENAI_API_KEY -- curl https://api.example.com",
+    "srun TOK -- sh -c 'echo \"$TOK\"'",
+    "srun add TOK", "srun add TOK -b aws",
+    "srun add TOK && srun check TOK",
     "env FOO=bar mycmd", "git status",
     "cat .env.example", "cat .env.sample",
     "grep -c '^API_KEY=' .env", "grep -q API_KEY .env.local",
@@ -354,7 +354,7 @@ def test_redactor_still_catches_credentials(text):
 def test_init_merges_idempotently_and_keeps_other_settings():
     settings = {"model": "x", "hooks": {"PreToolUse": [{"matcher": "Edit", "hooks": []}]},
                 "permissions": {"deny": ["Read(**/.env)"]}}
-    ref = '"$CLAUDE_PROJECT_DIR"/.claude/secretrun'
+    ref = '"$CLAUDE_PROJECT_DIR"/.claude/srun'
     first = wire.merge(settings, ref)
     assert first and settings["model"] == "x"
     assert settings["permissions"]["deny"].count("Read(**/.env)") == 1
@@ -365,5 +365,5 @@ def test_init_merges_idempotently_and_keeps_other_settings():
 
 def test_init_refs_project_relative_inside_repo(tmp_path):
     assert wire._folder_ref(os.path.dirname(os.path.dirname(SR_DIR))) == \
-        '"$CLAUDE_PROJECT_DIR"/shared/secretrun'
+        '"$CLAUDE_PROJECT_DIR"/shared/srun'
     assert wire._folder_ref(str(tmp_path)) == '"%s"' % SR_DIR

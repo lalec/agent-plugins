@@ -28,8 +28,8 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 - `.claude/hooks/post-commit.sh` — PostToolUse Bash: reminds to run `<PREFIX>-log` after every commit
 - `.claude/graph/graph.py` — delivery-graph projector + query engine (copied verbatim from `../../shared/graph.py`); `edges.jsonl` is generated and gitignored
 - `.claude/skills/<PREFIX>-test/scripts/run-checks.py` — batched execution of resolved Integration commands and `last:` recording for every type (copied verbatim from `../../shared/run-checks.py`); returns observations, never verdicts
-- `.claude/secretrun/` — the secrets wrapper and its two hooks (copied verbatim from `../../shared/secretrun/`, wired by its own `init`): agents use a secret by NAME and never see its value
-- `.secretrun.json` — written by that `init`: the project's `namespace` (from the repo folder name), so its secrets get their own store ids, and the secret NAMES with their stores — never values
+- `.claude/srun/` — the secrets wrapper and its two hooks (copied verbatim from `../../shared/srun/`, wired by its own `init`): agents use a secret by NAME and never see its value
+- `.srun.json` — written by that `init`: the project's `namespace` (from the repo folder name), so its secrets get their own store ids, and the secret NAMES with their stores — never values
 - `~/.claude/usage-snapshot.sh` — **outside the repo, opt-in** (Phase 3 Step 5): wraps the status line so a run can read the account's remaining allowance, writing one file per session under `~/.claude/usage/` and aggregating them on `--read`. Account-scoped, so one machine needs it once
 - `.claude/settings.json` — wires all hooks
 - `CLAUDE.md` workflow sections
@@ -39,7 +39,7 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 - `../../shared/tpl-lifecycle.md` — 8 lifecycle skill templates
 - `../../shared/graph.py` — the delivery-graph projector, copied verbatim to `.claude/graph/graph.py`
 - `../../shared/run-checks.py` — the verification runner/recorder, copied verbatim to `.claude/skills/<PREFIX>-test/scripts/run-checks.py`
-- `../../shared/secretrun/` — the secrets wrapper, copied verbatim to `.claude/secretrun/`
+- `../../shared/srun/` — the secrets wrapper, copied verbatim to `.claude/srun/`
 - `../../shared/usage-snapshot.sh` — the status-line allowance tee, copied verbatim to `~/.claude/usage-snapshot.sh` (opt-in, Phase 3 Step 5)
 - `../../shared/tpl-skill-guard.md` — all hook templates + governed-paths.conf + settings.json
 - `../../shared/tpl-domain-skill.md` — domain skill stub + project file sections
@@ -203,8 +203,8 @@ Create these files (skip if already present, offer to overwrite if stale):
 .claude/skills/<PREFIX>-docs/SKILL.md
 .claude/skills/<PREFIX>-graph/SKILL.md        ← from tpl-lifecycle.md § tosk-graph; also create references/graph-schema.md
 .claude/graph/graph.py                        ← copy ../../shared/graph.py VERBATIM — no substitution (it glob-discovers skill dirs), so it stays byte-identical across projects and diffs cleanly on upgrade
-.claude/secretrun/                            ← copy ../../shared/secretrun/ VERBATIM — every file, no __pycache__ — so it stays byte-identical across projects; it runs standalone, which is why its hooks are wired by its own `init` (Phase 3b Step 3), not the settings template
-.secretrun.json                               ← written by that `init`: `{"namespace": "<repo folder name>", "secrets": {}}` — never edit an existing namespace; secret NAMES are added as the project needs them
+.claude/srun/                            ← copy ../../shared/srun/ VERBATIM — every file, no __pycache__ — so it stays byte-identical across projects; it runs standalone, which is why its hooks are wired by its own `init` (Phase 3b Step 3), not the settings template
+.srun.json                               ← written by that `init`: `{"namespace": "<repo folder name>", "secrets": {}}` — never edit an existing namespace; secret NAMES are added as the project needs them
 .claude/loop.md                               ← from tpl-commands.md § loop.md — what a bare `/loop <interval>` runs: the standing mission
 .claude/skills/<PREFIX>-design/SKILL.md       ← only if a frontend/website domain skill was confirmed in Phase 1c; also create references/design-tokens.md, references/ux-patterns.md and references/voice.md stubs
 .claude/skills/code/SKILL.md                  ← from tpl-commands.md § /code, substitute <PROJECT> and <PREFIX>
@@ -253,7 +253,7 @@ Create `references/voice.md` from the same section's stub. `§ Rules` ships as w
 
 **`health_path`**: optional everywhere. Set when the project exposes a dedicated readiness endpoint (e.g. `/health`, `/_ready`, `/api/health`) — discovered by reading backend route files or framework configs. Omit when the base url itself is a sufficient liveness signal (typical for frontends).
 
-**`envs.local.stack`** (composed local stack — see `tpl-domain-skill.md § deploy-config.yaml schema`): when a component's plain dev-run command starts it wired to prod (e.g. the frontend's API-base-URL env var points at the prod API) or unusable headless (no data, no auth), derive a `stack:` block: find the env var that selects the API base url (framework config, `.env.example`, code) and override it to the local backend's url; record a `seed:` command only if a real one exists (fixtures script, `scripts/seed*`); record the headless `auth:` strategy only if one exists (test-user credentials — named as secrets in `.secretrun.json`, never values — or a local auth bypass). Never invent seed commands or auth strategies — if local verification is genuinely impossible, omit `stack:` and typed verifications will honestly report blocked.
+**`envs.local.stack`** (composed local stack — see `tpl-domain-skill.md § deploy-config.yaml schema`): when a component's plain dev-run command starts it wired to prod (e.g. the frontend's API-base-URL env var points at the prod API) or unusable headless (no data, no auth), derive a `stack:` block: find the env var that selects the API base url (framework config, `.env.example`, code) and override it to the local backend's url; record a `seed:` command only if a real one exists (fixtures script, `scripts/seed*`); record the headless `auth:` strategy only if one exists (test-user credentials — named as secrets in `.srun.json`, never values — or a local auth bypass). Never invent seed commands or auth strategies — if local verification is genuinely impossible, omit `stack:` and typed verifications will honestly report blocked.
 
 **Determine components** from `CATEGORY_MAP`:
 - `frontend` component if the Frontend category is present
@@ -330,7 +330,7 @@ never *what* it decided (that lives in the log and the roadmap), so nothing in i
 
 **`graph.py` itself must be committed** — stage it explicitly:
 ```bash
-git add .claude/graph/graph.py .claude/secretrun .secretrun.json .claude/loop.md .gitignore
+git add .claude/graph/graph.py .claude/srun .srun.json .claude/loop.md .gitignore
 ```
 An untracked `graph.py` has no protection: any `git clean`, a `/tidy` discard, or a stray `rm -rf`
 deletes it, and because every call site is required to fall back silently, the workflow keeps
@@ -381,7 +381,7 @@ Upsert the following sections in `CLAUDE.md` (add if missing, replace if present
 - `## Agents` — the pipeline line plus the routing paragraph (pipeline-shaped work → `/code`/`/fix`, iterative rounds → `/tweak`) from the template
 - `## Skills` — "Path→skill ownership is defined in `.claude/hooks/governed-paths.conf` — edit that file to add or change path ownership. Both `skill-guard.sh` and `path-coverage-check.sh` source it automatically."
 - `## Roadmap` — single line: `docs/roadmap.md` is the source of truth for open items.
-- `## Secrets` — the template's rule: secrets by NAME through `secretrun`, values never in chat, files read, command lines or memory
+- `## Secrets` — the template's rule: secrets by NAME through `srun`, values never in chat, files read, command lines or memory
 - `## Linting` — only add if lint commands were discovered in Phase 1; omit entirely if none found (no `<fill in>` stub)
 
 ---

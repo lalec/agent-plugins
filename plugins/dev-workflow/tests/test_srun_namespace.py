@@ -1,4 +1,4 @@
-"""Tests for secretrun namespacing — namespaced store ids, `init` writing the
+"""Tests for srun namespacing — namespaced store ids, `init` writing the
 namespace once, and `migrate` moving keychain values off the bare NAME.
 Maintainer-only: never copied into projects."""
 import json
@@ -39,9 +39,9 @@ def test_plan_without_namespace_is_the_bare_name():
 
 @pytest.mark.parametrize("ns", ["bad/ns", "a b", "", 5, "x.y"])
 def test_invalid_namespace_raises_naming_the_key(tmp_path, monkeypatch, ns):
-    (tmp_path / ".secretrun.json").write_text(json.dumps({"namespace": ns, "secrets": {}}))
+    (tmp_path / ".srun.json").write_text(json.dumps({"namespace": ns, "secrets": {}}))
     monkeypatch.chdir(tmp_path)
-    with pytest.raises(stores.SecretrunError) as e:
+    with pytest.raises(stores.SrunError) as e:
         manifest.load_manifest()
     assert '"namespace"' in str(e.value)
     assert ns == "" or str(ns) not in str(e.value)
@@ -59,7 +59,7 @@ def test_init_creates_manifest_with_namespace_once(tmp_path, monkeypatch, capsys
     root = _git_repo(tmp_path, "my.app")
     monkeypatch.chdir(root)
     assert wire.init([]) == 0
-    path = root / ".secretrun.json"
+    path = root / ".srun.json"
     assert json.loads(path.read_text()) == {"namespace": "my-app", "secrets": {}}
     assert '"namespace": "my-app"' in capsys.readouterr().out
     before = path.read_bytes()
@@ -74,11 +74,11 @@ def test_init_adds_namespace_keeping_entries_and_never_rewrites(tmp_path, monkey
     write_manifest(root, {"A": {"backend": "aws", "id": "x"}})
     monkeypatch.chdir(root)
     wire.init([])
-    data = json.loads((root / ".secretrun.json").read_text())
+    data = json.loads((root / ".srun.json").read_text())
     assert data == {"namespace": "web", "secrets": {"A": {"backend": "aws", "id": "x"}}}
     write_manifest(root, {}, namespace="chosen")
     wire.init([])
-    assert json.loads((root / ".secretrun.json").read_text())["namespace"] == "chosen"
+    assert json.loads((root / ".srun.json").read_text())["namespace"] == "chosen"
 
 
 def test_init_global_touches_no_manifest(tmp_path, monkeypatch):
@@ -86,7 +86,7 @@ def test_init_global_touches_no_manifest(tmp_path, monkeypatch):
     monkeypatch.chdir(root)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     assert wire.init(["--global"]) == 0
-    assert not (root / ".secretrun.json").exists()
+    assert not (root / ".srun.json").exists()
     assert (tmp_path / "home" / ".claude" / "settings.json").is_file()
 
 
@@ -97,7 +97,7 @@ def fake_keychain(monkeypatch):
 
     def get(name, sid):
         if sid not in kc:
-            raise stores.SecretrunError(f"not found in keychain: {name}")
+            raise stores.SrunError(f"not found in keychain: {name}")
         return bytearray(kc[sid])
 
     def put(backend, name, sid, vb):
@@ -133,7 +133,7 @@ def test_migrate_reports_each_name_and_never_prints_a_value(
 def test_migrate_without_namespace_refuses(tmp_path, monkeypatch, fake_keychain):
     write_manifest(tmp_path, {"A": {}})
     monkeypatch.chdir(tmp_path)
-    with pytest.raises(stores.SecretrunError):
+    with pytest.raises(stores.SrunError):
         manage.cmd_migrate([])
 
 
@@ -157,12 +157,12 @@ def test_keychain_round_trip_add_check_migrate(tmp_path, monkeypatch, capsys):
         assert f"OK    {added}  (keychain {ns}/{added})" in out
         assert f"OK    {moved}  (keychain {ns}/{moved})" in out
         assert "dummy-" not in out
-        with pytest.raises(stores.SecretrunError):
+        with pytest.raises(stores.SrunError):
             get(moved, moved)
         assert get(moved, f"{ns}/{moved}") == bytearray(b"dummy-moved-72")
     finally:
         for name, sid in ids:
             try:
                 stores.delete("keychain", name, sid)
-            except stores.SecretrunError:
+            except stores.SrunError:
                 pass

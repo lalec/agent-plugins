@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """PostToolUse redactor — scrub secret-SHAPED strings from tool output.
 
-Defence-in-depth against tokens that arrive via channels the secretrun wrapper
+Defence-in-depth against tokens that arrive via channels the srun wrapper
 never saw (an API error body, a config file the user asked to read, a webpage).
 It matches well-known credential SHAPES; it never reads the real stored values.
 
@@ -96,7 +96,7 @@ def main():
             "hookEventName": "PostToolUse",
             "updatedToolOutput": scrubbed,
             "additionalContext":
-                f"secretrun: redacted {n} secret-shaped string(s) from this "
+                f"srun: redacted {n} secret-shaped string(s) from this "
                 "tool output.",
         }
     }

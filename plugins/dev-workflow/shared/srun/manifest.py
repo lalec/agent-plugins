@@ -1,4 +1,4 @@
-"""The project manifest, .secretrun.json — which store holds each NAME, under
+"""The project manifest, .srun.json — which store holds each NAME, under
 which id. Names, stores and ids only; it never holds a value.
 
   {"namespace": "<project>",
@@ -15,7 +15,7 @@ import os
 import re
 from collections import namedtuple
 
-from stores import DEFAULT_BACKEND, MANIFEST, RESOLVERS, SecretrunError, find_manifest
+from stores import DEFAULT_BACKEND, MANIFEST, RESOLVERS, SrunError, find_manifest
 
 Manifest = namedtuple("Manifest", "secrets namespace path", defaults=(None, None))
 _NAMESPACE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -27,21 +27,21 @@ def _read(path):
         with open(path) as f:
             data = json.load(f)
     except (OSError, ValueError):
-        raise SecretrunError(f"unreadable manifest: {MANIFEST}")
+        raise SrunError(f"unreadable manifest: {MANIFEST}")
     if not isinstance(data, dict):
-        raise SecretrunError(f"{MANIFEST} must hold a JSON object")
+        raise SrunError(f"{MANIFEST} must hold a JSON object")
     return data
 
 
 def load_manifest():
-    """The nearest .secretrun.json, walking up from the working directory."""
+    """The nearest .srun.json, walking up from the working directory."""
     path = find_manifest()
     if not path:
         return Manifest({})
     data = _read(path)
     ns = data.get("namespace")
     if ns is not None and not (isinstance(ns, str) and _NAMESPACE.match(ns)):
-        raise SecretrunError(f'invalid "namespace" in {MANIFEST}: use only '
+        raise SrunError(f'invalid "namespace" in {MANIFEST}: use only '
                              "letters, digits, _ and -")
     secrets = data.get("secrets", {})
     return Manifest(secrets if isinstance(secrets, dict) else {}, ns, path)
@@ -56,9 +56,9 @@ def plan(name, cli_backend, manifest):
         return "cmd", entry["cmd"]
     backend = entry.get("backend") or cli_backend or DEFAULT_BACKEND
     if backend == "cmd":
-        raise SecretrunError(f'the cmd store needs a "cmd" entry for {name} in {MANIFEST}')
+        raise SrunError(f'the cmd store needs a "cmd" entry for {name} in {MANIFEST}')
     if backend not in RESOLVERS:
-        raise SecretrunError(f"unknown backend '{backend}' for {name}")
+        raise SrunError(f"unknown backend '{backend}' for {name}")
     if entry.get("id"):
         return backend, entry["id"]
     ns = manifest.namespace
@@ -71,7 +71,7 @@ def resolve(name, cli_backend, manifest):
 
 
 def ensure_namespace(root):
-    """Give <root>/.secretrun.json a namespace from the folder name, once —
+    """Give <root>/.srun.json a namespace from the folder name, once —
     creating the manifest when there is none. Returns the namespace written, or
     None when one is already set: an existing namespace is never rewritten."""
     path = os.path.join(root, MANIFEST)

@@ -1,4 +1,4 @@
-"""Hidden value entry for `secretrun add` — the user types; the agent never sees it.
+"""Hidden value entry for `srun add` — the user types; the agent never sees it.
 
 Order: a terminal's hidden prompt, then (macOS, no terminal — Claude Code's shell
 has none) a native hidden-input dialog, else refuse. Never reads a value from a
@@ -8,7 +8,7 @@ import os
 import subprocess
 import sys
 
-from stores import SecretrunError
+from stores import SrunError
 
 
 def tty_available():
@@ -32,18 +32,18 @@ def prompt_gui(name):
         ["osascript",
          "-e", "on run argv",
          "-e", 'set d to display dialog ("Enter value for " & item 1 of argv'
-               ' & return & "(stored by secretrun; Claude never sees it)")'
-               ' with title "secretrun" default answer ""'
+               ' & return & "(stored by srun; Claude never sees it)")'
+               ' with title "srun" default answer ""'
                " with hidden answer giving up after 110",
          "-e", "return text returned of d",
          "-e", "end run",
          name],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     if p.returncode != 0:
-        raise SecretrunError(f"dialog cancelled; nothing stored: {name}")
+        raise SrunError(f"dialog cancelled; nothing stored: {name}")
     out = p.stdout[:-1] if p.stdout.endswith(b"\n") else p.stdout
     if not out:                        # empty entry, or dialog gave up (timeout)
-        raise SecretrunError("empty value; nothing stored")
+        raise SrunError("empty value; nothing stored")
     return bytearray(out)
 
 
@@ -52,10 +52,10 @@ def read_hidden(name):
         import getpass
         val = getpass.getpass(f"Value for {name} (hidden, not echoed): ")
         if not val:
-            raise SecretrunError("empty value; nothing stored")
+            raise SrunError("empty value; nothing stored")
         return bytearray(val.encode("utf-8"))
     if sys.platform == "darwin":
         return prompt_gui(name)
-    raise SecretrunError(
+    raise SrunError(
         "no controlling terminal for a hidden prompt. Open a normal terminal "
-        "window and run:  secretrun add " + name)
+        "window and run:  srun add " + name)

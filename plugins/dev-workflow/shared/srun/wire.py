@@ -1,15 +1,15 @@
-"""`secretrun init [--global]` — wire this folder into Claude Code settings.
+"""`srun init [--global]` — wire this folder into Claude Code settings.
 
 Adds three hooks and the read-deny rules, idempotently, without touching
 unrelated settings:
-  SessionStart  puts this folder on PATH, so `secretrun` works by name
+  SessionStart  puts this folder on PATH, so `srun` works by name
   PreToolUse    guard.py on Bash — denies commands that would print values
   PostToolUse   redact.py — scrubs credential-shaped strings from tool output
   deny          Read of .env files (never .env.example), ~/.aws, ~/.ssh, gcloud
 
 Project scope (default) writes <repo>/.claude/settings.json with paths relative
 to $CLAUDE_PROJECT_DIR, so a committed settings file works in every clone, and
-gives <repo>/.secretrun.json a namespace from the repo folder name when it has
+gives <repo>/.srun.json a namespace from the repo folder name when it has
 none (creating the file if missing) — committed, so every clone and worktree
 uses the same store ids. --global writes ~/.claude/settings.json with absolute
 paths, backs it up, and touches no manifest.
@@ -22,7 +22,7 @@ import subprocess
 import time
 
 from manifest import ensure_namespace
-from stores import MANIFEST, SecretrunError
+from stores import MANIFEST, SrunError
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 ENV_FILES = [".env", ".env.local", ".env.development", ".env.development.local",
@@ -89,7 +89,7 @@ def _load(path):
 def init(args):
     unknown = [a for a in args if a != "--global"]
     if unknown:
-        print(f"secretrun init: unknown argument {unknown[0]}")
+        print(f"srun init: unknown argument {unknown[0]}")
         return 1
     glob = "--global" in args
     root = None if glob else _repo_root()
@@ -98,7 +98,7 @@ def init(args):
     try:
         settings = _load(path)
     except (OSError, ValueError) as e:
-        print(f"secretrun init: cannot read {path}: {e}")
+        print(f"srun init: cannot read {path}: {e}")
         return 1
     changed = merge(settings, _folder_ref(root))
     if changed:
@@ -126,8 +126,8 @@ def _write(path, settings, backup):
 def _namespace(root):
     try:
         ns = ensure_namespace(root)
-    except (SecretrunError, OSError) as e:
-        print(f"secretrun init: {e}")
+    except (SrunError, OSError) as e:
+        print(f"srun init: {e}")
         return 1
     if ns:
         print(f'set "namespace": "{ns}" in {os.path.join(root, MANIFEST)} — '

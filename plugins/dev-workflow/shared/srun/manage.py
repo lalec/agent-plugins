@@ -1,4 +1,4 @@
-"""`secretrun add | rm | ls | sync | check | migrate` — manage stored values by NAME.
+"""`srun add | rm | ls | sync | check | migrate` — manage stored values by NAME.
 
 Values are typed by the user (prompt.py) and go straight to the store; `check`
 resolves each value only to zero it unread; `migrate` moves one store entry to
@@ -10,7 +10,7 @@ from names import index_load, index_save, index_update, keychain_dump_names, lis
 from prompt import read_hidden
 from manifest import load_manifest, plan, resolve
 from stores import (CURRENT_NAMES, DEFAULT_BACKEND, MANIFEST, RESOLVERS,
-                    SecretrunError, delete, not_writable, store, zero)
+                    SrunError, delete, not_writable, store, zero)
 
 
 def _parse_name_backend(rest, name_optional=False):
@@ -20,16 +20,16 @@ def _parse_name_backend(rest, name_optional=False):
         if t in ("-b", "--backend"):
             backend = next(it, None)
             if backend is None:
-                raise SecretrunError("-b needs a backend name")
+                raise SrunError("-b needs a backend name")
         elif t.startswith("-"):
-            raise SecretrunError(f"unknown option: {t}")
+            raise SrunError(f"unknown option: {t}")
         elif name is None:
             name = t
         else:
-            raise SecretrunError("unexpected extra argument (secrets are added "
+            raise SrunError("unexpected extra argument (secrets are added "
                                  "interactively, never on the command line)")
     if name is None and not name_optional:
-        raise SecretrunError("a secret NAME is required")
+        raise SrunError("a secret NAME is required")
     return name, backend
 
 
@@ -66,9 +66,9 @@ def cmd_ls(rest):
     backend = backend or DEFAULT_BACKEND
     if backend == "keychain" and index_load() is None:
         sys.stderr.write(
-            "secretrun: first run — indexing keychain names once so future `ls` "
-            "won't dump the keychain. Run `secretrun sync` if you store secrets "
-            "outside secretrun.\n")
+            "srun: first run — indexing keychain names once so future `ls` "
+            "won't dump the keychain. Run `srun sync` if you store secrets "
+            "outside srun.\n")
     for n in list_names(backend):
         print(n)
     return 0
@@ -77,7 +77,7 @@ def cmd_ls(rest):
 def cmd_sync(rest):
     _, backend = _parse_name_backend(rest, name_optional=True)
     if (backend or DEFAULT_BACKEND) != "keychain":
-        raise SecretrunError("sync applies only to the keychain backend")
+        raise SrunError("sync applies only to the keychain backend")
     names = keychain_dump_names()
     index_save(names)
     print("synced %d keychain name(s) into the local index" % len(names))
@@ -101,7 +101,7 @@ def cmd_check(rest):
         try:
             zero(resolve(name, None, manifest))
             print(f"OK    {name}  ({where})")
-        except SecretrunError:
+        except SrunError:
             missing += 1
             print(f"MISS  {name}  ({where})")
     return 1 if missing else 0
@@ -110,7 +110,7 @@ def cmd_check(rest):
 def _names(rest, manifest):
     bad = [t for t in rest if t.startswith("-")]
     if bad:
-        raise SecretrunError(f"unknown option: {bad[0]}")
+        raise SrunError(f"unknown option: {bad[0]}")
     return rest or list(manifest.secrets)
 
 
@@ -128,11 +128,11 @@ def _move(name, manifest):
     try:
         zero(get(name, sid))
         return "kept", f"already under {sid}"     # never clobber a namespaced value
-    except SecretrunError:
+    except SrunError:
         pass
     try:
         old = get(name, name)
-    except SecretrunError:
+    except SrunError:
         return "not stored", ""
     try:
         store("keychain", name, sid, old)
@@ -142,7 +142,7 @@ def _move(name, manifest):
     finally:
         zero(old)
     if not same:
-        raise SecretrunError(f"moved value did not read back; bare entry kept: {name}")
+        raise SrunError(f"moved value did not read back; bare entry kept: {name}")
     delete("keychain", name, name)
     index_update(name, add=False)
     index_update(sid, add=True)
@@ -154,7 +154,7 @@ def cmd_migrate(rest):
     the named NAMEs or every manifest entry."""
     manifest = load_manifest()
     if not manifest.namespace:
-        raise SecretrunError(f'no "namespace" in {MANIFEST}; nothing to move')
+        raise SrunError(f'no "namespace" in {MANIFEST}; nothing to move')
     for name in _names(rest, manifest):
         CURRENT_NAMES[:] = [name]
         status, detail = _move(name, manifest)

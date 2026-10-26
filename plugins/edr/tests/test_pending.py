@@ -208,7 +208,7 @@ def test_bare_zero_accepts_only_benign(monkeypatch):
                         lambda sigs, snapshot_ts: seen.extend(sigs) or {"accepted": sigs, "unmatched": []})
     out = pending.drain(reply="0", batch_ts=TS)
     assert seen == ["a", "c"]
-    assert out["acks"] == ["👌 1, 3 · accepted as normal\nstill open: 2"]
+    assert out["acks"] == ["👌 1, 3 · accepted as normal", "still open: 2"]
     assert not alerts.load(TS).get("reviewed")
 
 

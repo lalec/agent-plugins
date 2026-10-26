@@ -40,6 +40,12 @@ def health() -> dict[str, dict[str, Any]]:
     return data if isinstance(data, dict) else {}
 
 
+def _held(conn, feed: str) -> dict[str, Any]:
+    """Rows this feed holds and when the newest arrived — its last good sync."""
+    rows, newest = conn.execute("SELECT COUNT(*), MAX(last_seen) FROM iocs WHERE feed=?", (feed,)).fetchone()
+    return {"rows": rows, "last_ok": newest}
+
+
 def main() -> int:
     now = time.time()
     report: dict[str, dict[str, Any]] = {}
@@ -54,14 +60,15 @@ def main() -> int:
             except Exception as e:  # feeds raise FeedError with the key already redacted
                 error = str(e) if isinstance(e, FeedError) else f"{type(e).__name__}: {e}"
                 print(f"[sync] feed {feed.FEED_NAME} failed: {error}", file=sys.stderr)
-            report[feed.FEED_NAME] = {"ok": error is None and n > 0, "fetched": n, "rows": 0,
-                                      "last_ok": None, "error": error}
+            report[feed.FEED_NAME] = {"ok": error is None and n > 0, "fetched": n, "error": error,
+                                      **_held(conn, feed.FEED_NAME)}
+            conn.commit()
+            write_json(paths.INTEL_HEALTH, report)  # per feed: a killed sync still leaves a record
             print(f"[sync] {feed.FEED_NAME}: {n} IOCs")
         pruned = conn.execute("DELETE FROM iocs WHERE feed != 'mitre_macos' AND last_seen < ?",
                               (now - PRUNE_AFTER_SEC,)).rowcount
-        for name, rows, newest in conn.execute("SELECT feed, COUNT(*), MAX(last_seen) FROM iocs GROUP BY feed"):
-            if name in report:
-                report[name].update(rows=rows, last_ok=newest)
+        for name in report:
+            report[name].update(_held(conn, name))
     write_json(paths.INTEL_HEALTH, report)
     failed = sorted(name for name, r in report.items() if not r["ok"])
     print(f"[sync] feeds: {len(report)}, failed: {', '.join(failed) or 'none'}, pruned stale: {pruned}")

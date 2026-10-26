@@ -107,7 +107,7 @@ def _intel_sync() -> None:
     """Refresh IOC feeds; a failure is logged, never fatal."""
     try:
         proc = subprocess.run([sys.executable, str(paths.RUNTIME_DIR / "intel" / "sync.py")],
-                              capture_output=True, text=True, timeout=180)
+                              capture_output=True, text=True, timeout=600)
         notify.log(f"intel-sync rc={proc.returncode}: {(proc.stdout or proc.stderr).strip().splitlines()[-1:]}")
     except (subprocess.TimeoutExpired, OSError) as e:
         notify.log(f"intel-sync failed: {e}")

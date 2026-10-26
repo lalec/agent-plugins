@@ -126,9 +126,11 @@ def _handle(batch: dict[str, Any], text: str, source: str, msg_id: str | None,
         msgs.append(f"👌 {', '.join(map(str, accepted))} · accepted as normal")
     fresh = alerts.load(batch["ts"]) or batch
     left = sorted(alerts.numbers(fresh) - {int(k) for k in fresh.get("answers") or {}})
-    if left and len(ops) > 1:
+    if left and any(verb != "why" for verb, _ in ops):
         msgs.append(f"still open: {', '.join(map(str, left))}")
-    _ack(out, "\n".join(msgs), source)
+    out["acks"].extend(msgs)
+    if source == "discord":
+        notify.post("\n".join(msgs))
     if alerts.answered(fresh) and not fresh.get("reviewed"):
         alerts.mark(batch["ts"], reviewed=ledger.now())
 

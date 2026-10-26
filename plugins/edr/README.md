@@ -13,6 +13,7 @@ Endpoint Detection & Response for macOS, packaged as a Claude Code plugin. Detec
 | Browsers | any of Chrome, Chromium, Brave, Edge, Arc, Vivaldi, Opera, Firefox, Safari | Discovered at run time; nothing is assumed installed. |
 | Discord (optional) | a bot token, a private server, one text channel | Only for the unattended nightly loop. Without it, findings wait for your next `/edr:macos`. |
 | Network (optional) | outbound HTTPS to abuse.ch | Intel feeds. Offline runs still work; the IOC database is simply stale. |
+| abuse.ch Auth-Key (free) | `~/.claude/edr/secrets/abusech.key` | ThreatFox and URLhaus exports need it ([auth.abuse.ch](https://auth.abuse.ch/)). Save with `pbpaste > ~/.claude/edr/secrets/abusech.key && chmod 600 ~/.claude/edr/secrets/abusech.key`. Without it those lists go stale and every post says so. |
 
 Check a host before the first scan:
 
@@ -39,6 +40,7 @@ edr doctor
 | `/edr:macos test {scenario\|all}` | Red-team simulators (see Testing) |
 | `edr accept <sig>… \| --all [--collector X]` | Fold confirmed-benign anomalies into the baseline. The only way the baseline grows after bootstrap. |
 | `edr intel-sync` / `edr intel-lookup <type> <value>` | Refresh the IOC database (abuse.ch URLhaus, ThreatFox, Feodo + MITRE) / look one value up |
+| `edr coverage` | What the last run checked, threat-list size, matches and age |
 | `edr doctor` | macOS version, Python, PyYAML, and per-source availability on this host |
 
 ## What it detects
@@ -61,7 +63,7 @@ Command-line pattern rules and the IOC match run over the **whole snapshot** eve
 
 ## Unattended nightly scan
 
-`edr schedule install` writes a launchd calendar job (default 22:00, fires on wake if missed, runs under `caffeinate`). With `notify.channel: discord` in `config.yaml` the job posts findings to one guild text channel as a numbered list; reply `<finding> <choice>` with `0` ok (accept as benign), `1` why, `2` fix (run the declared remediation), `3` skip — just the choice when there is one finding. User-scope actions run the same night; anything needing root queues until the next `/edr:macos` at the Mac, where it raises the admin dialog. Every failed run posts one `scan incomplete` line; Sundays post a one-line heartbeat when clean. With `notify.channel: none` nothing is posted and the batch opens the next interactive run.
+`edr schedule install` writes a launchd calendar job (default 22:00, fires on wake if missed, runs under `caffeinate`). With `notify.channel: discord` in `config.yaml` the job posts findings to one guild text channel as a numbered list; reply `<finding> <choice>` with `0` ok (accept as benign), `1` why, `2` fix (run the declared remediation), `3` skip — just the choice when there is one finding, and just `0` to accept every finding the analyst called benign. The header gives the verdict (🟢 no sign of compromise / 🔴 N need a look), findings from earlier nights sit under "Still open" with the date they first appeared, and every post ends with what was checked and how fresh the threat lists are. A threat list going stale posts one warning line, and one more when it recovers. User-scope actions run the same night; anything needing root queues until the next `/edr:macos` at the Mac, where it raises the admin dialog. Every failed run posts one `scan incomplete` line; Sundays post a one-line heartbeat when clean. With `notify.channel: none` nothing is posted and the batch opens the next interactive run.
 
 Discord setup, once: a bot token (the Claude Code Discord plugin's works), a private server the bot is in, a text channel the plugin has **not** opted into (the plugin routes DMs into every open Claude session), and in `config.yaml`: `notify.channel: discord`, `channel_id`, `user_id`. `edr notify test` proves it.
 

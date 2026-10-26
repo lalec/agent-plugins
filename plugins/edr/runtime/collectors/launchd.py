@@ -24,6 +24,7 @@ LAUNCH_DIRS = [
 
 class LaunchdCollector(Collector):
     name = "launchd"
+    label = "startup items"
     tier = "T"
     maturity = "stable"
     version = 1

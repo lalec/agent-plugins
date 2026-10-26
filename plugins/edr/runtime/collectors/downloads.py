@@ -30,6 +30,7 @@ MAX_EVENTS = 100
 
 class DownloadsCollector(Collector):
     name = "downloads"
+    label = "downloads"
     tier = "T"
     maturity = "beta"
     version = 1

@@ -30,6 +30,7 @@ PROXY_KEYS = ("HTTPEnable", "HTTPProxy", "HTTPPort", "HTTPSEnable", "HTTPSProxy"
 
 class NetworkCollector(Collector):
     name = "network"
+    label = "network"
     tier = "T"
     maturity = "stable"
     version = 2

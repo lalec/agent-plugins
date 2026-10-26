@@ -197,6 +197,8 @@ def main() -> int:
         "duration_ms": sum(durations.values()),
         "collectors": {
             cls.name: {
+                "label": cls.label or cls.name,
+                "errors": sum(1 for e in snapshot.get(cls.name, []) if e.kind == "error"),
                 "tier": cls.tier,
                 "maturity": cls.maturity,
                 "version": cls.version,

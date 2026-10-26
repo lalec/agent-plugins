@@ -28,6 +28,7 @@ KEYBINDINGS = CLAUDE_HOME / "keybindings.json"
 
 class ClaudeCodeConfigCollector(Collector):
     name = "claude_code_config"
+    label = "Claude config"
     tier = "T"
     maturity = "stable"
     version = 1

@@ -24,6 +24,7 @@ BUNDLE_ID = re.compile(r"^[A-Za-z0-9-]+(\.[A-Za-z0-9_-]+){2,}$")
 
 class HostSecurityCollector(Collector):
     name = "host_security"
+    label = "Mac security settings"
     tier = "D"
     maturity = "beta"
     version = 1

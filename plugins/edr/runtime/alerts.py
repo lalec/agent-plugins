@@ -10,7 +10,13 @@ Fields the loop maintains: `posted` (message id once sent), `answers`
 was shown in an interactive session).
 
 Reply grammar is numeric: `<finding> <choice>` pairs, choices 0 ok · 1 why ·
-2 fix · 3 skip; a bare choice when the batch has one finding.
+2 fix · 3 skip; a bare choice when the batch has one finding, and a bare `0`
+accepts every finding the analyst called benign.
+
+The header carries the analyst's verdict (`verdict: benign` per finding), not
+the floor severity: a batch of benign changes is green even when a triage
+floor made one of them critical. Findings already posted on earlier nights
+are listed under "Still open" with the night they first appeared.
 """
 from __future__ import annotations
 
@@ -22,10 +28,8 @@ from typing import Any
 import paths
 from collectors._base import read_json, write_json
 
-SEV_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 CHOICES = {0: "ok", 1: "why", 2: "fix", 3: "skip"}
 CHOICE_LINE = " · ".join(f"{c} {v}" for c, v in CHOICES.items())
-SEV_ICON = {"critical": "🔴", "high": "🔴", "medium": "🟠", "low": "🟡", "info": "🟢"}
 TS_FORMAT = "%Y%m%dT%H%M%SZ"
 
 
@@ -108,19 +112,63 @@ def local_label(ts: str) -> str:
 
 def render(batch: dict[str, Any]) -> str | None:
     """Channel message for a batch; None when there is nothing to decide."""
+    import coverage
     findings = [f for f in batch.get("findings") or [] if _n(f) is not None]
     if not findings:
         return None
-    top = max(findings, key=lambda f: SEV_RANK.get(str(f.get("severity")), 0))
-    icon = SEV_ICON.get(str(top.get("severity")), "🟠")
-    lines = [f"{icon} edr · {local_label(batch['ts'])} · {len(findings)} to decide"]
-    for f in findings:
-        rec = f" → {f['recommend']}" if f.get("recommend") else ""
-        lines.append(f"{_n(f)} · {f.get('headline', '')}{rec}")
+    ok = benign(batch)
+    look = len(findings) - len(ok)
+    yours = f"{len(ok)} look{'s' if len(ok) == 1 else ''} like yours"
+    head = (f"🔴 edr · {local_label(batch['ts'])} · {look} need{'s' if look == 1 else ''} a look"
+            + (f" · {yours}" if ok else "")) if look else \
+        f"🟢 edr · {local_label(batch['ts'])} · no sign of compromise · {yours}"
+    since = open_since(batch)
+    new = [f for f in findings if _n(f) not in since]
+    old = [f for f in findings if _n(f) in since]
+    lines = [head] + (["New tonight:"] if new and old else []) + [_line(f, ok) for f in new]
+    if old:
+        lines += ["Still open:"] + [_line(f, ok, since[_n(f)]) for f in old]
+    lines += coverage.lines(batch["ts"])
     ns = sorted(_n(f) for f in findings)
     which = str(ns[0]) if len(ns) == 1 else f"{ns[0]}–{ns[-1]}"
-    lines.append(f"Reply: {which} · {CHOICE_LINE}")
+    bulk = " · just 0 = ok all that look like yours" if len(ns) > 1 and ok else ""
+    lines.append(f"Reply: {which} · {CHOICE_LINE}{bulk}")
     return "\n".join(lines)
+
+
+def _line(f: dict[str, Any], ok: set[int], first: str | None = None) -> str:
+    mark = "" if _n(f) in ok else "⚠️ "
+    count = f" ×{len(sigs(f))}" if len(sigs(f)) > 1 else ""
+    when = f" · since {datetime.fromtimestamp(parse_ts(first)).strftime('%-d %b')}" if first else ""
+    rec = f" → {f['recommend']}" if f.get("recommend") else ""
+    return f"{mark}{_n(f)} · {f.get('headline', '')}{count}{when}{rec}"
+
+
+def benign(batch: dict[str, Any]) -> set[int]:
+    """Finding numbers the analyst called benign — what a bare `0` accepts."""
+    return {_n(f) for f in batch.get("findings") or [] if f.get("verdict") == "benign" and _n(f) is not None}
+
+
+def sigs(f: dict[str, Any]) -> list[str]:
+    """A finding covers one or more anomalies with the same root cause."""
+    return [s for s in (f.get("sigs") or [f.get("sig")]) if s]
+
+
+def open_since(batch: dict[str, Any]) -> dict[int, str]:
+    """{n: ts of the first night} for findings also posted on the nights just before this one."""
+    tracking = {_n(f): set(sigs(f)) for f in batch.get("findings") or [] if _n(f) is not None}
+    since: dict[int, str] = {}
+    for ts in reversed([t for t in list_ts() if t < batch["ts"]]):
+        prior = load(ts)
+        if not prior or not tracking:
+            break
+        seen = {s for f in prior.get("findings") or [] for s in sigs(f)}
+        for n, ss in list(tracking.items()):
+            if ss & seen:
+                since[n] = ts
+            else:
+                del tracking[n]
+    return since
 
 
 def post_batch(batch: dict[str, Any]) -> str | None:

@@ -14,6 +14,7 @@ from collectors._util import run_cmd
 
 class DockerCollector(Collector):
     name = "docker"
+    label = "containers"
     tier = "T"
     maturity = "stable"
     version = 1

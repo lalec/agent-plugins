@@ -111,7 +111,7 @@ Collectors give you **starting points**, not conclusions. For anything not obvio
   "posted": null, "reviewed": null,
   "findings": [
     {
-      "n": 1, "sig": "<sig from diff.json>", "severity": "medium",
+      "n": 1, "sigs": ["<sig from diff.json>"], "severity": "medium", "verdict": "suspicious",
       "headline": "LaunchAgent runs every 2h, app deleted 2021",
       "recommend": "remove it",
       "action": {"primitive": "remove_path", "args": {"path": "~/Library/LaunchAgents/x.plist"}},
@@ -123,9 +123,11 @@ Collectors give you **starting points**, not conclusions. For anything not obvio
 ```
 
 - `findings` holds only anomalies at or above `alert_floor`, numbered from 1. Clean run → `"findings": []`.
-- `headline` and `recommend` ≤ 80 chars each; they are the whole phone message. Depth goes in `narrative` (pulled by `why N`, never pushed).
+- One finding per root cause: anomalies with the same explanation (the same tool seen twice, one app's three files) share a finding and list every `sig` in `sigs`; `ok` accepts them all.
+- `verdict` is your call on the finding: `benign` (explained, nothing to do but accept) or `suspicious` (needs the user's eyes or a fix). It drives the post's header — green "no sign of compromise" only when every finding is `benign` — and a bare `0` reply accepts only `benign` findings. When unsure, `suspicious`. Severity stays the floor-driven impact rating; never lower it to match the verdict.
+- `headline` and `recommend` ≤ 80 chars each; they are the whole phone message. Depth goes in `narrative` (pulled by `why N`, never pushed). No night counts or "unanswered since" in the headline — the post adds "since <date>" for findings carried over from earlier nights.
 - `action` is the one thing you would do, as a `respond.py` primitive with its args (`kill_pid`, `launchctl_unload`, `quarantine_file`, `remove_path`, `ssh_revoke_key`), or `null` when the fix is the user's to make — then `fix` answers with `recommend`, so make it the exact change (`bind it to 127.0.0.1`). `ok` (accept as benign) and `skip` always apply.
-- Then narrate to chat: headline line `N anomalies — X critical, Y high, Z medium, K low (J suppressed)` or `Clean — no anomalies`; per finding the numbered line plus a short narrative; end with the reply grammar the user can answer in chat — `<finding> <choice>` with `0 ok · 1 why · 2 fix · 3 skip` (a bare choice when there is one finding). Apply their answer with `edr poll --reply "1 2" --batch {ts}`.
+- Then narrate to chat: first line the risk verdict (`No sign of compromise` or `N need a look`), then `N anomalies — X critical, Y high, Z medium, K low (J suppressed)` or `Clean — no anomalies`; per finding the numbered line plus a short narrative; then the output of `edr coverage` (what was checked, threat-list freshness — say so plainly when a list is stale); end with the reply grammar the user can answer in chat — `<finding> <choice>` with `0 ok · 1 why · 2 fix · 3 skip` (a bare choice when there is one finding; a bare `0` accepts every `benign` finding). Apply their answer with `edr poll --reply "1 2" --batch {ts}`.
 
 With `notify.channel: discord` the nightly job posts the batch itself; interactive runs stay in chat.
 

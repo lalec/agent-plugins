@@ -42,6 +42,7 @@ FIREFOX_POLICY_JSON = Path("/Applications/Firefox.app/Contents/Resources/distrib
 
 class BrowserCollector(Collector):
     name = "browser"
+    label = "browser extensions"
     tier = "T"
     maturity = "beta"
     version = 1

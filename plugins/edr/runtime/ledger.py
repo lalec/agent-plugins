@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import accept as accept_mod
+import alerts
 import paths
 import respond
 from collectors._base import read_json, write_json
@@ -59,7 +60,7 @@ def build(batch: dict[str, Any], finding: dict[str, Any], verb: str, source: str
         if not action.get("primitive"):
             return None
         kind, primitive, args = "action", str(action["primitive"]), dict(action.get("args") or {})
-    return {"batch": batch["ts"], "n": int(finding["n"]), "kind": kind, "sig": finding.get("sig"),
+    return {"batch": batch["ts"], "n": int(finding["n"]), "kind": kind, "sigs": alerts.sigs(finding),
             "primitive": primitive, "args": args,
             "needs_root": kind == "action" and needs_root(primitive, args),
             "source": source, "approved_msg": msg_id, "approved_at": now(),
@@ -70,9 +71,11 @@ def execute(entry: dict[str, Any]) -> dict[str, Any]:
     """Run one entry now; records status/result on disk."""
     try:
         if entry["kind"] == "accept":
-            res = accept_mod.accept([entry["sig"]], snapshot_ts=entry["batch"])
-            ok = bool(res["accepted"])
-            summary = "accepted as normal" if ok else "signature not in that run's diff"
+            sigs = entry.get("sigs") or [entry.get("sig")]
+            res = accept_mod.accept(sigs, snapshot_ts=entry["batch"])
+            ok = bool(res["accepted"]) and not res["unmatched"]
+            summary = ("accepted as normal" if ok else
+                       f"accepted {len(res['accepted'])} of {len(set(sigs))}; the rest are not in that run's diff")
         else:
             fn = getattr(respond, entry["primitive"], None)
             if fn is None or entry["primitive"].startswith("_"):

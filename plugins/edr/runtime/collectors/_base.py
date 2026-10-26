@@ -85,6 +85,7 @@ class CollectorContext:
 class Collector(ABC):
     """Abstract base. Subclass and implement .collect(). Auto-discovered from collectors/*.py."""
     name: ClassVar[str]
+    label: ClassVar[str] = ""  # plain words for the nightly post's coverage line; falls back to name
     tier: ClassVar[Tier]
     maturity: ClassVar[Maturity] = "experimental"  # overridable via manifest.yaml
     version: ClassVar[int] = 1

@@ -24,6 +24,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent.resolve()))
 
 import alerts  # noqa: E402
+import coverage  # noqa: E402
 import launchd_job  # noqa: E402
 import ledger  # noqa: E402
 import notify  # noqa: E402
@@ -73,7 +74,11 @@ def run() -> int:
             if posted:
                 pending.drain(wait=conf["reply_window"])
         elif _heartbeat_due():
-            posted = bool(notify.post(f"🟢 edr · {_clean_streak() + 1} nights clean"))
+            posted = bool(notify.post("\n".join([f"🟢 edr · {_clean_streak() + 1} nights clean"]
+                                                + coverage.lines())))
+        warning = coverage.intel_warning()  # the batch post already shows list age
+        if warning and not (ended == "ok" and findings):
+            notify.post(warning)
 
     _append_run({"ts": time.strftime(alerts.TS_FORMAT, time.gmtime(start)), "ended": ended,
                  "reason": reason, "cost_usd": data.get("total_cost_usd"),
@@ -102,7 +107,7 @@ def _intel_sync() -> None:
     """Refresh IOC feeds; a failure is logged, never fatal."""
     try:
         proc = subprocess.run([sys.executable, str(paths.RUNTIME_DIR / "intel" / "sync.py")],
-                              capture_output=True, text=True, timeout=180)
+                              capture_output=True, text=True, timeout=600)
         notify.log(f"intel-sync rc={proc.returncode}: {(proc.stdout or proc.stderr).strip().splitlines()[-1:]}")
     except (subprocess.TimeoutExpired, OSError) as e:
         notify.log(f"intel-sync failed: {e}")

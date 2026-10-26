@@ -44,3 +44,27 @@ def test_accept_by_sig_then_all(monkeypatch):
     assert "launchd@1::/gone.plist" not in b                # removed → key dropped
     assert "launchd@1::/suppressed" not in b                # suppressed never accepted
     assert len(res["accepted"]) == 2
+
+
+def test_ok_reply_accepts_every_sig_of_a_finding(monkeypatch):
+    """`0` on a grouped finding runs through the real ledger → accept path."""
+    import alerts
+    import pending
+    monkeypatch.setattr(accept, "_collector_meta", lambda: ({"launchd": 1}, {"launchd": ["mtime"]}, set()))
+    monkeypatch.setattr(pending.notify, "fetch", lambda after: [])
+    _snapshot()
+    second = {**ADDED, "key": "/y.plist"}
+    write_json(paths.STATE_DIR / "snapshots" / TS / "diff.json", {"anomalies": [
+        {"change": "added", "suppressed": False, "evidence": ADDED},
+        {"change": "added", "suppressed": False, "evidence": second}]})
+    baseline_mod.save(paths.STATE_DIR, {})
+    sigs = [Evidence(**ADDED).signature_hash(), Evidence(**second).signature_hash()]
+    alerts.save({"ts": TS, "findings": [
+        {"n": 1, "sigs": sigs, "verdict": "benign", "headline": "h", "action": None},
+        {"n": 2, "sigs": ["missing"], "verdict": "benign", "headline": "h2", "action": None}]})
+
+    out = pending.drain(reply="0", batch_ts=TS)
+    b = baseline_mod.load(paths.STATE_DIR)
+    assert "launchd@1::/x.plist" in b and "launchd@1::/y.plist" in b
+    assert out["acks"][0].startswith("❌ 2 · accepted 0 of 1")
+    assert out["acks"][1] == "👌 1 · accepted as normal"

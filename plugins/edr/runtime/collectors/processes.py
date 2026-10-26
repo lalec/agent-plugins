@@ -12,9 +12,13 @@ pairs settle through `edr accept`; an Office or browser parent spawning a
 shell is the macro / dropper pattern and gets a triage floor.
 
 The executable comes from `ps -o comm=`, which keeps paths with spaces intact.
+Tools run by `uvx` live under a fresh hash directory per launch and run as that
+directory's `python`; their identity is the tool script with the hash replaced
+by `*`, so one accept covers every future launch of that tool and no other.
 """
 from __future__ import annotations
 
+import re
 import shutil
 from collections import defaultdict
 from pathlib import Path
@@ -27,10 +31,12 @@ MAX_COMMANDS = 10
 WATCH_CHILDREN = {"osascript", "curl", "wget", "sh", "bash", "zsh", "python", "python3", "perl",
                   "ruby", "nc", "ncat", "openssl", "base64", "xattr", "chmod", "launchctl"}
 HASH_STATUSES = {"unsigned", "adhoc", "broken"}
+EPHEMERAL_ENV = re.compile(r"(/\.cache/uv/archive-v0/)[^/]+")
 
 
 class ProcessesCollector(Collector):
     name = "processes"
+    label = "programs"
     tier = "T"
     maturity = "stable"
     version = 4
@@ -56,23 +62,25 @@ class ProcessesCollector(Collector):
             row = self._parse(line)
             if row and (exe := self._exe(comm_by_pid.get(row["pid"]), row["command"])):
                 row["exe"] = exe
+                row["ident"] = self._identity(exe, row["command"])
                 rows.append(row)
-        exe_by_pid = {r["pid"]: r["exe"] for r in rows}
+        ident_by_pid = {r["pid"]: r["ident"] for r in rows}
 
-        evidences = self._processes(rows, cache) + self._lineage(rows, exe_by_pid)
+        evidences = self._processes(rows, cache) + self._lineage(rows, ident_by_pid)
         save_json_cache(cache_path, cache)
         return evidences
 
     def _processes(self, rows: list[dict[str, Any]], cache: dict[str, Any]) -> list[Evidence]:
         groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for r in rows:
-            groups[r["exe"]].append(r)
+            groups[r["ident"]].append(r)
         out: list[Evidence] = []
-        for exe, grp in groups.items():
-            verdict = codesign_verdict(exe, cache) if exe.startswith("/") else {"status": "unresolved"}
+        for ident, grp in groups.items():
             sample = grp[0]
+            exe = sample["exe"]
+            verdict = codesign_verdict(exe, cache) if exe.startswith("/") else {"status": "unresolved"}
             attrs = {
-                "exe": exe,
+                "exe": ident,
                 "users": sorted({r["user"] for r in grp}),
                 "commands": list(dict.fromkeys(r["command"][:200] for r in grp))[:MAX_COMMANDS],
                 "ppid": sample["ppid"],
@@ -86,17 +94,17 @@ class ProcessesCollector(Collector):
             }
             if verdict.get("status") in HASH_STATUSES:
                 attrs["exe_sha256"] = self._sha_cached(exe, cache)
-            out.append(Evidence(collector=self.name, kind="process", key=exe, attrs=attrs))
+            out.append(Evidence(collector=self.name, kind="process", key=ident, attrs=attrs))
         return out
 
-    def _lineage(self, rows: list[dict[str, Any]], exe_by_pid: dict[int, str]) -> list[Evidence]:
+    def _lineage(self, rows: list[dict[str, Any]], ident_by_pid: dict[int, str]) -> list[Evidence]:
         pairs: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
         for r in rows:
             if Path(r["exe"]).name not in WATCH_CHILDREN:
                 continue
-            parent = exe_by_pid.get(r["ppid"])
+            parent = ident_by_pid.get(r["ppid"])
             if parent:
-                pairs[(parent, r["exe"])].append(r)
+                pairs[(parent, r["ident"])].append(r)
         return [
             Evidence(collector=self.name, kind="lineage", key=f"lineage|{parent}|{child}",
                      attrs={"parent_exe": parent, "child_exe": child, "child": Path(child).name,
@@ -104,6 +112,16 @@ class ProcessesCollector(Collector):
                             "sample_command": grp[0]["command"][:200]})
             for (parent, child), grp in pairs.items()
         ]
+
+    @staticmethod
+    def _identity(exe: str, command: str) -> str:
+        """`exe`, unless it runs a tool script inside a per-launch uv env: then that script, hash → `*`."""
+        env = EPHEMERAL_ENV.search(exe)
+        if not env:
+            return exe
+        prefix = exe[: env.end()] + "/"
+        tool = next((t for t in command.split()[1:] if t.startswith(prefix)), None)
+        return EPHEMERAL_ENV.sub(r"\1*", tool, count=1) if tool else exe  # no script: never merge
 
     @staticmethod
     def _sha_cached(exe: str, cache: dict[str, Any]) -> str | None:

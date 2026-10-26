@@ -51,6 +51,7 @@ CURL_PIPE_SH = re.compile(r"(curl|wget)[^\n|]*\|\s*(sh|bash|zsh)|eval\s+\"\$\(cu
 
 class SensitivePathsCollector(Collector):
     name = "sensitive_paths"
+    label = "credential files"
     tier = "T"
     maturity = "stable"
     version = 1

@@ -177,8 +177,45 @@ def test_unseen_runs_reported_once():
 def test_render():
     b = make_batch()
     text = alerts.render(b)
-    assert text.splitlines()[0].endswith("1 to decide")
-    assert "1 · h → r" in text and text.splitlines()[-1] == "Reply: 1 · 0 ok · 1 why · 2 fix · 3 skip"
+    assert text.splitlines()[0].endswith("1 needs a look")  # no verdict = needs a look
+    assert "⚠️ 1 · h → r" in text and text.splitlines()[-1] == "Reply: 1 · 0 ok · 1 why · 2 fix · 3 skip"
+    assert "Threat lists" in text  # coverage rides on every post
     assert alerts.render({"ts": TS, "findings": []}) is None
     assert alerts.since(alerts.parse_ts(TS) + 0.7)["ts"] == TS  # same-second start still counts
     assert alerts.since(alerts.parse_ts(TS) + 1.0) is None
+
+
+def _finding(n, sig, verdict="benign", **kw):
+    return {"n": n, "sig": sig, "severity": "critical", "headline": f"h{n}", "recommend": "accept",
+            "action": None, "narrative": "", "verdict": verdict, **kw}
+
+
+def test_render_verdict_still_open_and_grouping():
+    alerts.save({"ts": "20260902T120004Z", "findings": [_finding(1, "old")]})
+    b = {"ts": TS, "findings": [_finding(1, "new", sigs=["new", "new2"]), _finding(2, "old")]}
+    alerts.save(b)
+    lines = alerts.render(b).splitlines()
+    assert lines[0].startswith("🟢") and "no sign of compromise · 2 look like yours" in lines[0]
+    assert lines[1:5] == ["New tonight:", "1 · h1 ×2 → accept", "Still open:", "2 · h2 · since 2 Sep → accept"]
+    assert lines[-1].endswith("just 0 = ok all that look like yours")
+
+
+def test_bare_zero_accepts_only_benign(monkeypatch):
+    alerts.save({"ts": TS, "findings": [_finding(1, "a"), _finding(2, "b", verdict="suspicious"),
+                                        _finding(3, "c")]})
+    seen = []
+    monkeypatch.setattr(ledger.accept_mod, "accept",
+                        lambda sigs, snapshot_ts: seen.extend(sigs) or {"accepted": sigs, "unmatched": []})
+    out = pending.drain(reply="0", batch_ts=TS)
+    assert seen == ["a", "c"]
+    assert out["acks"] == ["👌 1, 3 · accepted as normal", "still open: 2"]
+    assert not alerts.load(TS).get("reviewed")
+
+
+@pytest.mark.parametrize("text,benign,expected", [
+    ("0", {1, 3}, [("ok", 1), ("ok", 3)]),
+    ("0", set(), None),                  # nothing benign: bare 0 is not a blanket accept
+    ("1", {1, 2}, None),
+])
+def test_parse_bare_zero(text, benign, expected):
+    assert pending.parse(text, {1, 2, 3}, benign) == expected

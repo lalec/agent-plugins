@@ -22,6 +22,7 @@ from intel.feeds._http import FeedError  # noqa: E402
 
 FEEDS_DIR = Path(__file__).parent / "feeds"
 PRUNE_AFTER_SEC = 30 * 24 * 3600
+MIN_INTERVAL = 6 * 3600
 
 
 def discover_feeds() -> list:
@@ -46,11 +47,17 @@ def _held(conn, feed: str) -> dict[str, Any]:
     return {"rows": rows, "last_ok": newest}
 
 
-def main() -> int:
+def main(argv: list[str]) -> int:
     now = time.time()
+    prior = {} if "--force" in argv else health()
     report: dict[str, dict[str, Any]] = {}
     with ioc_db.connect() as conn:
         for feed in discover_feeds():
+            last = prior.get(feed.FEED_NAME) or {}
+            if last.get("ok") and now - float(last.get("last_ok") or 0) < MIN_INTERVAL:
+                report[feed.FEED_NAME] = last
+                print(f"[sync] {feed.FEED_NAME}: fresh, skipped (--force to refetch)")
+                continue
             n, error = 0, None
             try:
                 for ioc in feed.fetch():
@@ -76,4 +83,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

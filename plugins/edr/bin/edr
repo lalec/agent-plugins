@@ -63,7 +63,7 @@ case "$cmd" in
     ;;
 
   intel-sync)
-    exec python3 "$RUNTIME/intel/sync.py"
+    exec python3 "$RUNTIME/intel/sync.py" "${@:2}"
     ;;
 
   coverage)
@@ -95,7 +95,8 @@ Usage:
   edr schedule install|uninstall|status|run
                                Nightly unattended scan via launchd (run = what the job executes)
   edr test {scenario|all}      Run a red-team simulator scenario
-  edr intel-sync               Refresh the IOC database from intel feeds (abuse.ch key: secrets/abusech.key)
+  edr intel-sync [--force]     Refresh the IOC database from intel feeds (abuse.ch key: secrets/abusech.key);
+                               feeds synced in the last 6h are skipped
   edr coverage                 What the last run checked, and how fresh the threat lists are
   edr intel-lookup <type> <v>  Look up an ip | domain | hash_sha256 | mitre_id in the IOC database
   edr doctor                   macOS version, python/PyYAML, and which sources this host can provide

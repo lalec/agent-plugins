@@ -77,3 +77,22 @@ def test_uv_tool_identity():
     assert ident(env + "python", f"{env}python {env}mcp-tool --x") == "/Users/u/.cache/uv/archive-v0/*/bin/mcp-tool"
     assert ident(env + "python", f"{env}python -c 'x'") == env + "python"  # no script: never merged
     assert ident("/bin/zsh", "-zsh") == "/bin/zsh"
+
+
+def test_sync_skips_fresh_feeds(monkeypatch):
+    from intel import sync
+
+    class Feed:
+        FEED_NAME = "fake"
+        calls = 0
+
+        @classmethod
+        def fetch(cls):
+            cls.calls += 1
+            yield {"type": "ip", "value": "203.0.113.9", "severity": "high"}
+
+    monkeypatch.setattr(sync, "discover_feeds", lambda: [Feed])
+    paths.INTEL_HEALTH.unlink(missing_ok=True)
+    assert sync.main([]) == 0 and Feed.calls == 1
+    assert sync.main([]) == 0 and Feed.calls == 1          # fresh: no second download
+    assert sync.main(["--force"]) == 0 and Feed.calls == 2

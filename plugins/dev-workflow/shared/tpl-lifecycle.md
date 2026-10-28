@@ -616,6 +616,9 @@ Its scope is the branch's pending changes, so its unit is a branch diff and not 
 # The key is id + package + VERSION. A carried status is only honest at the version it was
 # decided against, so a bump re-opens the statement instead of inheriting the old answer —
 # the same rule custom-tests.yaml applies to a pass carried across an untouched diff.
+# A CI gate that reads this file to silence its scanner keeps the same key: it ignores an id
+# only on a not_affected statement whose package version is the one installed, so a bump
+# fails CI until the statement is re-decided instead of passing on the old answer.
 #
 # Protocol, justifications and the compensating-control rule: <PREFIX>-review/references/security-review.md § Triage
 #

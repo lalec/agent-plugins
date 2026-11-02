@@ -6,15 +6,16 @@ value to one child command, and masks it — plus its base64, URL-encoded and
 JSON-escaped forms — out of that command's output as `[REDACTED:NAME]`. Nothing
 reaches the command line, the agent's context, or the session transcript.
 
-One folder, Python standard library only. dev-workflow installs it into every
-project; any other project can use it on its own.
+A Claude Code plugin, Python standard library only. dev-workflow depends on it,
+so installing dev-workflow installs srun; any other project uses it on its own.
 
 ## Use it in any project
 
-1. Copy this folder into the project, e.g. to `.claude/srun/`.
-2. Wire it: `python3 .claude/srun/srun init` — adds the hooks below to
-   `.claude/settings.json` and gives `.srun.json` a `namespace` (see
-   Namespacing). Takes effect in new sessions. Commit all three.
+1. Install once per machine: `/plugin install srun@agent-plugins`. Its hooks
+   (below) then guard every project, from the next session on.
+2. Run `/srun:setup` once per project. It gives `.srun.json` a `namespace` (see
+   Namespacing) and writes the Secrets rule into `CLAUDE.md`, so the agent —
+   subagents included — uses secrets by name. Commit both.
 3. Declare the project's secrets by name in `.srun.json` at the repo root
    (committed — it never holds values):
 
@@ -33,9 +34,6 @@ project; any other project can use it on its own.
 4. Store each value yourself: `srun add NAME` opens a hidden prompt (in a
    terminal) or a macOS dialog (inside Claude Code). For a `cmd` entry, store it
    in that secret manager instead.
-
-For one copy that serves every project (and global skills that call `srun`
-by name), put the folder somewhere stable and run `srun init --global`.
 
 ## Stores
 
@@ -59,7 +57,7 @@ entry's store id is `<namespace>/NAME` (Keychain, AWS) or `<namespace>_NAME`
 (GCP); letters, digits, `_` and `-` only. An explicit `"id"` always wins — that
 is how a secret shared on purpose opts out. No namespace means the id is NAME.
 
-`init` writes the namespace once, from the repo folder name, and never rewrites
+`setup` writes the namespace once, from the repo folder name, and never rewrites
 it. It lives in the committed file, not the folder name, because a worktree or
 second clone has a different folder and would look up different entries.
 
@@ -78,7 +76,7 @@ srun check [NAME...]     OK / MISS and store id per name (default: every manifes
 srun add NAME            store a value — the user types it, never the agent
 srun rm NAME | ls | sync
 srun migrate [NAME...]   move Keychain values from NAME to <namespace>/NAME
-srun init [--global]     wire the hooks; project scope also sets the namespace
+srun setup               set the namespace (once) and the Secrets rule in CLAUDE.md
 ```
 
 A tool that reads a variable needs nothing else; a shell expansion goes inside
@@ -91,20 +89,22 @@ srun GH_TOKEN --stdin GH_TOKEN -- gh auth login --with-token
 
 An MCP server takes `srun` as its launcher (`"command": "<absolute path>/srun"`,
 `"args": ["TOKEN", "--", "npx", "<server>"]`), so the token is never in the config file.
+The plugin's path changes with each `/plugin update`; re-point the launcher after one.
 
-## What `init` wires
+## What the plugin wires
 
 | Hook | Does |
 |---|---|
-| SessionStart | puts this folder on `PATH`, so `srun` works by name |
-| PreToolUse · Bash (`guard.py`) | denies printing a `.env` file (`grep -c` still counts), `security … -w`, `dump-keychain`, `env`/`printenv` dumps, and a value on the `add` command line |
+| SessionStart | puts `scripts/` on `PATH`, so `srun` works by name |
+| PreToolUse · Bash (`guard.py`) | denies printing a `.env` file or anything under `~/.aws`, `~/.ssh`, `~/.config/gcloud` (`grep -c` still counts), `security … -w`, `dump-keychain`, `env`/`printenv` dumps, and a value on the `add` command line |
+| PreToolUse · Read, Grep (`guard.py`) | denies the Read tool, and Grep in content mode, on those same files — never `.env.example`; Glob and Grep's file lists stay allowed |
 | PostToolUse (`redact.py`) | replaces credential-*shaped* strings (`sk-…`, `ghp_…`, `AKIA…`, JWTs, keys) in any tool output |
-| `permissions.deny` | the Read tool on `.env` files (never `.env.example`), `~/.aws`, `~/.ssh`, `~/.config/gcloud` |
 
 Session transcripts stay readable — debugging across sessions keeps working.
 
 ## Limits
 
+- It serves your own machine. Claude cloud sessions and CI do not install the plugin, so a step there that needs a secret stops as `blocked`; deployed services read their secret manager themselves.
 - Masking covers output, not intent: a child that sends a value over the network sends the real value.
 - Any process you own can read a child's environment while it runs; `--stdin` avoids that for tools that accept it.
 - Python cannot guarantee a value is wiped from memory; the process is short-lived, core dumps are off, and tracebacks never print.

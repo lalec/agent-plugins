@@ -7,7 +7,7 @@ import sys
 import pytest
 
 SR_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                      "shared", "srun")
+                      "scripts")
 sys.path.insert(0, SR_DIR)
 
 

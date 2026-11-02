@@ -60,7 +60,7 @@ chmod +x .claude/hooks/precompact-handover.sh
 
 Use `tpl-skill-guard.md § settings.json`. If the file does not exist, create it from the template. If it already exists, merge the `hooks` key — add all hook entries without removing unrelated settings. Do not tell the user to wire hooks manually; write the file in this step.
 
-Then run `python3 .claude/srun/srun init`. It merges the secrets wrapper's own hooks (PATH on session start, the Bash guard, the output redactor) and the `.env` read-deny rules into the same file, idempotently, and gives `.srun.json` a `namespace` from the repo folder name (creating the file when there is none) so this project's secrets never share a store entry with another project's same-named ones; show the lines it printed.
+Then use the `srun:setup` skill. It gives `.srun.json` a `namespace` from the repo folder name (creating the file when there is none), so this project's secrets never share a store entry with another project's same-named ones, and writes `CLAUDE.md § Secrets`; show the lines it printed. The secrets hooks need no wiring here — they ship with the srun plugin. If the skill is not available (the srun plugin arrived with this install and loads in the next session), finish the install and list `/srun:setup` under the user's next steps.
 
 **Step 4 — The standing mission on a schedule (nothing to install)**
 

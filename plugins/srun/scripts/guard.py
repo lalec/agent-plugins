@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-"""PreToolUse(Bash) guard — deny commands that would print secret values.
+"""PreToolUse guard — deny Bash commands and Read/Grep calls that would print
+secret values.
 
 Blocks the clear-cut leak vectors and teaches the srun form in the deny
 reason. Deliberately narrow: `srun NAME -- sh -c 'echo $NAME'` is allowed
 (the wrapper masks it), and nothing here reads or restricts session transcripts.
 A backstop, not the primary control — deliberate exfiltration by a child that
 holds a value is outside what a command-line check can see.
+
+Secret files: `.env` files (never `.env.example` and other templates), and
+anything under ~/.aws, ~/.ssh or ~/.config/gcloud — for Bash readers, the Read
+tool, and Grep in content mode. Glob and Grep's default file-list and count
+modes print no content and stay allowed.
 
 Contract: tool-call JSON on stdin. Exit 2 with a stderr reason to DENY (Claude
 Code shows stderr to the model). Exit 0 to allow.
@@ -25,6 +31,7 @@ _SILENT_GREP = re.compile(r"^-[a-zA-Z]*[cqlL][a-zA-Z]*$")
 _ENV_FILE = re.compile(r"^\.env(\.[\w.-]+)?$")
 _TEMPLATE = re.compile(r"\.(example|sample|template|dist)$")
 _SHELL_OPS = {"|", "||", "&&", ";", "&"}
+_SECRET_DIRS = [os.path.expanduser(d) for d in ("~/.aws", "~/.ssh", "~/.config/gcloud")]
 
 
 def _deny(reason):
@@ -59,19 +66,26 @@ def _is_env_file(tok):
     return bool(_ENV_FILE.match(base)) and not _TEMPLATE.search(base)
 
 
-def _env_file_read(toks):
-    """The env file a reader prints, or None. `grep -c/-q/-l` only counts. Looks
-    inside `srun ... -- cmd` and `sh -c '...'`: other values in the file
+def _is_secret_path(tok):
+    if _is_env_file(tok):
+        return True
+    path = os.path.abspath(os.path.expanduser(tok.replace("$HOME", "~", 1)))
+    return any(path == d or path.startswith(d + os.sep) for d in _SECRET_DIRS)
+
+
+def _secret_read(toks):
+    """The secret file a reader prints, or None. `grep -c/-q/-l` only counts.
+    Looks inside `srun ... -- cmd` and `sh -c '...'`: other values in the file
     are not masked there."""
     for seg in _segments(toks):
         prog = os.path.basename(seg[0])
         if prog == "srun" and "--" in seg:
-            hit = _env_file_read(seg[seg.index("--") + 1:])
+            hit = _secret_read(seg[seg.index("--") + 1:])
             if hit:
                 return hit
             continue
         if prog in ("sh", "bash", "zsh") and "-c" in seg[:-1]:
-            hit = _env_file_read(_tokens(seg[seg.index("-c") + 1]))
+            hit = _secret_read(_tokens(seg[seg.index("-c") + 1]))
             if hit:
                 return hit
             continue
@@ -81,9 +95,33 @@ def _env_file_read(toks):
                 any(_SILENT_GREP.match(a) for a in seg[1:]):
             continue
         for a in seg[1:]:
-            if _is_env_file(a):
+            if _is_secret_path(a):
                 return a
     return None
+
+
+def _deny_read(path):
+    _deny(f"reading {path} prints secret values into the transcript. "
+          "Use the value by NAME: `srun NAME -- cmd` (a `cmd` entry in "
+          ".srun.json can read it from that file); `srun check "
+          "NAME` says whether it is set. `grep -c '^NAME=' FILE` counts "
+          "without printing.")
+
+
+def _check_file_tool(tool, inp):
+    """Read prints a file; Grep prints matching lines only in content mode."""
+    if tool == "Read":
+        path = inp.get("file_path") or ""
+    elif tool == "Grep" and inp.get("output_mode") == "content":
+        path = inp.get("path") or ""
+        glob = inp.get("glob") or ""
+        base = glob.rsplit("/", 1)[-1]
+        if base.startswith(".env") and not _TEMPLATE.search(base):
+            _deny_read(glob)
+    else:
+        return
+    if path and _is_secret_path(path):
+        _deny_read(path)
 
 
 def _check(command):
@@ -100,13 +138,9 @@ def _check(command):
         _deny("`security ... -w` prints a keychain password into the transcript. "
               "Use `srun NAME -- cmd`; the value stays out of context.")
 
-    env_file = _env_file_read(toks)
-    if env_file:
-        _deny(f"reading {env_file} prints secret values into the transcript. "
-              "Use the value by NAME: `srun NAME -- cmd` (a `cmd` entry in "
-              ".srun.json can read it from that file); `srun check "
-              "NAME` says whether it is set. `grep -c '^NAME=' FILE` counts "
-              "without printing.")
+    secret_file = _secret_read(toks)
+    if secret_file:
+        _deny_read(secret_file)
 
     if re.search(r"\bsrun\s+add\b", low):
         if re.search(r"\|\s*\S*srun\s+add", low):
@@ -135,11 +169,12 @@ def main():
         data = json.load(sys.stdin)
     except (ValueError, OSError):
         return 0
-    if data.get("tool_name") != "Bash":
-        return 0
-    command = (data.get("tool_input") or {}).get("command") or ""
-    if command:
-        _check(command)
+    tool, inp = data.get("tool_name"), data.get("tool_input") or {}
+    if tool == "Bash":
+        if inp.get("command"):
+            _check(inp["command"])
+    else:
+        _check_file_tool(tool, inp)
     return 0
 
 

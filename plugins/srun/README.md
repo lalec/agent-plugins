@@ -105,6 +105,7 @@ Session transcripts stay readable — debugging across sessions keeps working.
 ## Limits
 
 - It serves your own machine. Claude cloud sessions and CI do not install the plugin, so a step there that needs a secret stops as `blocked`; deployed services read their secret manager themselves.
+- Grep over a whole folder in content mode, or `grep -r`, can still print a `.env` line; the guard catches a secret file only when it is named.
 - Masking covers output, not intent: a child that sends a value over the network sends the real value.
 - Any process you own can read a child's environment while it runs; `--stdin` avoids that for tools that accept it.
 - Python cannot guarantee a value is wiped from memory; the process is short-lived, core dumps are off, and tracebacks never print.

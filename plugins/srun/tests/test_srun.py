@@ -1,6 +1,5 @@
-"""Tests for shared/srun — the masker, store selection (incl. the cmd store),
-run/spawn, add, check, the guard's deny rules, the redactor and `init` wiring.
-Maintainer-only: never copied into projects."""
+"""Tests for the srun scripts — the masker, store selection (incl. the cmd
+store), run/spawn, add, check, the guard's deny rules and the redactor."""
 import io
 import json
 import os
@@ -19,7 +18,6 @@ import names  # noqa: E402
 import prompt  # noqa: E402
 import redact  # noqa: E402
 import stores  # noqa: E402
-import wire  # noqa: E402
 
 _loader = SourceFileLoader("srun_cli", os.path.join(SR_DIR, "srun"))
 sr = module_from_spec(spec_from_loader("srun_cli", _loader))
@@ -276,6 +274,9 @@ def test_index_update_only_when_bootstrapped():
     "srun K -- sh -c 'cat .env'",
     "srun K -- head .env",
     "bash -c 'grep X .env.local'",
+    "cat ~/.aws/credentials",
+    "cat $HOME/.ssh/id_ed25519",
+    "grep token ~/.config/gcloud/credentials.db",
 ])
 def test_guard_denies(cmd):
     with pytest.raises(SystemExit) as e:
@@ -296,6 +297,33 @@ def test_guard_denies(cmd):
 ])
 def test_guard_allows(cmd):
     assert guard._check(cmd) is None
+
+
+@pytest.mark.parametrize("tool,inp", [
+    ("Read", {"file_path": "/repo/.env"}),
+    ("Read", {"file_path": "/repo/web/.env.production.local"}),
+    ("Read", {"file_path": os.path.expanduser("~/.aws/credentials")}),
+    ("Read", {"file_path": os.path.expanduser("~/.ssh/id_rsa")}),
+    ("Grep", {"pattern": "KEY", "path": "/repo/.env", "output_mode": "content"}),
+    ("Grep", {"pattern": "KEY", "glob": ".env*", "output_mode": "content"}),
+])
+def test_guard_denies_file_tools(tool, inp):
+    with pytest.raises(SystemExit) as e:
+        guard._check_file_tool(tool, inp)
+    assert e.value.code == 2
+
+
+@pytest.mark.parametrize("tool,inp", [
+    ("Read", {"file_path": "/repo/.env.example"}),
+    ("Read", {"file_path": "/repo/src/env.ts"}),
+    ("Read", {"file_path": os.path.expanduser("~/.claude/projects/x/y.jsonl")}),
+    ("Grep", {"pattern": "KEY", "path": "/repo/.env"}),                 # file list
+    ("Grep", {"pattern": "KEY", "path": "/repo/.env", "output_mode": "count"}),
+    ("Grep", {"pattern": "KEY", "glob": ".env.example", "output_mode": "content"}),
+    ("Glob", {"pattern": "**/.env"}),
+])
+def test_guard_allows_file_tools(tool, inp):
+    assert guard._check_file_tool(tool, inp) is None
 
 
 # ------------------------------------------------------------- redactor ----- #
@@ -348,22 +376,3 @@ def test_redactor_leaves_normal_text(text):
 def test_redactor_still_catches_credentials(text):
     out, n = redact._scrub(text)
     assert n >= 1 and redact.REDACTED in out
-
-
-# ------------------------------------------------------------------ init ---- #
-def test_init_merges_idempotently_and_keeps_other_settings():
-    settings = {"model": "x", "hooks": {"PreToolUse": [{"matcher": "Edit", "hooks": []}]},
-                "permissions": {"deny": ["Read(**/.env)"]}}
-    ref = '"$CLAUDE_PROJECT_DIR"/.claude/srun'
-    first = wire.merge(settings, ref)
-    assert first and settings["model"] == "x"
-    assert settings["permissions"]["deny"].count("Read(**/.env)") == 1
-    assert "Read(**/.env.example)" not in settings["permissions"]["deny"]
-    assert len(settings["hooks"]["PreToolUse"]) == 2
-    assert wire.merge(settings, ref) == []
-
-
-def test_init_refs_project_relative_inside_repo(tmp_path):
-    assert wire._folder_ref(os.path.dirname(os.path.dirname(SR_DIR))) == \
-        '"$CLAUDE_PROJECT_DIR"/shared/srun'
-    assert wire._folder_ref(str(tmp_path)) == '"%s"' % SR_DIR

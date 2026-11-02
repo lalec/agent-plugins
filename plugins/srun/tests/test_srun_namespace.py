@@ -1,6 +1,6 @@
-"""Tests for srun namespacing — namespaced store ids, `init` writing the
-namespace once, and `migrate` moving keychain values off the bare NAME.
-Maintainer-only: never copied into projects."""
+"""Tests for srun namespacing and setup — namespaced store ids, `setup` writing
+the namespace once and the Secrets rule into CLAUDE.md, and `migrate` moving
+keychain values off the bare NAME."""
 import json
 import os
 import shutil
@@ -13,7 +13,7 @@ from conftest import write_manifest
 import manage  # noqa: E402
 import manifest  # noqa: E402
 import stores  # noqa: E402
-import wire  # noqa: E402
+import setup  # noqa: E402
 
 M = manifest.Manifest
 
@@ -47,7 +47,7 @@ def test_invalid_namespace_raises_naming_the_key(tmp_path, monkeypatch, ns):
     assert ns == "" or str(ns) not in str(e.value)
 
 
-# ------------------------------------------------------------------ init ---- #
+# ----------------------------------------------------------------- setup ---- #
 def _git_repo(tmp_path, name):
     root = tmp_path / name
     root.mkdir()
@@ -55,39 +55,54 @@ def _git_repo(tmp_path, name):
     return root
 
 
-def test_init_creates_manifest_with_namespace_once(tmp_path, monkeypatch, capsys):
+def test_setup_creates_manifest_with_namespace_once(tmp_path, monkeypatch, capsys):
     root = _git_repo(tmp_path, "my.app")
     monkeypatch.chdir(root)
-    assert wire.init([]) == 0
+    assert setup.setup([]) == 0
     path = root / ".srun.json"
     assert json.loads(path.read_text()) == {"namespace": "my-app", "secrets": {}}
     assert '"namespace": "my-app"' in capsys.readouterr().out
     before = path.read_bytes()
-    assert wire.init([]) == 0
+    assert setup.setup([]) == 0
     assert path.read_bytes() == before
     out = capsys.readouterr().out
-    assert "already wired" in out and "namespace" not in out
+    assert "already set" in out and "is current" in out and "Commit" not in out
 
 
-def test_init_adds_namespace_keeping_entries_and_never_rewrites(tmp_path, monkeypatch):
+def test_setup_adds_namespace_keeping_entries_and_never_rewrites(tmp_path, monkeypatch):
     root = _git_repo(tmp_path, "web")
     write_manifest(root, {"A": {"backend": "aws", "id": "x"}})
     monkeypatch.chdir(root)
-    wire.init([])
+    setup.setup([])
     data = json.loads((root / ".srun.json").read_text())
     assert data == {"namespace": "web", "secrets": {"A": {"backend": "aws", "id": "x"}}}
     write_manifest(root, {}, namespace="chosen")
-    wire.init([])
+    setup.setup([])
     assert json.loads((root / ".srun.json").read_text())["namespace"] == "chosen"
 
 
-def test_init_global_touches_no_manifest(tmp_path, monkeypatch):
-    root = _git_repo(tmp_path, "proj")
-    monkeypatch.chdir(root)
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    assert wire.init(["--global"]) == 0
-    assert not (root / ".srun.json").exists()
-    assert (tmp_path / "home" / ".claude" / "settings.json").is_file()
+def _rule():
+    with open(setup.RULE) as f:
+        return f.read().strip()
+
+
+def test_setup_creates_or_appends_the_rule(tmp_path):
+    md = tmp_path / "CLAUDE.md"
+    assert setup.upsert_rule(str(md)) == "added"
+    assert md.read_text().strip() == _rule()
+    md.write_text("# Proj\n\n## Agents\n\ntext\n")
+    assert setup.upsert_rule(str(md)) == "added"
+    assert md.read_text() == "# Proj\n\n## Agents\n\ntext\n\n" + _rule() + "\n"
+    assert setup.upsert_rule(str(md)) is None
+
+
+def test_setup_replaces_an_older_rule_and_keeps_neighbours(tmp_path):
+    md = tmp_path / "CLAUDE.md"
+    md.write_text("# P\n\n## Secrets\n\nold rule\n\n## Roadmap\n\nkeep\n")
+    assert setup.upsert_rule(str(md)) == "updated"
+    text = md.read_text()
+    assert "old rule" not in text and text.count("## Secrets") == 1
+    assert text.startswith("# P\n\n" + _rule() + "\n\n## Roadmap\n\nkeep\n")
 
 
 # --------------------------------------------------------------- migrate ---- #

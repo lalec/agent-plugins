@@ -258,10 +258,8 @@ Path→skill ownership is defined in `.claude/hooks/governed-paths.conf` — edi
 ## Roadmap
 
 `docs/roadmap.md` is the source of truth for open items.
-
-## Secrets
-
-Secret values never enter the conversation, a file you read, a command line, or memory — only their NAMES do, because anything printed once stays in the transcript until the secret is changed. Every secret this project uses (a test login, an API key, a token, a database URL) is declared by NAME in `.srun.json` with the store that holds it, never its value. Run anything that needs one as `srun NAME [NAME...] -- <cmd>`: the command reads `$NAME`, and `srun` masks the value out of its output; put a shell expansion inside `sh -c '…'` so it happens in the child. `srun check NAME` says whether one is set — a missing secret makes the step `blocked`: name it and stop. Never print a value-holding file or variable — no `cat`, `echo`, `sed` or `grep` of it, not even "masked". Never ask for a value in chat: add the NAME to `.srun.json` and have the user store it (`srun add NAME` opens a hidden dialog, or their own secret manager). When `srun` is not on PATH it is `.claude/srun/srun`; its README lists the stores.
 ```
+
+`## Secrets` is not templated here: the `srun:setup` skill writes it from the srun plugin's own text.
 
 **Linting commands:** Embed in the relevant domain skill's `## Quality Checklist`, not in CLAUDE.md. `<PREFIX>-dev` step 3 delegates to these checklists. The hook `pre-handoff-check.sh` enforces lint at handoff time independently via its own `<LINT_CMD>` substitution.

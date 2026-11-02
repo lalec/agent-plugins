@@ -3,5 +3,8 @@
   "description": "Bootstrap a 3-agent delivery pipeline (dev → qa → pm) with skill-guard hooks, domain skills, and roadmap tracking on any project",
   "author": {
     "name": "lalec"
-  }
+  },
+  "dependencies": [
+    "srun"
+  ]
 }

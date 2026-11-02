@@ -6,8 +6,8 @@ NAME from its store (stores.py), injects the value into a child process's env (o
 stdin), and masks every occurrence of the value out of the child's output
 (masking.py). Only NAMES appear in argv, and nothing reaches the transcript.
 
-Self-contained: stdlib only, no plugin needed. Copy this folder into any project
-and run `srun init` to wire its two hooks (guard.py, redact.py).
+Stdlib only. The srun plugin puts this folder on PATH and wires its two hooks
+(guard.py, redact.py); `srun setup` prepares a project.
 
 Honest limits: CPython cannot guarantee memory zeroization. The primary controls
 are this process's short lifetime, disabled core dumps, and a traceback-scrubbing
@@ -153,12 +153,12 @@ USAGE = """srun — run a command with named secrets, values never exposed
   srun sync                      rebuild the keychain-name index
   srun migrate [NAME...]         move keychain values from NAME to
                                       <namespace>/NAME (after adding a namespace)
-  srun init [--global]           wire the hooks; project scope also gives
-                                      .srun.json a namespace, once
+  srun setup                     give .srun.json a namespace (once) and put
+                                      the Secrets rule in CLAUDE.md
 
 Stores: keychain (default, macOS), aws, gcp, or a per-NAME `cmd` in
 .srun.json that prints the value. With a "namespace" in .srun.json,
-ids are <namespace>/NAME (gcp: <namespace>_NAME). See README.md in this folder.
+ids are <namespace>/NAME (gcp: <namespace>_NAME). See the plugin's README.md.
 """
 
 
@@ -167,9 +167,9 @@ def main(argv):
     if not argv or argv[0] in ("-h", "--help", "help"):
         sys.stdout.write(USAGE)
         return 0
-    if argv[0] == "init":
-        from wire import init
-        return init(argv[1:])
+    if argv[0] == "setup":
+        from setup import setup
+        return setup(argv[1:])
     if argv[0] in COMMANDS:
         return COMMANDS[argv[0]](argv[1:])
     return cmd_run(argv)

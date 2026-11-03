@@ -72,7 +72,7 @@ The `install` command aborts cleanly if it detects an existing dev-workflow inst
 - Confirm the proposed domain skill → path mapping
 - Confirm which packages your product can't run without, so they're pinned to the version you ship today
 
-When a check needs a login or a key, the agent names the secret and asks you to store it — `srun add NAME` opens a hidden dialog — and you type the value there, never into the chat.
+When a check needs a login or a key, the agent names the secret and tells you where it goes — `srun add NAME` in your own terminal, or an item in 1Password, Dashlane or LastPass — so you type the value there, never into the chat.
 
 Everything else is written automatically, inside your repo. One thing sits outside it and is offered rather than done: letting runs see how much of your Claude allowance is left. The second wraps your status line so the figures it already receives are saved where `/pilot` can read them — one file per open session, reconciled on read, because a dozen sessions writing one file just publishes whichever of them rendered last. Your own status-line script isn't edited, and deleting one line from your settings undoes it. Say no and it prints the change for you to make yourself. It's per-machine, not per-project, so the next project you install into finds it already there.
 
@@ -263,7 +263,7 @@ Then one last line, always there and always the one you act on. Everything that 
 | `agent-mark.sh` | Subagent stop | A pipeline agent trying to finish without its handoff block is sent back once to write it; every stop is recorded, so a close-out can check how many verification children really ran |
 | `pilot-cleanup.sh` | Session end | Clears this session's own `/pilot` run marker, and only its own, so a mission in another session is never unmarked |
 | `precompact-handover.sh` | Before compaction | Writes a fallback handover from git and the run's state files, so a compaction that lands mid-task still leaves something `/proceed` can read |
-| srun `guard.py` | Bash, Read, Grep | Printing a `.env` file, anything under `~/.aws` or `~/.ssh`, a Keychain password or the whole environment, or putting a value on the command line — counting with `grep -c` and reading `.env.example` stay allowed |
+| srun `guard.py` | Bash, Read, Grep | Printing a `.env` file, anything under `~/.aws` or `~/.ssh`, a Keychain or password-manager entry or the whole environment, or putting a value on the command line — counting with `grep -c` and reading `.env.example` stay allowed |
 | srun `redact.py` | Any tool (post) | Never blocks — replaces anything shaped like a credential (`sk-…`, `ghp_…`, AWS keys, JWTs) in the output before the agent reads it |
 | `limit-mark.sh` | API limit error | Records the moment the usage limit killed a turn, so the next `/pilot` resumes that run instead of treating its marker as stale |
 

@@ -38,7 +38,7 @@
     },
     {
       "name": "srun",
-      "description": "Keep secret values out of Claude Code — the agent uses a secret by name through `srun NAME -- cmd`; the value comes from Keychain, AWS, GCP or any secret manager, reaches only that command, and is masked out of its output. Install once per machine, run /srun:setup once per project.",
+      "description": "Keep secret values out of Claude Code — the agent uses a secret by name through `srun NAME -- cmd`; the value comes from Keychain, 1Password, Dashlane, LastPass, AWS, GCP or any secret manager, reaches only that command, and is masked out of its output. Install once per machine, run /srun:setup once per project.",
       "author": {
         "name": "lalec"
       },

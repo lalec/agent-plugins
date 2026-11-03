@@ -66,12 +66,12 @@ def test_mask_skips_ultra_short_value():
 M = manifest.Manifest
 
 
-def test_plan_manifest_wins_over_cli_backend():
-    assert manifest.plan("DB", "keychain", M({"DB": {"backend": "aws", "id": "p/db"}})) \
+def test_plan_manifest_wins_over_cli_store():
+    assert manifest.plan("DB", "keychain", M({"DB": {"store": "aws", "id": "p/db"}})) \
         == ("aws", "p/db")
 
 
-def test_plan_default_and_cli_backend():
+def test_plan_default_and_cli_store():
     assert manifest.plan("K", None, M({})) == ("keychain", "K")
     assert manifest.plan("K", "gcp", M({})) == ("gcp", "K")
 
@@ -80,10 +80,10 @@ def test_plan_cmd_entry_is_the_cmd_store():
     assert manifest.plan("K", "aws", M({"K": {"cmd": "op read x"}})) == ("cmd", "op read x")
 
 
-@pytest.mark.parametrize("backend", ["vault", "cmd"])
-def test_plan_unknown_backend_or_cmd_without_entry_raises(backend):
+@pytest.mark.parametrize("store", ["vault", "cmd"])
+def test_plan_unknown_store_or_cmd_without_entry_raises(store):
     with pytest.raises(stores.SrunError):
-        manifest.plan("K", backend, M({}))
+        manifest.plan("K", store, M({}))
 
 
 def test_load_manifest_walks_up(tmp_path, monkeypatch):
@@ -219,7 +219,7 @@ def test_add_gui_cancel_or_empty_stores_nothing(monkeypatch):
 
 def test_add_rejects_value_on_command_line():
     with pytest.raises(stores.SrunError):
-        manage._parse_name_backend(["TOK", "the-value"])
+        manage._parse_name_store(["TOK", "the-value"])
 
 
 def test_excepthook_scrubs_traceback(capsys):
@@ -287,7 +287,7 @@ def test_guard_denies(cmd):
 @pytest.mark.parametrize("cmd", [
     "srun OPENAI_API_KEY -- curl https://api.example.com",
     "srun TOK -- sh -c 'echo \"$TOK\"'",
-    "srun add TOK", "srun add TOK -b aws",
+    "srun add TOK", "srun add TOK -s aws",
     "srun add TOK && srun check TOK",
     "env FOO=bar mycmd", "git status",
     "cat .env.example", "cat .env.sample",

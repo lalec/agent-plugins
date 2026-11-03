@@ -2,7 +2,8 @@
 
   .srun.json   gets a namespace from the repo folder name, once (created when
                missing) — committed, so every clone and worktree uses the same
-               store ids; an existing namespace is never rewritten
+               store ids; an existing namespace is never rewritten. `--store`
+               sets the project's store; the file is kept in its short form
   CLAUDE.md    gets the `## Secrets` section from secrets-rule.md, replacing an
                older copy so rule edits reach projects on the next setup
 
@@ -12,8 +13,8 @@ import os
 import re
 import subprocess
 
-from manifest import ensure_namespace
-from stores import MANIFEST, SrunError
+from base import MANIFEST, SrunError
+from manifest import tidy
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 RULE = os.path.join(HERE, "secrets-rule.md")
@@ -49,13 +50,18 @@ def upsert_rule(path):
     return how
 
 
+def _parse(args):
+    if not args:
+        return None
+    if len(args) == 2 and args[0] == "--store":
+        return args[1]
+    raise SrunError("usage: srun setup [--store STORE]")
+
+
 def setup(args):
-    if args:
-        print(f"srun setup: unknown argument {args[0]}")
-        return 1
     root = _repo_root()
     try:
-        ns = ensure_namespace(root)
+        ns, changed = tidy(root, _parse(args))
     except (SrunError, OSError) as e:
         print(f"srun setup: {e}")
         return 1
@@ -63,10 +69,10 @@ def setup(args):
         print(f'set "namespace": "{ns}" in {os.path.join(root, MANIFEST)} — '
               f"store ids are {ns}/NAME (gcp: {ns}_NAME).")
     else:
-        print(f"namespace already set in {MANIFEST}")
+        print(f"updated {MANIFEST}" if changed else f"{MANIFEST} is current")
     how = upsert_rule(os.path.join(root, "CLAUDE.md"))
     print(f"{how} the Secrets section in CLAUDE.md" if how
           else "CLAUDE.md Secrets section is current")
-    if ns or how:
+    if changed or how:
         print(f"Commit {MANIFEST} and CLAUDE.md.")
     return 0

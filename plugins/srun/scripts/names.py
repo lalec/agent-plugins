@@ -8,7 +8,8 @@ import json
 import os
 import subprocess
 
-from stores import SERVICE, SrunError
+from base import SrunError, srun_home
+from stores import SERVICE
 
 
 def _blob_val(line):
@@ -37,8 +38,7 @@ def keychain_dump_names():
 
 
 def index_path():
-    home = os.environ.get("SRUN_HOME") or os.path.expanduser("~/.srun")
-    return os.path.join(home, "keychain-names.json")
+    return os.path.join(srun_home(), "keychain-names.json")
 
 
 def index_load():
@@ -86,6 +86,6 @@ def list_names(backend):
     elif backend == "gcp":
         cmd = ["gcloud", "secrets", "list", "--format", "value(name)"]
     else:
-        raise SrunError(f"cannot list backend: {backend}")
+        raise SrunError(f"srun cannot list the {backend} store; look in its own app or CLI")
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     return sorted(p.stdout.decode().split()) if p.returncode == 0 else []

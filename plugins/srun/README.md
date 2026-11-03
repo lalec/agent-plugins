@@ -16,49 +16,65 @@ so installing dev-workflow installs srun; any other project uses it on its own.
 2. Run `/srun:setup` once per project. It gives `.srun.json` a `namespace` (see
    Namespacing) and writes the Secrets rule into `CLAUDE.md`, so the agent —
    subagents included — uses secrets by name. Commit both.
-3. Declare the project's secrets by name in `.srun.json` at the repo root
-   (committed — it never holds values):
+3. List the project's secrets by name in `.srun.json` at the repo root
+   (committed — it never holds values). `"store"` is optional: without it every
+   name lives in your personal default store (`srun default 1password`), else
+   the keychain.
 
 ```json
-{ "namespace": "myapp",
-  "secrets": {
-    "E2E_EMAIL":    { "backend": "keychain" },
-    "E2E_PASSWORD": { "backend": "keychain" },
-    "DB_URL":       { "backend": "aws", "id": "dev/db/url" },
-    "STRIPE_KEY":   { "cmd": "aws ssm get-parameter --with-decryption --name /dev/stripe --query Parameter.Value --output text" },
-    "OPENAI_KEY":   { "cmd": "op read op://dev/openai/key" },
-    "MAPS_KEY":     { "cmd": "sed -n 's/^MAPS_KEY=//p' .env" }
-} }
+{ "namespace": "myapp", "store": "1password", "secrets": ["E2E_EMAIL", "E2E_PASSWORD", "OPENAI_KEY"] }
 ```
 
-4. Store each value yourself: `srun add NAME` opens a hidden prompt (in a
-   terminal) or a macOS dialog (inside Claude Code). For a `cmd` entry, store it
-   in that secret manager instead.
+4. Store each value yourself, at the place `srun check` names: `srun add NAME`
+   in your own terminal (a hidden prompt; inside Claude Code it opens a macOS
+   dialog instead), or the password manager's app.
 
 ## Stores
 
-| Store | Entry | Id with a namespace | Notes |
-|---|---|---|---|
-| macOS Keychain | `{"backend": "keychain"}` (default) | account `myapp/NAME`, service `srun` | `add`, `rm`, `ls`, `migrate` |
-| AWS Secrets Manager | `{"backend": "aws"}` | `myapp/NAME` — a path, so IAM can scope by prefix | `add` writes a new version of an existing secret |
-| GCP Secret Manager | `{"backend": "gcp"}` | `myapp_NAME` — GCP ids reject `/` | same |
-| Any command | `{"cmd": "<prints the value>"}` | none — the command is the lookup | an env file, AWS Parameter Store, 1Password, Vault, Doppler — read-only here |
+Every store holds one entry per secret under the same id, `myapp/NAME`, so
+moving a project to another store is a one-word change.
+
+| Store | Where `myapp/API_KEY` lives | `srun add` |
+|---|---|---|
+| `keychain` (built-in default) | macOS Keychain, service `srun`, account `myapp/API_KEY` | yes |
+| `1password` | a Password item titled `myapp/API_KEY`, any vault; srun reads its password field | no — create it in the 1Password app |
+| `dashlane` | a login titled `myapp/API_KEY`; srun reads its password | no — Dashlane's CLI cannot write; use the app |
+| `lastpass` | an entry `API_KEY` in folder `myapp` | yes — and `rm` |
+| `aws` | Secrets Manager secret `myapp/API_KEY` — a path, so IAM can scope by prefix | writes a new version of an existing secret |
+| `gcp` | Secret Manager secret `myapp_API_KEY` — GCP ids reject `/` | same |
+
+The password managers need their CLI signed in: `op` (1Password, desktop-app
+sign-in may ask for Touch ID), `dcli` (Dashlane), `lpass` (LastPass — srun stops
+with "run `lpass login`" once its agent has timed out, rather than let it
+prompt). Each title must be unique; srun refuses a duplicate rather than guess.
+
+**One secret somewhere else.** A name can carry its own entry instead of
+following the project's store — a store, a fixed `"id"` (a secret shared on
+purpose across projects), or a `"cmd"` that prints the value (an env file, AWS
+Parameter Store, Bitwarden, Vault, Doppler):
+
+```json
+"secrets": { "E2E_PASSWORD": {},
+             "SHARED_TOKEN": { "store": "aws", "id": "shared/token" },
+             "MAPS_KEY": { "cmd": "sed -n 's/^MAPS_KEY=//p' .env" } }
+```
 
 A `cmd` runs from the folder holding `.srun.json`; its error output is
 discarded and one trailing newline is stripped. It is committed code, so it
-carries the same trust as a `package.json` script.
+carries the same trust as a `package.json` script; srun only reads through it.
 
 ## Namespacing
 
-`"namespace"` keeps projects that share a machine, AWS account or GCP project
-apart: without it, every project that declares `E2E_PASSWORD` reads and writes
-the same entry, and one overwrites another's value with no warning. With it, an
-entry's store id is `<namespace>/NAME` (Keychain, AWS) or `<namespace>_NAME`
-(GCP); letters, digits, `_` and `-` only. An explicit `"id"` always wins — that
-is how a secret shared on purpose opts out. No namespace means the id is NAME.
+`"namespace"` keeps projects that share a machine or a store apart: without
+it, every project that lists `E2E_PASSWORD` reads and writes the same entry, and
+one overwrites another's value with no warning. With it, a store id is
+`<namespace>/NAME` (`<namespace>_NAME` in GCP); letters, digits, `_` and `-`
+only. An explicit `"id"` always wins — that is how a secret shared on purpose
+opts out. No namespace means the id is NAME.
 
 `setup` writes the namespace once, from the repo folder name, and never rewrites
-it. It lives in the committed file, not the folder name, because a worktree or
+it; it also keeps the file in the short form above, so an older file that named
+a store per secret becomes one `"store"` and a list. It lives in the committed file, not the folder name, because a worktree or
 second clone has a different folder and would look up different entries.
 
 Adding a namespace to a project that already stored values: `srun migrate`
@@ -71,12 +87,13 @@ deletes on a delay), so move them in that store, or pin `"id": "NAME"`.
 ## Commands
 
 ```
-srun NAME [NAME...] [--stdin NAME] -- cmd args...   run cmd with the values
-srun check [NAME...]     OK / MISS and store id per name (default: every manifest entry)
-srun add NAME            store a value — the user types it, never the agent
+srun NAME [NAME...] [-s STORE] [--stdin NAME] -- cmd args...   run cmd with the values
+srun check [NAME...]     OK / MISS, store and id per name (default: every listed name)
+srun add NAME [-s STORE] store a value — the user types it, never the agent
 srun rm NAME | ls | sync
 srun migrate [NAME...]   move Keychain values from NAME to <namespace>/NAME
-srun setup               set the namespace (once) and the Secrets rule in CLAUDE.md
+srun default [STORE]     show or set your personal default store
+srun setup [--store S]   namespace (once), short form, the Secrets rule in CLAUDE.md
 ```
 
 A tool that reads a variable needs nothing else; a shell expansion goes inside
@@ -96,7 +113,7 @@ The plugin's path changes with each `/plugin update`; re-point the launcher afte
 | Hook | Does |
 |---|---|
 | SessionStart | puts `scripts/` on `PATH`, so `srun` works by name |
-| PreToolUse · Bash (`guard.py`) | denies printing a `.env` file or anything under `~/.aws`, `~/.ssh`, `~/.config/gcloud` (`grep -c` still counts), `security … -w`, `dump-keychain`, `env`/`printenv` dumps, and a value on the `add` command line |
+| PreToolUse · Bash (`guard.py`) | denies printing a `.env` file or anything under `~/.aws`, `~/.ssh`, `~/.config/gcloud` (`grep -c` still counts), `security … -w`, `dump-keychain`, password-manager reads (`op read`, `op item get`, `dcli password`, `lpass show`), `env`/`printenv` dumps, and a value on the `add` command line |
 | PreToolUse · Read, Grep (`guard.py`) | denies the Read tool, and Grep in content mode, on those same files — never `.env.example`; Glob and Grep's file lists stay allowed |
 | PostToolUse (`redact.py`) | replaces credential-*shaped* strings (`sk-…`, `ghp_…`, `AKIA…`, JWTs, keys) in any tool output |
 

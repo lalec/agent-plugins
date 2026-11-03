@@ -1,4 +1,5 @@
-"""`srun add | rm | ls | sync | check | migrate` — manage stored values by NAME.
+"""`srun add | rm | ls | sync | check | migrate | default` — manage stored values
+by NAME.
 
 Values are typed by the user (prompt.py) and go straight to the store; `check`
 resolves each value only to zero it unread; `migrate` moves one store entry to
@@ -8,19 +9,20 @@ import sys
 
 from names import index_load, index_save, index_update, keychain_dump_names, list_names
 from prompt import read_hidden
-from manifest import load_manifest, plan, resolve
-from stores import (CURRENT_NAMES, DEFAULT_BACKEND, MANIFEST, RESOLVERS,
-                    SrunError, delete, not_writable, store, zero)
+from manifest import (default_store, load_manifest, plan, resolve, set_default_store,
+                      store_for)
+from stores import (CURRENT_NAMES, DEFAULT_STORE, MANIFEST, RESOLVERS,
+                    SrunError, delete, not_writable, store, writable, zero)
 
 
-def _parse_name_backend(rest, name_optional=False):
-    backend = name = None
+def _parse_name_store(rest, name_optional=False):
+    store_ = name = None
     it = iter(rest)
     for t in it:
-        if t in ("-b", "--backend"):
-            backend = next(it, None)
-            if backend is None:
-                raise SrunError("-b needs a backend name")
+        if t in ("-s", "--store"):
+            store_ = next(it, None)
+            if store_ is None:
+                raise SrunError("-s needs a store name")
         elif t.startswith("-"):
             raise SrunError(f"unknown option: {t}")
         elif name is None:
@@ -30,15 +32,15 @@ def _parse_name_backend(rest, name_optional=False):
                                  "interactively, never on the command line)")
     if name is None and not name_optional:
         raise SrunError("a secret NAME is required")
-    return name, backend
+    return name, store_
 
 
 def cmd_add(rest):
-    name, cli_backend = _parse_name_backend(rest)
+    name, cli_store = _parse_name_store(rest)
     CURRENT_NAMES[:] = [name]
-    backend, sid = plan(name, cli_backend, load_manifest())
-    if backend == "cmd":
-        raise not_writable(name)
+    backend, sid = plan(name, cli_store, load_manifest())
+    if not writable(backend):
+        raise not_writable(backend, name, sid)
     vb = read_hidden(name)
     try:
         store(backend, name, sid, vb)
@@ -51,9 +53,9 @@ def cmd_add(rest):
 
 
 def cmd_rm(rest):
-    name, cli_backend = _parse_name_backend(rest)
+    name, cli_store = _parse_name_store(rest)
     CURRENT_NAMES[:] = [name]
-    backend, sid = plan(name, cli_backend, load_manifest())
+    backend, sid = plan(name, cli_store, load_manifest())
     delete(backend, name, sid)
     if backend == "keychain":
         index_update(sid, add=False)
@@ -62,8 +64,8 @@ def cmd_rm(rest):
 
 
 def cmd_ls(rest):
-    _, backend = _parse_name_backend(rest, name_optional=True)
-    backend = backend or DEFAULT_BACKEND
+    _, cli_store = _parse_name_store(rest, name_optional=True)
+    backend = store_for(cli_store, load_manifest())
     if backend == "keychain" and index_load() is None:
         sys.stderr.write(
             "srun: first run — indexing keychain names once so future `ls` "
@@ -75,9 +77,9 @@ def cmd_ls(rest):
 
 
 def cmd_sync(rest):
-    _, backend = _parse_name_backend(rest, name_optional=True)
-    if (backend or DEFAULT_BACKEND) != "keychain":
-        raise SrunError("sync applies only to the keychain backend")
+    _, cli_store = _parse_name_store(rest, name_optional=True)
+    if (cli_store or DEFAULT_STORE) != "keychain":
+        raise SrunError("sync applies only to the keychain store")
     names = keychain_dump_names()
     index_save(names)
     print("synced %d keychain name(s) into the local index" % len(names))
@@ -101,9 +103,9 @@ def cmd_check(rest):
         try:
             zero(resolve(name, None, manifest))
             print(f"OK    {name}  ({where})")
-        except SrunError:
+        except SrunError as e:
             missing += 1
-            print(f"MISS  {name}  ({where})")
+            print(f"MISS  {name}  ({where}): {e}")
     return 1 if missing else 0
 
 
@@ -162,5 +164,19 @@ def cmd_migrate(rest):
     return 0
 
 
+def cmd_default(rest):
+    """Show or set the personal default store — used by every project whose
+    .srun.json names no store of its own."""
+    if len(rest) > 1 or (rest and rest[0].startswith("-")):
+        raise SrunError("usage: srun default [STORE]")
+    if rest:
+        set_default_store(rest[0])
+        print(f"default store: {rest[0]}")
+    else:
+        print(f"default store: {default_store() or DEFAULT_STORE}"
+              + ("" if default_store() else " (built in)"))
+    return 0
+
+
 COMMANDS = {"add": cmd_add, "rm": cmd_rm, "ls": cmd_ls, "sync": cmd_sync,
-            "check": cmd_check, "migrate": cmd_migrate}
+            "check": cmd_check, "migrate": cmd_migrate, "default": cmd_default}

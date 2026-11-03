@@ -149,7 +149,7 @@ def _check(command):
         j = next((i for i, t in enumerate(toks) if t == "add"), -1)
         pos, k = [], j + 1
         while 0 <= j < len(toks) and k < len(toks) and toks[k] not in _SHELL_OPS:
-            if toks[k] in ("-b", "--backend"):
+            if toks[k] in ("-s", "--store"):
                 k += 2
                 continue
             pos.append(toks[k])

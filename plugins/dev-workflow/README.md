@@ -72,7 +72,7 @@ The `install` command aborts cleanly if it detects an existing dev-workflow inst
 - Confirm the proposed domain skill → path mapping
 - Confirm which packages your product can't run without, so they're pinned to the version you ship today
 
-When a check needs a login or a key, the agent names the secret and asks you to store it — `srun add NAME` opens a hidden dialog — and you type the value there, never into the chat.
+When a check needs a login or a key, the agent names the secret and tells you where it goes — `srun add NAME` in your own terminal, or an item in 1Password, Dashlane or LastPass — so you type the value there, never into the chat.
 
 Everything else is written automatically, inside your repo. One thing sits outside it and is offered rather than done: letting runs see how much of your Claude allowance is left. The second wraps your status line so the figures it already receives are saved where `/pilot` can read them — one file per open session, reconciled on read, because a dozen sessions writing one file just publishes whichever of them rendered last. Your own status-line script isn't edited, and deleting one line from your settings undoes it. Say no and it prints the change for you to make yourself. It's per-machine, not per-project, so the next project you install into finds it already there.
 

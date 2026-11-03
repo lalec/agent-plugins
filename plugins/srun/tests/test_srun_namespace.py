@@ -19,16 +19,17 @@ M = manifest.Manifest
 
 
 # ------------------------------------------------------------------ plan ---- #
-@pytest.mark.parametrize("backend,sid", [
-    ("keychain", "app/K"), ("aws", "app/K"), ("gcp", "app_K")])
-def test_plan_namespaces_ids_per_backend(backend, sid):
-    m = M({"K": {"backend": backend}}, "app")
-    assert manifest.plan("K", None, m) == (backend, sid)
-    assert manifest.plan("X", backend, M({}, "app"))[1] == sid.replace("K", "X")
+@pytest.mark.parametrize("store,sid", [
+    ("keychain", "app/K"), ("aws", "app/K"), ("gcp", "app_K"), ("1password", "app/K"),
+    ("dashlane", "app/K"), ("lastpass", "app/K")])
+def test_plan_namespaces_ids_per_store(store, sid):
+    m = M({"K": {"store": store}}, "app")
+    assert manifest.plan("K", None, m) == (store, sid)
+    assert manifest.plan("X", store, M({}, "app"))[1] == sid.replace("K", "X")
 
 
 def test_plan_explicit_id_wins_and_cmd_is_unchanged():
-    m = M({"S": {"backend": "aws", "id": "shared/s"}, "C": {"cmd": "op read x"}}, "app")
+    m = M({"S": {"store": "aws", "id": "shared/s"}, "C": {"cmd": "op read x"}}, "app")
     assert manifest.plan("S", None, m) == ("aws", "shared/s")
     assert manifest.plan("C", None, m) == ("cmd", "op read x")
 
@@ -55,30 +56,62 @@ def _git_repo(tmp_path, name):
     return root
 
 
+def _read(root):
+    return json.loads((root / ".srun.json").read_text())
+
+
 def test_setup_creates_manifest_with_namespace_once(tmp_path, monkeypatch, capsys):
     root = _git_repo(tmp_path, "my.app")
     monkeypatch.chdir(root)
     assert setup.setup([]) == 0
-    path = root / ".srun.json"
-    assert json.loads(path.read_text()) == {"namespace": "my-app", "secrets": {}}
+    assert _read(root) == {"namespace": "my-app", "secrets": []}
     assert '"namespace": "my-app"' in capsys.readouterr().out
-    before = path.read_bytes()
+    before = (root / ".srun.json").read_bytes()
     assert setup.setup([]) == 0
-    assert path.read_bytes() == before
+    assert (root / ".srun.json").read_bytes() == before
     out = capsys.readouterr().out
-    assert "already set" in out and "is current" in out and "Commit" not in out
+    assert "is current" in out and "Commit" not in out
 
 
-def test_setup_adds_namespace_keeping_entries_and_never_rewrites(tmp_path, monkeypatch):
+def test_setup_keeps_overrides_and_never_rewrites_the_namespace(tmp_path, monkeypatch):
     root = _git_repo(tmp_path, "web")
-    write_manifest(root, {"A": {"backend": "aws", "id": "x"}})
+    write_manifest(root, {"A": {"backend": "aws", "id": "x"}, "B": {}})
     monkeypatch.chdir(root)
     setup.setup([])
-    data = json.loads((root / ".srun.json").read_text())
-    assert data == {"namespace": "web", "secrets": {"A": {"backend": "aws", "id": "x"}}}
+    assert _read(root) == {"namespace": "web", "secrets": {"A": {"store": "aws", "id": "x"},
+                                                           "B": {}}}
     write_manifest(root, {}, namespace="chosen")
     setup.setup([])
-    assert json.loads((root / ".srun.json").read_text())["namespace"] == "chosen"
+    assert _read(root)["namespace"] == "chosen"
+
+
+@pytest.mark.parametrize("secrets,want", [
+    ({"A": {"backend": "keychain"}, "B": {"backend": "keychain"}},
+     {"store": "keychain", "secrets": ["A", "B"]}),
+    ({"A": {}, "B": {"backend": "aws"}}, {"secrets": {"A": {}, "B": {"store": "aws"}}}),
+    ({"A": {"backend": "aws"}, "C": {"cmd": "op read x"}},
+     {"store": "aws", "secrets": {"A": {}, "C": {"cmd": "op read x"}}}),
+    (["A", "B"], {"secrets": ["A", "B"]}),
+])
+def test_setup_rewrites_old_manifests_in_the_short_form(tmp_path, monkeypatch, secrets, want):
+    root = _git_repo(tmp_path, "p")
+    write_manifest(root, secrets, namespace="p")
+    monkeypatch.chdir(root)
+    setup.setup([])
+    assert _read(root) == {"namespace": "p", **want}
+    before = (root / ".srun.json").read_bytes()
+    setup.setup([])
+    assert (root / ".srun.json").read_bytes() == before
+
+
+def test_setup_store_sets_the_project_store(tmp_path, monkeypatch):
+    root = _git_repo(tmp_path, "p")
+    write_manifest(root, {"A": {"backend": "1password"}, "B": {}}, namespace="p")
+    monkeypatch.chdir(root)
+    assert setup.setup(["--store", "1password"]) == 0
+    assert _read(root) == {"namespace": "p", "store": "1password", "secrets": ["A", "B"]}
+    assert setup.setup(["--store", "vault"]) == 1
+    assert setup.setup(["--store"]) == 1
 
 
 def _rule():
@@ -130,7 +163,7 @@ def fake_keychain(monkeypatch):
 def test_migrate_reports_each_name_and_never_prints_a_value(
         tmp_path, monkeypatch, capsys, fake_keychain):
     write_manifest(tmp_path, {"MOVE": {}, "GONE": {}, "BOTH": {}, "PIN": {"id": "shared"},
-                              "OP": {"cmd": "op read x"}, "CLOUD": {"backend": "aws"}},
+                              "OP": {"cmd": "op read x"}, "CLOUD": {"store": "aws"}},
                    namespace="app")
     fake_keychain.update({"MOVE": b"val-move-1", "BOTH": b"val-old-2",
                           "app/BOTH": b"val-new-3", "shared": b"val-pin-4"})

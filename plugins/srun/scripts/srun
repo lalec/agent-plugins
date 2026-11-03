@@ -102,23 +102,23 @@ def cmd_run(argv):
     if "--" not in argv:
         raise SrunError(
             "missing '--' before the command  (usage: srun NAME [NAME...] "
-            "[-b BACKEND] [--stdin NAME] -- cmd args...)")
+            "[-s STORE] [--stdin NAME] -- cmd args...)")
     sep = argv.index("--")
     head, cmd = argv[:sep], argv[sep + 1:]
     if not cmd:
         raise SrunError("no command after '--'")
-    backend = stdin_name = None
+    cli_store = stdin_name = None
     names = []
     it = iter(head)
     for t in it:
-        if t in ("-b", "--backend", "--stdin"):
+        if t in ("-s", "--store", "--stdin"):
             val = next(it, None)
             if val is None:
                 raise SrunError(f"{t} needs a value")
             if t == "--stdin":
                 stdin_name = val
             else:
-                backend = val
+                cli_store = val
         elif t.startswith("-"):
             raise SrunError(f"unknown option: {t}")
         else:
@@ -133,7 +133,7 @@ def cmd_run(argv):
     secrets = {}
     try:
         for name in names:
-            secrets[name] = resolve(name, backend, manifest)
+            secrets[name] = resolve(name, cli_store, manifest)
         return _spawn(cmd, secrets, stdin_name)
     finally:
         for v in secrets.values():
@@ -142,23 +142,26 @@ def cmd_run(argv):
 
 USAGE = """srun — run a command with named secrets, values never exposed
 
-  srun NAME [NAME...] [-b BACKEND] [--stdin NAME] -- cmd args...
+  srun NAME [NAME...] [-s STORE] [--stdin NAME] -- cmd args...
                             resolve NAME(s) into the child env (or one via stdin)
                             and mask their values out of the child's output
   srun check [NAME...]           OK/MISS + store id per NAME (default: every
-                                      manifest entry)
-  srun add NAME [-b BACKEND]     store a value (hidden prompt or macOS dialog)
-  srun rm  NAME [-b BACKEND]     remove a stored value
-  srun ls  [-b BACKEND]          list stored NAMES (keychain: local index)
+                                      name in .srun.json)
+  srun add NAME [-s STORE]       store a value (hidden prompt; run it in your
+                                      own terminal)
+  srun rm  NAME [-s STORE]       remove a stored value
+  srun ls  [-s STORE]            list stored NAMES (keychain: local index)
   srun sync                      rebuild the keychain-name index
   srun migrate [NAME...]         move keychain values from NAME to
                                       <namespace>/NAME (after adding a namespace)
-  srun setup                     give .srun.json a namespace (once) and put
-                                      the Secrets rule in CLAUDE.md
+  srun default [STORE]           show or set your personal default store
+  srun setup [--store STORE]     prepare .srun.json (namespace once, short
+                                      form) and the Secrets rule in CLAUDE.md
 
-Stores: keychain (default, macOS), aws, gcp, or a per-NAME `cmd` in
-.srun.json that prints the value. With a "namespace" in .srun.json,
-ids are <namespace>/NAME (gcp: <namespace>_NAME). See the plugin's README.md.
+Stores: keychain (built-in default, macOS), 1password, dashlane, lastpass, aws,
+gcp, or a per-NAME `cmd` in .srun.json that prints the value. A NAME's store:
+its own entry, else -s, else the project's "store", else `srun default`, else
+the keychain. Ids are <namespace>/NAME (gcp: <namespace>_NAME). See README.md.
 """
 
 

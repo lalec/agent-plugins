@@ -1,6 +1,6 @@
 {
   "name": "srun",
-  "description": "Keep secret values out of Claude Code. The agent uses a secret by NAME through `srun NAME -- cmd`; srun fetches the value from Keychain, AWS, GCP or any command, gives it to that one command, and masks it out of the output. Hooks block reading .env files and keychain dumps and mask credential-shaped strings. Run /srun:setup once per project.",
+  "description": "Keep secret values out of Claude Code. The agent uses a secret by NAME through `srun NAME -- cmd`; srun fetches the value from Keychain, 1Password, Dashlane, LastPass, AWS, GCP or any command, gives it to that one command, and masks it out of the output. Hooks block reading .env files and keychain dumps and mask credential-shaped strings. Run /srun:setup once per project.",
   "author": {
     "name": "lalec"
   }

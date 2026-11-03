@@ -90,9 +90,10 @@ def _lastpass_ready(name):
 
 def _resolve_lastpass(name, sid):
     _lastpass_ready(name)
-    item = _one("lastpass", _json("lastpass", _run(
-        "lastpass", ["lpass", "show", "--json", "--expand-multi", sid], name), name),
-        "fullname", sid, name)
+    p = _run("lastpass", ["lpass", "show", "--json", "--expand-multi", sid], name)
+    if p.returncode != 0:              # signed in (checked above), so: no such item
+        raise SrunError(f"not found in LastPass (no item {sid}): {name}")
+    item = _one("lastpass", _json("lastpass", p, name), "fullname", sid, name)
     if not item.get("password"):
         raise SrunError(f"LastPass item {sid} has no password: {name}")
     return bytearray(item["password"].encode("utf-8"))

@@ -167,3 +167,21 @@ def test_guard_still_denies_a_value_after_the_store_flag():
         guard._check("srun add TOK -s lastpass hunter2")
     assert e.value.code == 2
     guard._check("srun add TOK -s lastpass")
+
+
+@pytest.mark.parametrize("cmd", [
+    "op read op://Private/item/password", "op item get p/K --reveal",
+    "op item get p/K --format json", "dcli password -o console title=p/K",
+    "dcli p p/K", "lpass show --password p/K", "lpass show --json p/K",
+    "srun K -- sh -c 'lpass show --all p/X'", "cd x && dcli read dl://abc/password"])
+def test_guard_denies_password_manager_reads(cmd):
+    with pytest.raises(SystemExit) as e:
+        guard._check(cmd)
+    assert e.value.code == 2
+
+
+@pytest.mark.parametrize("cmd", [
+    "op item list --format json", "op whoami", "lpass status -q", "lpass ls myapp",
+    "dcli sync", "srun K -- op run -- env-check", "srun check K"])
+def test_guard_allows_password_manager_housekeeping(cmd):
+    guard._check(cmd)

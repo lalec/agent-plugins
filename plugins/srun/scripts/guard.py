@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """PreToolUse guard — deny Bash commands and Read/Grep calls that would print
-secret values.
+secret values: secret files, keychain reads, and password-manager reads
+(`op read`, `dcli password`, `lpass show`, ...).
 
 Blocks the clear-cut leak vectors and teaches the srun form in the deny
 reason. Deliberately narrow: `srun NAME -- sh -c 'echo $NAME'` is allowed
@@ -31,6 +32,13 @@ _SILENT_GREP = re.compile(r"^-[a-zA-Z]*[cqlL][a-zA-Z]*$")
 _ENV_FILE = re.compile(r"^\.env(\.[\w.-]+)?$")
 _TEMPLATE = re.compile(r"\.(example|sample|template|dist)$")
 _SHELL_OPS = {"|", "||", "&&", ";", "&"}
+# Password-manager verbs that print a stored value (`op item list`, `lpass
+# status` and the like print none and stay allowed).
+_MANAGER_READS = {
+    "op": [("read",), ("inject",), ("item", "get"), ("document", "get")],
+    "dcli": [("password",), ("p",), ("read",), ("note",), ("n",), ("secret",)],
+    "lpass": [("show",), ("export",)],
+}
 _SECRET_DIRS = [os.path.expanduser(d) for d in ("~/.aws", "~/.ssh", "~/.config/gcloud")]
 
 
@@ -73,22 +81,22 @@ def _is_secret_path(tok):
     return any(path == d or path.startswith(d + os.sep) for d in _SECRET_DIRS)
 
 
-def _secret_read(toks):
-    """The secret file a reader prints, or None. `grep -c/-q/-l` only counts.
-    Looks inside `srun ... -- cmd` and `sh -c '...'`: other values in the file
-    are not masked there."""
+def _commands(toks):
+    """Every command segment, including those inside `srun ... -- cmd` and
+    `sh -c '...'`: other values printed there are not masked."""
     for seg in _segments(toks):
         prog = os.path.basename(seg[0])
         if prog == "srun" and "--" in seg:
-            hit = _secret_read(seg[seg.index("--") + 1:])
-            if hit:
-                return hit
-            continue
-        if prog in ("sh", "bash", "zsh") and "-c" in seg[:-1]:
-            hit = _secret_read(_tokens(seg[seg.index("-c") + 1]))
-            if hit:
-                return hit
-            continue
+            yield from _commands(seg[seg.index("--") + 1:])
+        elif prog in ("sh", "bash", "zsh") and "-c" in seg[:-1]:
+            yield from _commands(_tokens(seg[seg.index("-c") + 1]))
+        else:
+            yield prog, seg
+
+
+def _secret_read(toks):
+    """The secret file a reader prints, or None. `grep -c/-q/-l` only counts."""
+    for prog, seg in _commands(toks):
         if prog not in _READERS:
             continue
         if prog in ("grep", "egrep", "fgrep", "rg") and \
@@ -97,6 +105,17 @@ def _secret_read(toks):
         for a in seg[1:]:
             if _is_secret_path(a):
                 return a
+    return None
+
+
+def _manager_read(toks):
+    """A password-manager command that prints a value, or None. srun runs
+    these itself; the agent never needs them."""
+    for prog, seg in _commands(toks):
+        verbs = tuple(a for a in seg[1:] if not a.startswith("-"))
+        for v in _MANAGER_READS.get(prog, ()):
+            if verbs[:len(v)] == v:
+                return " ".join((prog,) + v)
     return None
 
 
@@ -141,6 +160,12 @@ def _check(command):
     secret_file = _secret_read(toks)
     if secret_file:
         _deny_read(secret_file)
+
+    manager = _manager_read(toks)
+    if manager:
+        _deny(f"`{manager}` prints a stored value into the transcript. Use the "
+              "value by NAME: `srun NAME -- cmd` reads it from the project's "
+              "store; `srun check NAME` says whether it is set.")
 
     if re.search(r"\bsrun\s+add\b", low):
         if re.search(r"\|\s*\S*srun\s+add", low):

@@ -263,7 +263,7 @@ Then one last line, always there and always the one you act on. Everything that 
 | `agent-mark.sh` | Subagent stop | A pipeline agent trying to finish without its handoff block is sent back once to write it; every stop is recorded, so a close-out can check how many verification children really ran |
 | `pilot-cleanup.sh` | Session end | Clears this session's own `/pilot` run marker, and only its own, so a mission in another session is never unmarked |
 | `precompact-handover.sh` | Before compaction | Writes a fallback handover from git and the run's state files, so a compaction that lands mid-task still leaves something `/proceed` can read |
-| srun `guard.py` | Bash, Read, Grep | Printing a `.env` file, anything under `~/.aws` or `~/.ssh`, a Keychain password or the whole environment, or putting a value on the command line — counting with `grep -c` and reading `.env.example` stay allowed |
+| srun `guard.py` | Bash, Read, Grep | Printing a `.env` file, anything under `~/.aws` or `~/.ssh`, a Keychain or password-manager entry or the whole environment, or putting a value on the command line — counting with `grep -c` and reading `.env.example` stay allowed |
 | srun `redact.py` | Any tool (post) | Never blocks — replaces anything shaped like a credential (`sk-…`, `ghp_…`, AWS keys, JWTs) in the output before the agent reads it |
 | `limit-mark.sh` | API limit error | Records the moment the usage limit killed a turn, so the next `/pilot` resumes that run instead of treating its marker as stale |
 

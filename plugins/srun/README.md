@@ -113,7 +113,7 @@ The plugin's path changes with each `/plugin update`; re-point the launcher afte
 | Hook | Does |
 |---|---|
 | SessionStart | puts `scripts/` on `PATH`, so `srun` works by name |
-| PreToolUse · Bash (`guard.py`) | denies printing a `.env` file or anything under `~/.aws`, `~/.ssh`, `~/.config/gcloud` (`grep -c` still counts), `security … -w`, `dump-keychain`, `env`/`printenv` dumps, and a value on the `add` command line |
+| PreToolUse · Bash (`guard.py`) | denies printing a `.env` file or anything under `~/.aws`, `~/.ssh`, `~/.config/gcloud` (`grep -c` still counts), `security … -w`, `dump-keychain`, password-manager reads (`op read`, `op item get`, `dcli password`, `lpass show`), `env`/`printenv` dumps, and a value on the `add` command line |
 | PreToolUse · Read, Grep (`guard.py`) | denies the Read tool, and Grep in content mode, on those same files — never `.env.example`; Glob and Grep's file lists stay allowed |
 | PostToolUse (`redact.py`) | replaces credential-*shaped* strings (`sk-…`, `ghp_…`, `AKIA…`, JWTs, keys) in any tool output |
 

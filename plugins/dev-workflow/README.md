@@ -13,7 +13,7 @@ A multi-agent delivery workflow for Claude Code. It runs your plan through a tea
 | Component | What it does |
 |---|---|
 | `myapp-dev` | **The builder.** Loads the right domain skills, writes the code, runs each skill's quality checks, deploys non-prod, syncs reference docs — then hands off a structured report, so QA always tests a live stack. |
-| `myapp-qa` | **The gatekeeper.** Reviews the code and runs the test tiers before signing off, then walks the end state itself — the check that proves the feature runs on every pass, including retests, and reports *blocked* with a reason rather than being skipped for time. A UI change that stands up a second way to do something your app already does, or puts a word from inside your code in front of the user, comes back as a finding rather than a sign-off. Routes any required fix back to `myapp-dev` instead of patching it itself. |
+| `myapp-qa` | **The gatekeeper.** Reviews the code — Claude Code's own `/code-review` hunts bugs in the task's commits, so every change is read by a reviewer that did not write it, while the security pass stays the workflow's — and runs the test tiers before signing off, then walks the end state itself — the check that proves the feature runs on every pass, including retests, and reports *blocked* with a reason rather than being skipped for time. A UI change that stands up a second way to do something your app already does, or puts a word from inside your code in front of the user, comes back as a finding rather than a sign-off. Routes any required fix back to `myapp-dev` instead of patching it itself. |
 | `myapp-pm` | **The closer.** Confirms QA actually ran, ships prod when asked, writes the delivery log, refreshes docs, and advances the roadmap, shrinking each finished item to a stub so the file stays readable — the audit trail writes itself. |
 | `myapp-verify` | **The runner.** When a test set is too big for one context, `myapp-qa` hands each slice to one of these: it walks its checks against the running stack, records every outcome, and hands back what it didn't reach. Its price is fixed in its own file — the cheaper model, a hard turn cap, none of your project instructions in its context — so a fan-out costs what it says and a child that runs long is stopped and resumed, not left to wander. |
 | 8 lifecycle skills | `log`, `review`, `debug`, `deploy`, `test`, `skill`, `docs`, `graph` — one per delivery concern, shared by every agent. |
@@ -39,7 +39,7 @@ A multi-agent delivery workflow for Claude Code. It runs your plan through a tea
 
 ## Prerequisites
 
-- Claude Code (`claude`) installed and authenticated
+- Claude Code (`claude`) installed and authenticated — its own `/code-review` is the bug hunt in every review, at the effort level you last typed for it (`/code-review high` once sets it for every later run)
 - A git repo (recommended — hooks use `git status`)
 - `jq` on PATH (used by hook scripts)
 - The [`srun`](../srun/README.md) plugin — installed automatically with this one, so secrets are used by name and never reach a transcript

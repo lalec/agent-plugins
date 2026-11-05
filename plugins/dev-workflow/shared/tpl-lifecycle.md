@@ -113,23 +113,22 @@ Required steps before writing the log entry:
 ```markdown
 ---
 name: <PREFIX>-review
-description: Code review practices and verification gates. Use after task completion (request reviewer), when receiving feedback (process before implementing), or before claiming success (verify with evidence).
+description: Code review and verification gates. Use when reviewing a diff (the built-in bug hunt, the security pass, the UI check), when issuing review findings (evidence before blocking), when triaging dependency advisories, or before claiming success (verify with evidence).
 license: MIT
 ---
 
 # <PREFIX>-review
 
-Three distinct practices: receiving feedback, requesting reviews, verification gates. Static reference content — load the right reference for the situation. No `## Reference Sync` (this skill ships its references; the project does not author them). The one exception is `references/vex.yaml`, which is project state rather than shipped content — keep it current per the checklist below.
+Static reference content — load the right reference for the situation. No `## Reference Sync` (this skill ships its references; the project does not author them). The one exception is `references/vex.yaml`, which is project state rather than shipped content — keep it current per the checklist below.
 
-**Core principle:** Technical correctness over social comfort. Verify before implementing. Evidence before claims.
+**Core principle:** Evidence before claims — a finding blocks only once its cited lines are read.
 
 ## Read Map
 
 ```
 SITUATION?
 │
-├─ Received review feedback       → references/code-review-reception.md
-├─ Completed major task/feature   → references/requesting-code-review.md
+├─ Reviewing a diff for bugs      → references/requesting-code-review.md
 ├─ Issuing review findings (you   → references/issuing-findings.md
 │  are the reviewer, e.g. <PREFIX>-qa)
 ├─ Reviewing for defect classes   → references/security-review.md
@@ -150,8 +149,7 @@ SITUATION?
 
 ## References
 
-- `references/code-review-reception.md` — feedback reception protocol (read → understand → verify → evaluate → respond → implement)
-- `references/requesting-code-review.md` — code-reviewer subagent dispatch protocol
+- `references/requesting-code-review.md` — the bug hunt: Claude Code's built-in `code-review` skill on the range under review, and how to wait for and weigh its findings
 - `references/issuing-findings.md` — evidence requirements for review findings (no blocking finding without file:line)
 - `references/security-review.md` — fast per-task security pass: deps/supply-chain, secrets, injection sinks, access-control (IDOR), insecure defaults + headers, dead surface; recon→verify triage; VEX status per advisory (§ Triage); the two moments the deep `/security-review` is owed (§ Escalate)
 - `references/vex.yaml` — the VEX status held for every advisory this project has assessed, so a settled one is never re-decided at the same package version. Project state, not shipped content: written by this pass and by `/audit`
@@ -172,277 +170,17 @@ Include the `ux-patterns.md` + `voice.md` read-map branch **and** their `## Refe
 
 **Also create these reference files when installing `<PREFIX>-review`:**
 
-`references/code-review-reception.md`:
-
-````markdown
-# Code Review Reception
-
-## Overview
-
-Code review requires technical evaluation, not emotional performance.
-
-**Core principle:** Verify before implementing. Ask before assuming. Technical correctness over social comfort.
-
-## The Response Pattern
-
-```
-WHEN receiving code review feedback:
-
-1. READ: Complete feedback without reacting
-2. UNDERSTAND: Restate requirement in own words (or ask)
-3. VERIFY: Check against codebase reality
-4. EVALUATE: Technically sound for THIS codebase?
-5. RESPOND: Technical acknowledgment or reasoned pushback
-6. IMPLEMENT: One item at a time, test each
-```
-
-## Forbidden Responses
-
-**NEVER:**
-- "You're absolutely right!" (performative agreement)
-- "Great point!" / "Excellent feedback!" (performative)
-- "Let me implement that now" (before verification)
-
-**INSTEAD:**
-- Restate the technical requirement
-- Ask clarifying questions
-- Push back with technical reasoning if wrong
-- Just start working (actions > words)
-
-## Handling Unclear Feedback
-
-```
-IF any item is unclear:
-  STOP - do not implement anything yet
-  ASK for clarification on unclear items
-
-WHY: Items may be related. Partial understanding = wrong implementation.
-```
-
-**Example:**
-```
-Partner: "Fix 1-6"
-You understand 1,2,3,6. Unclear on 4,5.
-
-❌ WRONG: Implement 1,2,3,6 now, ask about 4,5 later
-✅ RIGHT: "I understand items 1,2,3,6. Need clarification on 4 and 5 before proceeding."
-```
-
-## Source-Specific Handling
-
-### From Human Partner
-- **Trusted** - implement after understanding
-- **Still ask** if scope unclear
-- **No performative agreement**
-- **Skip to action** or technical acknowledgment
-
-### From External Reviewers
-```
-BEFORE implementing:
-  1. Check: Technically correct for THIS codebase?
-  2. Check: Breaks existing functionality?
-  3. Check: Reason for current implementation?
-  4. Check: Works on all platforms/versions?
-  5. Check: Does reviewer understand full context?
-
-IF suggestion seems wrong:
-  Push back with technical reasoning
-
-IF can't easily verify:
-  Say so: "I can't verify this without [X]. Should I [investigate/ask/proceed]?"
-
-IF conflicts with partner's prior decisions:
-  Stop and discuss with partner first
-```
-
-## YAGNI Check for "Professional" Features
-
-```
-IF reviewer suggests "implementing properly":
-  grep codebase for actual usage
-
-  IF unused: "This endpoint isn't called. Remove it (YAGNI)?"
-  IF used: Then implement properly
-```
-
-## Implementation Order
-
-```
-FOR multi-item feedback:
-  1. Clarify anything unclear FIRST
-  2. Then implement in this order:
-     - Blocking issues (breaks, security)
-     - Simple fixes (typos, imports)
-     - Complex fixes (refactoring, logic)
-  3. Test each fix individually
-  4. Verify no regressions
-```
-
-## When To Push Back
-
-Push back when:
-- Suggestion breaks existing functionality
-- Reviewer lacks full context
-- Violates YAGNI (unused feature)
-- Technically incorrect for this stack
-- Legacy/compatibility reasons exist
-- Conflicts with partner's architectural decisions
-
-**How to push back:**
-- Use technical reasoning, not defensiveness
-- Ask specific questions
-- Reference working tests/code
-- Involve partner if architectural
-
-## Acknowledging Correct Feedback
-
-When feedback IS correct:
-```
-✅ "Fixed. [Brief description of what changed]"
-✅ "Good catch - [specific issue]. Fixed in [location]."
-✅ [Just fix it and show in the code]
-
-❌ "You're absolutely right!"
-❌ "Great point!"
-❌ ANY gratitude expression
-```
-
-**Why no thanks:** Actions speak. Just fix it.
-
-## Gracefully Correcting Your Pushback
-
-If you pushed back and were wrong:
-```
-✅ "You were right - I checked [X] and it does [Y]. Implementing now."
-✅ "Verified this and you're correct. My initial understanding was wrong because [reason]. Fixing."
-
-❌ Long apology
-❌ Defending why you pushed back
-❌ Over-explaining
-```
-
-## Common Mistakes
-
-| Mistake | Fix |
-|---------|-----|
-| Performative agreement | State requirement or just act |
-| Blind implementation | Verify against codebase first |
-| Batch without testing | One at a time, test each |
-| Assuming reviewer is right | Check if breaks things |
-| Avoiding pushback | Technical correctness > comfort |
-| Partial implementation | Clarify all items first |
-| Can't verify, proceed anyway | State limitation, ask for direction |
-
-## The Bottom Line
-
-**External feedback = suggestions to evaluate, not orders to follow.**
-
-Verify. Question. Then implement.
-
-No performative agreement. Technical rigor always.
-````
-
 `references/requesting-code-review.md`:
 
 ````markdown
 # Requesting Code Review
 
-Dispatch code-reviewer subagent to catch issues before they cascade.
+The bug hunt is Claude Code's built-in `code-review` skill: correctness bugs and CLAUDE.md breaks in the commits you name. It does not cover security (`security-review.md`) or UI patterns (`<PREFIX>-design`) — run those branches too.
 
-**Core principle:** Review early, review often.
-
-## When to Request Review
-
-**Mandatory:**
-- After each task in subagent-driven development
-- After completing major feature
-- Before merge to main
-
-**Optional but valuable:**
-- When stuck (fresh perspective)
-- Before refactoring (baseline check)
-- After fixing complex bug
-
-## How to Request
-
-**1. Get git SHAs:**
-```bash
-BASE_SHA=$(git rev-parse HEAD~1)  # or origin/main
-HEAD_SHA=$(git rev-parse HEAD)
-```
-
-**2. Dispatch code-reviewer subagent:**
-
-Use Task tool with `code-reviewer` type, providing these placeholders:
-
-**Placeholders:**
-- `{WHAT_WAS_IMPLEMENTED}` - What you just built
-- `{PLAN_OR_REQUIREMENTS}` - What it should do
-- `{BASE_SHA}` - Starting commit
-- `{HEAD_SHA}` - Ending commit
-- `{DESCRIPTION}` - Brief summary
-
-**3. Act on feedback:**
-- Fix Critical issues immediately
-- Fix Important issues before proceeding
-- Note Minor issues for later
-- Push back if reviewer is wrong (with reasoning)
-
-## Example
-
-```
-[Just completed Task 2: Add verification function]
-
-You: Let me request code review before proceeding.
-
-BASE_SHA=$(git log --oneline | grep "Task 1" | head -1 | awk '{print $1}')
-HEAD_SHA=$(git rev-parse HEAD)
-
-[Dispatch code-reviewer subagent]
-  WHAT_WAS_IMPLEMENTED: Verification and repair functions for conversation index
-  PLAN_OR_REQUIREMENTS: Task 2 from docs/plans/deployment-plan.md
-  BASE_SHA: a7981ec
-  HEAD_SHA: 3df7661
-  DESCRIPTION: Added verifyIndex() and repairIndex() with 4 issue types
-
-[Subagent returns]:
-  Strengths: Clean architecture, real tests
-  Issues:
-    Important: Missing progress indicators
-    Minor: Magic number (100) for reporting interval
-  Assessment: Ready to proceed
-
-You: [Fix progress indicators]
-[Continue to Task 3]
-```
-
-## Integration with Workflows
-
-**Subagent-Driven Development:**
-- Review after EACH task
-- Catch issues before they compound
-- Fix before moving to next task
-
-**Executing Plans:**
-- Review after each batch (3 tasks)
-- Get feedback, apply, continue
-
-**Ad-Hoc Development:**
-- Review before merge
-- Review when stuck
-
-## Red Flags
-
-**Never:**
-- Skip review because "it's simple"
-- Ignore Critical issues
-- Proceed with unfixed Important issues
-- Argue with valid technical feedback
-
-**If reviewer wrong:**
-- Push back with technical reasoning
-- Show code/tests that prove it works
-- Request clarification
+1. **Name the range.** Use the `code-review` skill with the range under review as its only argument — `<base>..HEAD`, the task's commits or the burst since the last delivery-log entry. With no argument it reviews the branch plus uncommitted work, the wrong scope mid-pipeline.
+2. **No effort level, no flags.** A level passed by an agent is ignored — the review runs at the level the user last typed. Never pass `--fix` or `--comment`: a source finding takes the caller's route (`blocked` back to `<PREFIX>-dev` from `<PREFIX>-qa`, `/fix` from a top-level close-out), and findings stay in this session.
+3. **Wait for it.** It runs as a background agent and its findings arrive as a notification — do not sign off or move on before they do.
+4. **Each finding is a hypothesis** until you have read the cited lines — `issuing-findings.md`.
 ````
 
 `references/issuing-findings.md`:
@@ -450,7 +188,7 @@ You: [Fix progress indicators]
 ````markdown
 # Issuing Review Findings
 
-When **you** are the reviewer producing findings (running `<PREFIX>-qa`, dispatching the code-reviewer subagent, doing a manifest check, lint sweep, schema audit), every blocking finding requires evidence read **in this session**.
+When **you** are the reviewer producing findings (running `<PREFIX>-qa`, weighing what the built-in code review returned, doing a manifest check, lint sweep, schema audit), every blocking finding requires evidence read **in this session**.
 
 For the **defect classes** to inspect during a security pass (dependencies, secrets, injection sinks, access control, insecure defaults, dead surface), see `security-review.md` — the evidence bar below applies to each.
 

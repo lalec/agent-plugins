@@ -190,7 +190,7 @@ Create these files (skip if already present, offer to overwrite if stale):
 .claude/agents/<PREFIX>-pm.md         ← from tpl-agents.md § tosk-pm
 .claude/agents/<PREFIX>-verify.md     ← from tpl-agents.md § tosk-verify
 .claude/skills/<PREFIX>-log/SKILL.md
-.claude/skills/<PREFIX>-review/SKILL.md       ← also create references/{code-review-reception,requesting-code-review,issuing-findings,security-review}.md and references/vex.yaml (`statements: []`) (see tpl-lifecycle.md § tosk-review)
+.claude/skills/<PREFIX>-review/SKILL.md       ← also create references/{requesting-code-review,issuing-findings,security-review}.md and references/vex.yaml (`statements: []`) (see tpl-lifecycle.md § tosk-review)
 .claude/skills/<PREFIX>-debug/SKILL.md        ← also create 4 reference files + scripts (see tpl-lifecycle.md § debug)
 .claude/skills/<PREFIX>-deploy/SKILL.md       ← from tpl-lifecycle.md § tosk-deploy/SKILL.md
 .claude/skills/<PREFIX>-deploy/references/deploy-config.yaml  ← populated, not a stub — see "Populate deploy-config.yaml" below

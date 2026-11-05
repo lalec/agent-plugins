@@ -58,7 +58,7 @@ Gate timeouts split by risk: reversible gates proceed with defaults labeled `aut
 | Skill | Purpose |
 |---|---|
 | `<PREFIX>-log` | Appends delivery log entries to `docs/project-log.md` |
-| `<PREFIX>-review` | Code review reception, reviewer dispatch, verification gates |
+| `<PREFIX>-review` | Bug hunt via Claude Code's built-in `/code-review`, issuing findings, per-task security pass, verification gates |
 | `<PREFIX>-debug` | Systematic debugging — four-phase root cause investigation |
 | `<PREFIX>-deploy` | Deploy authority — caller-driven env selection (`target=non-prod` from `<PREFIX>-dev`, `target=prod` from the `/code\|/fix --prod` command step); reads `references/deploy-config.yaml` (unified env schema: `run:` serve-envs / `deploy:` ship-envs / `invoke:` run-to-completion jobs, which serve no url and are passed over when resolving a target), fills missing values, gates prod inline via `AskUserQuestion`, verifies reachability; holds critical packages to exact pins and every build to a start-up check |
 | `<PREFIX>-test` | Smoke (always) · per-task verifications via `custom-tests.yaml`, end-state check never narrowed away · regression scope pinned by the caller or resolved from the changed paths |

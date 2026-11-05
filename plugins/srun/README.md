@@ -113,7 +113,7 @@ The plugin's path changes with each `/plugin update`; re-point the launcher afte
 | Hook | Does |
 |---|---|
 | SessionStart | puts `scripts/` on `PATH`, so `srun` works by name |
-| PreToolUse · Bash (`guard.py`) | denies printing a `.env` file or anything under `~/.aws`, `~/.ssh`, `~/.config/gcloud` (`grep -c` still counts), `security … -w`, `dump-keychain`, password-manager reads (`op read`, `op item get`, `dcli password`, `lpass show`), `env`/`printenv` dumps, and a value on the `add` command line |
+| PreToolUse · Bash (`guard.py`) | denies printing a `.env` file or anything under `~/.aws`, `~/.ssh`, `~/.config/gcloud` (`grep -c` still counts), `security … -w`, `dump-keychain`, password-manager reads (`op read`, `op item get`, `dcli password`, `lpass show`), `env`/`printenv` dumps, and a value on the `add` command line — wherever the read sits: behind `sudo`, `env`, `time` or `VAR=x`, inside `$(…)`, backticks, `bash -lc '…'` or `op run --`, or on a later line of the same command |
 | PreToolUse · Read, Grep (`guard.py`) | denies the Read tool, and Grep in content mode, on those same files — never `.env.example`; Glob and Grep's file lists stay allowed |
 | PostToolUse (`redact.py`) | replaces credential-*shaped* strings (`sk-…`, `ghp_…`, `AKIA…`, JWTs, keys) in any tool output |
 
@@ -123,6 +123,7 @@ Session transcripts stay readable — debugging across sessions keeps working.
 
 - It serves your own machine. Claude cloud sessions and CI do not install the plugin, so a step there that needs a secret stops as `blocked`; deployed services read their secret manager themselves.
 - Grep over a whole folder in content mode, or `grep -r`, can still print a `.env` line; the guard catches a secret file only when it is named.
+- The guard reads a command's text, not what it does: a heredoc or `echo` whose text names `cat .env` or `op read` is denied too. Write such text with the Edit or Write tool.
 - Masking covers output, not intent: a child that sends a value over the network sends the real value.
 - Any process you own can read a child's environment while it runs; `--stdin` avoids that for tools that accept it.
 - Python cannot guarantee a value is wiped from memory; the process is short-lived, core dumps are off, and tracebacks never print.

@@ -56,8 +56,8 @@ def test_unknown_project_store_raises(tmp_path, monkeypatch):
 
 # ------------------------------------------------------- faked manager CLIs -- #
 class _P:
-    def __init__(self, rc=0, out=b""):
-        self.returncode, self.stdout = rc, out
+    def __init__(self, rc=0, out=b"", err=b""):
+        self.returncode, self.stdout, self.stderr = rc, out, err
 
 
 @pytest.fixture
@@ -120,6 +120,19 @@ def test_lastpass_locked_fails_before_any_read(cli):
     assert "lpass login" in str(e.value) and len(calls) == 1
 
 
+@pytest.mark.parametrize("err,msg", [
+    (b"Error: Could not find specified account(s).", "not found in LastPass"),
+    (b"Error: Could not connect to server.", "lookup failed (Error: Could not connect"),
+    (b"", "lookup failed (exit 1)")])
+def test_lastpass_tells_a_missing_item_from_a_failed_lookup(cli, err, msg):
+    table, _ = cli
+    table[("lpass", "status")] = _P(0)
+    table[("lpass", "show")] = _P(1, err=err)
+    with pytest.raises(stores.SrunError) as e:
+        stores.RESOLVERS["lastpass"]("K", "p/K")
+    assert msg in str(e.value)
+
+
 def test_lastpass_read_requires_one_exact_fullname(cli):
     table, _ = cli
     table[("lpass", "status")] = _P(0)
@@ -173,7 +186,17 @@ def test_guard_still_denies_a_value_after_the_store_flag():
     "op read op://Private/item/password", "op item get p/K --reveal",
     "op item get p/K --format json", "dcli password -o console title=p/K",
     "dcli p p/K", "lpass show --password p/K", "lpass show --json p/K",
-    "srun K -- sh -c 'lpass show --all p/X'", "cd x && dcli read dl://abc/password"])
+    "srun K -- sh -c 'lpass show --all p/X'", "cd x && dcli read dl://abc/password",
+    # an option's value before the verb, prefixes and wrappers in front of it
+    "op --account my read op://p/K/password", "FOO=1 op read op://p/K/password",
+    "env -i op read op://p/K/password", "time lpass show p/K", "command dcli p p/K",
+    "sudo -u me op item get p/K", "nohup lpass show p/K",
+    # another command started inside this one
+    "echo $(op read op://p/K/password)", "echo `lpass show p/K`",
+    "echo hi\nop read op://p/K/password", "bash -lc 'op read op://p/K/password'",
+    "zsh -ic 'dcli p p/K'", "op run -- lpass show p/K",
+    # verbs the list missed: 1Password CLI v1, Dashlane one-time codes
+    "op get item p/K", "dcli otp p/K"])
 def test_guard_denies_password_manager_reads(cmd):
     with pytest.raises(SystemExit) as e:
         guard._check(cmd)
@@ -182,6 +205,8 @@ def test_guard_denies_password_manager_reads(cmd):
 
 @pytest.mark.parametrize("cmd", [
     "op item list --format json", "op whoami", "lpass status -q", "lpass ls myapp",
-    "dcli sync", "srun K -- op run -- env-check", "srun check K"])
+    "dcli sync", "srun K -- op run -- env-check", "srun check K",
+    "op --account my item list", "op run -- npm test", "FOO=1 npm test",
+    "op vault get Private", "op user get --me"])
 def test_guard_allows_password_manager_housekeeping(cmd):
     guard._check(cmd)

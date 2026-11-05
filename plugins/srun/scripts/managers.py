@@ -27,10 +27,10 @@ WHERE = {
 }
 
 
-def _run(store, argv, name, stdin=subprocess.DEVNULL):
+def _run(store, argv, name, stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL):
     try:
         return subprocess.run(argv, stdin=stdin, stdout=subprocess.PIPE,
-                              stderr=subprocess.DEVNULL)
+                              stderr=stderr)
     except FileNotFoundError:
         raise SrunError(f"{LABEL[store]} CLI `{argv[0]}` is not installed: {name}")
 
@@ -90,9 +90,16 @@ def _lastpass_ready(name):
 
 def _resolve_lastpass(name, sid):
     _lastpass_ready(name)
-    p = _run("lastpass", ["lpass", "show", "--json", "--expand-multi", sid], name)
-    if p.returncode != 0:              # signed in (checked above), so: no such item
-        raise SrunError(f"not found in LastPass (no item {sid}): {name}")
+    p = _run("lastpass", ["lpass", "show", "--json", "--expand-multi", sid], name,
+             stderr=subprocess.PIPE)
+    if p.returncode != 0:
+        # Only lpass's own "Could not find" means the item is missing; a network
+        # or session error must not read as one.
+        err = (p.stderr or b"").decode("utf-8", "replace").strip()
+        if "could not find" in err.lower():
+            raise SrunError(f"not found in LastPass (no item {sid}): {name}")
+        reason = err.splitlines()[-1] if err else f"exit {p.returncode}"
+        raise SrunError(f"LastPass lookup failed ({reason}): {name}")
     item = _one("lastpass", _json("lastpass", p, name), "fullname", sid, name)
     if not item.get("password"):
         raise SrunError(f"LastPass item {sid} has no password: {name}")

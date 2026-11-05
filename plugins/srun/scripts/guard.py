@@ -32,13 +32,19 @@ _SILENT_GREP = re.compile(r"^-[a-zA-Z]*[cqlL][a-zA-Z]*$")
 _ENV_FILE = re.compile(r"^\.env(\.[\w.-]+)?$")
 _TEMPLATE = re.compile(r"\.(example|sample|template|dist)$")
 _SHELL_OPS = {"|", "||", "&&", ";", "&"}
+_SHELLS = {"sh", "bash", "zsh"}
+# `-c`, `-lc`, `-ic`: the next argument is a command string the shell runs.
+_C_FLAG = re.compile(r"^-[a-zA-Z]*c[a-zA-Z]*$")
 # Password-manager verbs that print a stored value (`op item list`, `lpass
 # status` and the like print none and stay allowed).
 _MANAGER_READS = {
-    "op": [("read",), ("inject",), ("item", "get"), ("document", "get")],
-    "dcli": [("password",), ("p",), ("read",), ("note",), ("n",), ("secret",)],
+    "op": [("read",), ("inject",), ("item", "get"), ("document", "get"),
+           ("get", "item"), ("get", "document"), ("get", "totp")],
+    "dcli": [("password",), ("p",), ("read",), ("note",), ("n",), ("secret",),
+             ("otp",), ("o",)],
     "lpass": [("show",), ("export",)],
 }
+_KNOWN = _READERS | set(_MANAGER_READS) | _SHELLS
 _SECRET_DIRS = [os.path.expanduser(d) for d in ("~/.aws", "~/.ssh", "~/.config/gcloud")]
 
 
@@ -47,7 +53,14 @@ def _deny(reason):
     raise SystemExit(2)
 
 
-def _tokens(command):
+def _tokens(command, inner=False):
+    """Shell words. A newline ends a command. The outer pass keeps `$(...)` and
+    backticks inside the command that uses them, so `cat $(echo .env)` still
+    shows `.env` to `cat`; the inner pass splits them out, so `echo $(op read
+    x)` shows `op read` as a command of its own."""
+    command = command.replace("\n", " ; ")
+    for sep in ("$(", "`", ")") if inner else ("`",):
+        command = command.replace(sep, " ; " if inner else " ")
     try:
         lex = shlex.shlex(command, posix=True, punctuation_chars=True)
         lex.whitespace_split = True
@@ -82,21 +95,35 @@ def _is_secret_path(tok):
 
 
 def _commands(toks):
-    """Every command segment, including those inside `srun ... -- cmd` and
-    `sh -c '...'`: other values printed there are not masked."""
+    """Every reader, password manager and shell a command line runs. A segment's
+    command is its first known program, so `VAR=x`, `env`, `sudo -u x`, `time`
+    and `srun K --` in front of it are skipped; `sh -c '...'` and a manager's
+    `-- cmd` (`op run -- cmd`) are followed. Values printed there are not masked."""
     for seg in _segments(toks):
+        start = next((i for i, t in enumerate(seg) if os.path.basename(t) in _KNOWN), None)
+        if start is None:
+            continue
+        seg = seg[start:]
         prog = os.path.basename(seg[0])
-        if prog == "srun" and "--" in seg:
+        if prog in _SHELLS:
+            flag = next((i for i, a in enumerate(seg[1:-1], 1) if _C_FLAG.match(a)), None)
+            if flag:
+                yield from _parse(seg[flag + 1])
+        elif prog in _MANAGER_READS and "--" in seg:
+            yield prog, seg[:seg.index("--")]
             yield from _commands(seg[seg.index("--") + 1:])
-        elif prog in ("sh", "bash", "zsh") and "-c" in seg[:-1]:
-            yield from _commands(_tokens(seg[seg.index("-c") + 1]))
         else:
             yield prog, seg
 
 
-def _secret_read(toks):
+def _parse(command):
+    """The commands of both token passes."""
+    return list(_commands(_tokens(command))) + list(_commands(_tokens(command, inner=True)))
+
+
+def _secret_read(cmds):
     """The secret file a reader prints, or None. `grep -c/-q/-l` only counts."""
-    for prog, seg in _commands(toks):
+    for prog, seg in cmds:
         if prog not in _READERS:
             continue
         if prog in ("grep", "egrep", "fgrep", "rg") and \
@@ -108,13 +135,15 @@ def _secret_read(toks):
     return None
 
 
-def _manager_read(toks):
+def _manager_read(cmds):
     """A password-manager command that prints a value, or None. srun runs
-    these itself; the agent never needs them."""
-    for prog, seg in _commands(toks):
-        verbs = tuple(a for a in seg[1:] if not a.startswith("-"))
+    these itself; the agent never needs them. A verb is matched anywhere among
+    the non-flag words, so an option's value before it (`op --account x read`)
+    does not hide it."""
+    for prog, seg in cmds:
+        words = [a for a in seg[1:] if not a.startswith("-")]
         for v in _MANAGER_READS.get(prog, ()):
-            if verbs[:len(v)] == v:
+            if any(tuple(words[i:i + len(v)]) == v for i in range(len(words))):
                 return " ".join((prog,) + v)
     return None
 
@@ -157,11 +186,12 @@ def _check(command):
         _deny("`security ... -w` prints a keychain password into the transcript. "
               "Use `srun NAME -- cmd`; the value stays out of context.")
 
-    secret_file = _secret_read(toks)
+    cmds = _parse(command)
+    secret_file = _secret_read(cmds)
     if secret_file:
         _deny_read(secret_file)
 
-    manager = _manager_read(toks)
+    manager = _manager_read(cmds)
     if manager:
         _deny(f"`{manager}` prints a stored value into the transcript. Use the "
               "value by NAME: `srun NAME -- cmd` reads it from the project's "

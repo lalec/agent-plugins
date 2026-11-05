@@ -277,6 +277,11 @@ def test_index_update_only_when_bootstrapped():
     "cat ~/.aws/credentials",
     "cat $HOME/.ssh/id_ed25519",
     "grep token ~/.config/gcloud/credentials.db",
+    "sudo cat .env", "env -i cat .env", "time head .env", "FOO=1 cat .env",
+    "echo $(cat .env)", "echo `cat .env`", "true\ncat .env", "bash -lc 'cat .env'",
+    # the file name itself comes from a substitution
+    "cat $(find . -name .env)", "head $(echo .env)", "cat `realpath .env`",
+    "srun add TOK $(cat ~/x)",
 ])
 def test_guard_denies(cmd):
     with pytest.raises(SystemExit) as e:

@@ -112,7 +112,7 @@ Read `.claude/skills/code/references/pipeline.md` now and run its Steps 1, 1.5, 
 
 ## Step 4 — Deploy to prod (only if `ship_mode: prod`)
 
-Run only if `ship_mode = prod` (from the `--prod` flag or the Step 0.5 Ship answer). After <PREFIX>-pm has logged, invoke the `<PREFIX>-deploy` skill **here at the top level** (not via a subagent) with `target=prod`. It runs the fill-in pass, builds the gate context, and gates via `AskUserQuestion` — which works because this is the top level. Running after sign-off and any retest loop means it deploys the final, signed-off code.
+Run only if `ship_mode = prod` (from the `--prod` flag or the Step 0.5 Ship answer). After <PREFIX>-pm has logged, invoke the `<PREFIX>-deploy` skill **here at the top level** (not via a subagent) with args `target=prod`. It runs the fill-in pass, builds the gate context, and gates via `AskUserQuestion` — which works because this is the top level. Running after sign-off and any retest loop means it deploys the final, signed-off code.
 
 **Pre-authorization.** If the user answered **Ship** at the Step 0.5 gate (not a timeout default), pass `preauth: user shipped at Step 0.5` to the skill **only when all of these hold** — verified now, not assumed:
 - QA status is `signed-off`, or `signed-off-with-deferrals` where the deferral was **user-confirmed** (not auto-accepted on timeout);
@@ -768,7 +768,7 @@ Step 3 and the mission report. Read once, at close-out.
 
 **A filed item has to be executable cold.** Its body carries the decision and its date, the committed evidence path, and the exact parameters — everything a session with no memory of this one needs. That is what makes the next `/whats-up` enough, and it is why nothing here is ever handed over as prose.
 
-**(a) Deploy to prod** — only if `ship_mode = prod`. Invoke the `<PREFIX>-deploy` skill **here at the top level** with `target=prod`. Pass `preauth: user shipped at the mission gate` **only when all of these hold** — verified now, not assumed: every completed task is `signed-off` (no deferrals, no failed tasks), Ship was user-answered (not a timeout default), and the commits being shipped are exactly the reviewed set (nothing after the sign-offs except capture/log commits). Otherwise the skill gates normally — the user is often back by close-out; on no answer it returns `gate: unanswered — parked` → park per the `/code` Gate policy. If no `prod` env is declared or the user declines, report that and finish at UAT.
+**(a) Deploy to prod** — only if `ship_mode = prod`. Invoke the `<PREFIX>-deploy` skill **here at the top level** with args `target=prod`. Pass `preauth: user shipped at the mission gate` **only when all of these hold** — verified now, not assumed: every completed task is `signed-off` (no deferrals, no failed tasks), Ship was user-answered (not a timeout default), and the commits being shipped are exactly the reviewed set (nothing after the sign-offs except capture/log commits). Otherwise the skill gates normally — the user is often back by close-out; on no answer it returns `gate: unanswered — parked` → park per the `/code` Gate policy. If no `prod` env is declared or the user declines, report that and finish at UAT.
 
 **(a2) Prod walk** — run when Step 2 carried any `prod-walk:` items **and** (a) actually deployed. This is the only moment in the mission when a prod-only journey can be proven, so it is not optional: for each carried verification, walk its task's acceptance statement against the deployed prod system at the top level and update the entry's `last:` accordingly — a `pass` discharges it; a failure records `status: fail` with the reason and becomes a named follow-up in the report, never a silent close and never a mid-close-out fix round. Commit the outcomes with `test: record verification outcomes`. Then drain what the deploy made provable, exactly as `/code` Step 5 does: `blast` the shipped paths, walk every still-open prod-only deferral it returns, and report the count still carried. If (a) did not deploy — `ship_mode: hold`, no prod env, a declined or parked gate — the items stay deferred: say so explicitly, naming what would discharge them, rather than letting them read as accepted. Deploying to prod and then not walking the checks only prod can answer wastes the single opportunity the mission had to prove them.
 
@@ -1416,9 +1416,9 @@ Run when the user says done, or asks to push or deploy. (The `close-out-gate` ho
 ```markdown
 ---
 name: audit
-description: Assess the project's dependency advisories — give each one a VEX status, block only on the exploitable ones, and never re-decide a settled one. `--deep` runs the built-in /security-review over the commits no deep pass has covered.
+description: Assess the project's dependency advisories — give each one a VEX status, block only on the exploitable ones, and never re-decide a settled one.
 pilot-lane:
-  routing: A task that assesses dependency advisories, or runs the deep security pass over commits no pass has covered — evidence gathering against the audit tool and the repo, never code work. Fixing an advisory is a `pipeline` task, not this lane. A task invokes it as `/audit --max-packages 5`, so one mission task never spends a window on a large backlog.
+  routing: A task that assesses dependency advisories — evidence gathering against the audit tool and the repo, never code work. Fixing an advisory is a `pipeline` task, not this lane. A task invokes it as `/audit --max-packages 5`, so one mission task never spends a window on a large backlog.
   close-out: 'vex.yaml statements + a roadmap item per `affected` one'
   spend: none
   apply: >-
@@ -1436,13 +1436,13 @@ whats-up-store:
 
 # Audit
 
-**Usage:** `/audit` — assess every advisory this project has not assessed, in one run. `/audit --max-packages N` — stop after N packages. `/audit --deep` — run the built-in `/security-review` over the commits no deep pass has covered.
+**Usage:** `/audit` — assess every advisory this project has not assessed, in one run. `/audit --max-packages N` — stop after N packages.
 
 An advisory count is not risk. This lane turns the audit tool's output into one VEX status per advisory and files only what is exploitable here. The triage rule, the five justifications and the compensating-control rule live in `<PREFIX>-review/references/security-review.md § Triage` — **read it and do not restate it**; this file is the driver, not a second copy of the rule.
 
 ## Step 0 — What is already decided
 
-**Flag parse (first):** `--deep` in `$ARGUMENTS` runs Step 3 instead of Steps 1–2. `--max-packages N` bounds Step 1 to the top N packages. Anything else in `$ARGUMENTS` filters the candidate set to advisory ids or package names matching it case-insensitively; nothing matching → say so and assess the unfiltered set, because a typo'd filter must never read as "nothing to assess".
+**Flag parse (first):** `--max-packages N` bounds Step 1 to the top N packages. Anything else in `$ARGUMENTS` filters the candidate set to advisory ids or package names matching it case-insensitively; nothing matching → say so and assess the unfiltered set, because a typo'd filter must never read as "nothing to assess".
 
 1. Read `<PREFIX>-review/references/vex.yaml`. Absent → this is the first run; create it.
 2. Run the project's audit command — `vex.yaml`'s `audit_command:` when it names one, otherwise whichever of `npm audit` / `pnpm audit` / `pip-audit` / `cargo audit` / `osv-scanner` this project's ecosystem ships, and write that choice back as `audit_command:` so no later run re-picks it. Where the ecosystem ships more than one, **prefer the one that emits severity**, since Step 1's floor reads it — `pip-audit`, for one, emits ids and fix versions and no severity at all. **The command reads what ships, not only what the manifests ask for.** A component that ships as a built image installs packages its manifest never names — the base image's own, and resolved versions of the rest — so for it the command scans the image (`osv-scanner scan image`, `trivy image`, `grype` — recognition aids) or a package list its build writes; a manifest scan stays right for a component that ships none. A recorded `audit_command:` that misses an image is filed as a roadmap item and run as it stands — rewriting it mid-run would change the set the batches were counted against. No audit tool, or one that errors rather than reports — a non-zero exit with no findings, a network failure — → record that in `vex.yaml` as the reason the tree is unassessed, file the fix as a roadmap item, and stop; do not report the tree clean, and do not stand in for the tool by hand — a substitute nobody recorded is re-improvised by every run, and once the fix lands the next run loses nothing, since every answer is kept.
@@ -1471,10 +1471,6 @@ For each, follow `security-review.md § Triage` and write the statement. `affect
 Each `affected` statement gets a `docs/roadmap.md` item in the format `<PREFIX>-dev` step 1.5 uses, carrying its path and action, and its `**Id:**` goes back into the statement's `addressed:`. Lower the item's priority one step when a verified `compensating_control` covers the path — the control reduces risk without removing the vulnerability, which is a priority input and never a status.
 
 Commit the batch's statements and items together, then reproject: `python3 .claude/graph/graph.py build`.
-
-## Step 3 — `--deep` only
-
-Set the base ref first — `git remote set-head origin <default-branch>` — or the built-in command dies with `fatal: ambiguous argument 'origin/HEAD...'`. Then use the `security-review` skill. Its scope is the branch's pending changes, so it is owed before a branch's first push and before a prod deploy that ships a new external input surface; it is not owed on a calendar. Record the reviewed sha in `vex.yaml` as a `deep_reviewed:` top-level key so the next run can tell a covered branch from an uncovered one.
 
 ## Done
 

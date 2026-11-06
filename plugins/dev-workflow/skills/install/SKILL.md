@@ -23,6 +23,7 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 - `.claude/hooks/package-edit-guard.sh` — PreToolUse Edit: blocks direct dependency additions to `package.json` without `<PREFIX>-skill`
 - `.claude/hooks/pre-handoff-check.sh` — PreToolUse Skill + Task/Agent: blocks `<PREFIX>-qa` invocation (skill call or subagent spawn) if uncommitted changes exist, or lint or typecheck fails for a component the commits changed
 - `.claude/hooks/close-out-gate.sh` — PreToolUse Bash: blocks `git push` while commits after the last delivery-log entry touch governed/deploy paths (iterate-lane close-out enforcement; `CLOSEOUT_OVERRIDE=1` escape hatch)
+- `.claude/hooks/security-gate.sh` — PreToolUse Bash + Skill: blocks `git push`, and a `<PREFIX>-deploy` call with `target=prod`, while unpushed governed/deploy changes lack a Claude Code `/security-review` at or after them (`skill-mark.sh` records the reviewed HEAD in the git dir)
 - `.claude/hooks/ref-sync-check.sh` — PostToolUse Bash: warns after `git commit` on reference-worthy drift (structural changes or `REF_WATCH` matches; modify-only cosmetic commits stay silent) on deploy-mechanism drift without `deploy-config.yaml` updates, on dependency drift without `vex.yaml`, and on an em dash added to user-facing copy (`COPY_PATHS`); warnings reach the model as `additionalContext`
 - `.claude/hooks/skill-mark.sh` — PostToolUse Skill: records invoked skills to a session-scoped marker
 - `.claude/hooks/post-commit.sh` — PostToolUse Bash: reminds to run `<PREFIX>-log` after every commit

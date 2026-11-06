@@ -19,7 +19,7 @@ This is the **only** file that should contain path→skill mappings. Do not dupl
 
 **Step 2 — Create hook scripts**
 
-Create all 13 hooks from their templates in `tpl-skill-guard.md`. Substitute `<PREFIX>` throughout:
+Create all 14 hooks from their templates in `tpl-skill-guard.md`. Substitute `<PREFIX>` throughout:
 
 | Hook | Template section |
 |---|---|
@@ -29,6 +29,7 @@ Create all 13 hooks from their templates in `tpl-skill-guard.md`. Substitute `<P
 | `package-edit-guard.sh` | § package-edit-guard.sh |
 | `pre-handoff-check.sh` | § pre-handoff-check.sh |
 | `close-out-gate.sh` | § close-out-gate.sh |
+| `security-gate.sh` | § security-gate.sh |
 | `ref-sync-check.sh` | § ref-sync-check.sh |
 | `skill-mark.sh` | § skill-mark.sh |
 | `post-commit.sh` | § post-commit.sh |
@@ -47,6 +48,7 @@ chmod +x .claude/hooks/dependency-guard.sh
 chmod +x .claude/hooks/package-edit-guard.sh
 chmod +x .claude/hooks/pre-handoff-check.sh
 chmod +x .claude/hooks/close-out-gate.sh
+chmod +x .claude/hooks/security-gate.sh
 chmod +x .claude/hooks/ref-sync-check.sh
 chmod +x .claude/hooks/skill-mark.sh
 chmod +x .claude/hooks/post-commit.sh

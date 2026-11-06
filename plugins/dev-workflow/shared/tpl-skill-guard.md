@@ -385,6 +385,60 @@ The same bare-shell constraint applies to any tool a hook shells out to (typeche
 
 ---
 
+## § security-gate.sh
+
+Blocks a `git push`, and a `<PREFIX>-deploy` call with `target=prod`, while the code about to ship carries source changes no security review has covered — so Claude Code's `/security-review` runs on everything that leaves the machine, not only when someone remembers. "Covered" means `skill-mark.sh` recorded a `security-review` at a commit that is newer than the remote's and an ancestor of HEAD, and nothing touching governed or deploy paths has landed since; a docs-only commit after the review passes. The review is the full protocol in `<PREFIX>-review/references/security-review.md § Before ship`; a review that holds the ship deletes the mark, so the held code stays blocked in any later session. The hook proves the review started on this code — it cannot read the verdict, which is why a hold clears the mark. A project with no remote has nothing to diff against and passes (§ Before ship reports it unreviewed); a remote without `origin/HEAD` blocks with the one-line fix, because the review cannot load either. `CLOSEOUT_OVERRIDE=1 git push …` bypasses the push half only — a prod deploy has no override, since a rollback's unshipped diff is one revert commit and the review is one pass.
+
+```bash
+#!/bin/bash
+# PreToolUse Bash + Skill hook — blocks a push or prod deploy of source changes no security review covered.
+INPUT=$(cat) || exit 0
+CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
+SKILL=$(echo "$INPUT" | jq -r '.tool_input.skill // empty' 2>/dev/null)
+ARGS=$(echo "$INPUT" | jq -r '.tool_input.args // empty' 2>/dev/null)
+if [ -n "$CMD" ]; then
+  echo "$CMD" | grep -qE "git push" || exit 0
+  echo "$CMD" | grep -qE "CLOSEOUT_OVERRIDE=1" && exit 0
+  ACT="push"
+elif [ "$SKILL" = "<PREFIX>-deploy" ]; then
+  echo "$ARGS" | grep -qiE "target[[:punct:][:space:]]*prod" || exit 0
+  ACT="prod deploy"
+else
+  exit 0
+fi
+
+source "$(dirname "$0")/governed-paths.conf"
+[ -z "$GOVERNED_ROOTS" ] && [ -z "$DEPLOY_PATHS" ] && exit 0
+G() { git -C "${CLAUDE_PROJECT_DIR:-.}" "$@"; }
+[ -z "$(G remote 2>/dev/null)" ] && exit 0   # no remote: § Before ship reports the ship unreviewed
+if ! G rev-parse -q --verify origin/HEAD >/dev/null 2>&1; then
+  echo "Security gate: origin/HEAD is not set, so Claude Code's /security-review cannot load — run \`git remote set-head origin -a\`, then the review (<PREFIX>-review § Before ship)." >&2
+  exit 2
+fi
+
+# Reviewed up to the mark when it is newer than the remote and still in HEAD's history.
+BASE=origin/HEAD
+MARK=$(cat "$(G rev-parse --absolute-git-dir 2>/dev/null)/<PREFIX>-security-reviewed" 2>/dev/null)
+if [ -n "$MARK" ] && G merge-base --is-ancestor "$MARK" HEAD 2>/dev/null \
+   && G merge-base --is-ancestor origin/HEAD "$MARK" 2>/dev/null; then
+  BASE="$MARK"
+fi
+
+CHANGED=$(G diff --name-only "$BASE"...HEAD 2>/dev/null)
+UNREVIEWED=""
+[ -n "$GOVERNED_ROOTS" ] && UNREVIEWED=$(echo "$CHANGED" | grep -E "$GOVERNED_ROOTS")
+if [ -z "$UNREVIEWED" ] && [ -n "$DEPLOY_PATHS" ]; then
+  UNREVIEWED=$(echo "$CHANGED" | grep -E "$DEPLOY_PATHS")
+fi
+[ -z "$UNREVIEWED" ] && exit 0
+
+echo "Security gate: this $ACT ships source changes no security review has covered — use the \`security-review\` skill first, per <PREFIX>-review/references/security-review.md § Before ship. A review that held the ship cleared its mark, so held code stays blocked.${CMD:+ Emergency override for a push only: CLOSEOUT_OVERRIDE=1 git push …}" >&2
+echo "$UNREVIEWED" | head -10 | sed 's/^/  /' >&2
+exit 2
+```
+
+---
+
 ## § ref-sync-check.sh
 
 Warns after `git commit` when paths watched in `governed-paths.conf` changed without corresponding reference file updates, or when user-facing copy broke a mechanical voice rule. Four independent checks:
@@ -465,7 +519,7 @@ exit 0
 
 ## § skill-mark.sh
 
-Records each invoked skill to a session-scoped marker file. Used by `skill-guard.sh`, `dependency-guard.sh`, and `package-edit-guard.sh` to verify a skill was loaded, and by `<PREFIX>-log` to derive the delivery log's `**Skills:**` field. The marker key must match the guards' derivation exactly: session id alone.
+Records each invoked skill to a session-scoped marker file, and when the skill is Claude Code's `security-review`, writes the HEAD it reviewed to `<git dir>/<PREFIX>-security-reviewed` — the mark `security-gate.sh` checks before a push or a prod deploy. The git dir keeps it out of every commit, alive across sessions and separate per worktree. Used by `skill-guard.sh`, `dependency-guard.sh`, and `package-edit-guard.sh` to verify a skill was loaded, and by `<PREFIX>-log` to derive the delivery log's `**Skills:**` field. The marker key must match the guards' derivation exactly: session id alone.
 
 **Do not key this per agent.** Subagents inherit the parent's `transcript_path`, so `basename "$TRANSCRIPT"` returns the session id itself — a per-agent suffix is provably always equal to the session id (verified across 12 real markers on a machine that had run `/code`, `/fix` and `/pilot` pipelines: every filename's two halves were identical). Session scope is also what makes the `Skills:` derivation work at all, since `<PREFIX>-review` and `<PREFIX>-debug` only ever load inside subagents.
 
@@ -477,6 +531,11 @@ SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 SKILL=$(echo "$INPUT" | jq -r '.tool_input.skill // empty' 2>/dev/null)
 [ -z "$SKILL" ] && exit 0
 echo "$SKILL" >> "/tmp/<PREFIX>-skills-${SESSION_ID}"  # session-scoped — see skill-guard.sh
+if [ "$SKILL" = "security-review" ]; then
+  ROOT="${CLAUDE_PROJECT_DIR:-.}"
+  GD=$(git -C "$ROOT" rev-parse --absolute-git-dir 2>/dev/null) && \
+    git -C "$ROOT" rev-parse HEAD > "$GD/<PREFIX>-security-reviewed" 2>/dev/null
+fi
 exit 0
 ```
 
@@ -648,7 +707,7 @@ exit 0
 
 ## § settings.json
 
-Wire all 13 hook scripts — 15 entries, since `skill-guard.sh` sits under both `Edit` and `Write` and `pre-handoff-check.sh` under both `Skill` and `Task|Agent`. If the file already exists, merge the `hooks` key without removing unrelated settings. Timeout unit: **seconds**. The `Task|Agent` matcher is what makes `pre-handoff-check.sh` fire when qa is spawned as a subagent — without it the gate never runs in the pipeline. The `SubagentStop` matcher names the four pipeline agents so a research fork or an Explore child never gets blocked for lacking a handoff block. The secrets hooks are not in this file: they ship with the srun plugin, so they guard projects without dev-workflow too.
+Wire all 14 hook scripts — 17 entries, since `skill-guard.sh` sits under both `Edit` and `Write`, `pre-handoff-check.sh` under both `Skill` and `Task|Agent`, and `security-gate.sh` under both `Bash` and `Skill`. If the file already exists, merge the `hooks` key without removing unrelated settings. Timeout unit: **seconds**. The `Task|Agent` matcher is what makes `pre-handoff-check.sh` fire when qa is spawned as a subagent — without it the gate never runs in the pipeline. The `SubagentStop` matcher names the four pipeline agents so a research fork or an Explore child never gets blocked for lacking a handoff block. The secrets hooks are not in this file: they ship with the srun plugin, so they guard projects without dev-workflow too.
 
 ```json
 {
@@ -672,13 +731,15 @@ Wire all 13 hook scripts — 15 entries, since `skill-guard.sh` sits under both 
         "matcher": "Bash",
         "hooks": [
           { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/dependency-guard.sh", "timeout": 5 },
-          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/close-out-gate.sh", "timeout": 10 }
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/close-out-gate.sh", "timeout": 10 },
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/security-gate.sh", "timeout": 10 }
         ]
       },
       {
         "matcher": "Skill",
         "hooks": [
-          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-handoff-check.sh", "timeout": 60 }
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-handoff-check.sh", "timeout": 60 },
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/security-gate.sh", "timeout": 10 }
         ]
       },
       {

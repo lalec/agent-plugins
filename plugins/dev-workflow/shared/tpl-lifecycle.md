@@ -128,18 +128,15 @@ Static reference content — load the right reference for the situation. No `## 
 ```
 SITUATION?
 │
-├─ Reviewing a diff for bugs      → references/requesting-code-review.md
+├─ Reviewing a diff — every       → references/requesting-code-review.md
+│  review reads both files           + references/security-review.md
 ├─ Issuing review findings (you   → references/issuing-findings.md
 │  are the reviewer, e.g. <PREFIX>-qa)
-├─ Reviewing for defect classes   → references/security-review.md
-│  (deps, secrets, injection,
-│  authz/IDOR, headers, dead code)
 ├─ Triaging dependency            → references/security-review.md § Triage
 │  advisories (which of these
 │  actually matter?)
-├─ About to push a branch for     → references/security-review.md § Escalate
-│  the first time, or ship a new
-│  input surface to prod
+├─ About to deploy to prod or     → references/security-review.md § Before ship
+│  push source changes
 ├─ Reviewing a UI change (does it → <PREFIX>-design/references/ux-patterns.md
 │  match how this app already      + <PREFIX>-design/references/voice.md
 │  does this, and does its copy
@@ -151,7 +148,7 @@ SITUATION?
 
 - `references/requesting-code-review.md` — the bug hunt: Claude Code's built-in `code-review` skill on the range under review, and how to wait for and weigh its findings
 - `references/issuing-findings.md` — evidence requirements for review findings (no blocking finding without file:line)
-- `references/security-review.md` — fast per-task security pass: deps/supply-chain, secrets, injection sinks, access-control (IDOR), insecure defaults + headers, dead surface; recon→verify triage; VEX status per advisory (§ Triage); the two moments the deep `/security-review` is owed (§ Escalate)
+- `references/security-review.md` — the per-task security pass for what Claude Code's `/security-review` skips: dependencies and look-alike packages, committed secret files, values a model chooses, insecure defaults + headers, dead surface; recon→verify triage; VEX status per advisory (§ Triage); Claude Code's `/security-review` on everything about to ship, and what holds a ship (§ Before ship)
 - `references/vex.yaml` — the VEX status held for every advisory this project has assessed, so a settled one is never re-decided at the same package version. Project state, not shipped content: written by this pass and by `/audit`
 - `<PREFIX>-design/references/ux-patterns.md` — how this app already does a thing: a UI change that stands up a second pattern beside an existing one, a waiting, choosing or optional-depth state that misses its baseline without a recorded divergence, or a visual value absent from `design-tokens.md`, is a finding (single source of truth — owned by `<PREFIX>-design`)
 - `<PREFIX>-design/references/voice.md` — how this app writes: a user-readable string that breaks a rule or shows a word listed in § Vocabulary is a finding (single source of truth — owned by `<PREFIX>-design`)
@@ -190,7 +187,7 @@ The bug hunt is Claude Code's built-in `code-review` skill: correctness bugs and
 
 When **you** are the reviewer producing findings (running `<PREFIX>-qa`, weighing what the built-in code review returned, doing a manifest check, lint sweep, schema audit), every blocking finding requires evidence read **in this session**.
 
-For the **defect classes** to inspect during a security pass (dependencies, secrets, injection sinks, access control, insecure defaults, dead surface), see `security-review.md` — the evidence bar below applies to each.
+For the **defect classes** to inspect during a security pass (dependencies, committed secret files, values a model chooses, insecure defaults, dead surface), see `security-review.md` — the evidence bar below applies to each.
 
 ## Core Principle
 
@@ -257,7 +254,7 @@ If you cannot fill in **Evidence** with a fresh citation from this session, the 
 ````markdown
 # Security Review
 
-The fast, deterministic, per-task security pass — the defect classes coding agents ship (and rate as safe) plus the cheap whole-tree checks a diff-scoped reviewer misses. **Not** a replacement for the built-in `/security-review` (deep, diff-aware, multi-file SAST): run that periodically and escalate to it for complex auth/crypto/multi-file logic. This pass is grep- and audit-command-cheap, so run it every task — agent-written code degrades in security across iterations and models over-trust their own output.
+The per-task security pass — the classes Claude Code's own `/security-review` skips by design (third-party libraries, hardening, unused code, content a model handles), plus the cheap whole-tree checks a diff-scoped reviewer misses. That review covers injection, access control, secrets in source and data exposure, and runs on everything about to ship (§ Before ship), so this pass does not repeat it. This pass is grep- and audit-command-cheap, so run it on every review — agent-written code degrades in security across iterations and models over-trust their own output.
 
 ## Principle — recon → verify, evidence over artifact
 
@@ -314,32 +311,28 @@ The same three questions decide a **misconfiguration**, which carries no advisor
 - Every newly-added dependency: confirm the package **actually exists** on its registry and the name is not a typosquat or model hallucination (slopsquatting).
 - Flag unused / redundant dependencies — each is attack surface.
 
-### B. Secrets & sensitive data
-- No hardcoded secrets, API keys, tokens, or connection strings in source; no committed `.env`.
-- Secrets / PII do not leak into logs, error responses, or client-visible output.
+### B. Committed secret files
+- No committed `.env`, key or credentials file — Claude Code's `/security-review` leaves secrets stored on disk to other checks.
 
-### C. Input → sink (injection & output-encoding)
-- Untrusted input reaching a SQL / OS-command / HTML-DOM / template / deserialization (`pickle`, `yaml.load`) / `eval` sink is parameterized or sanitized at the sink.
-- Output is encoded for its context (HTML, attribute, JSON-LD, URL). Verify the sink is reachable before flagging.
+### C. Values a model chooses (projects that call a model)
+- A URL, id, path, command or tool argument the model picks is checked against an allowlist, or against what a tool actually returned this turn, before it is shown, stored or run. The model read untrusted text to choose it, so it is untrusted input — and Claude Code's `/security-review` treats content in a prompt as out of scope.
+- Model output that is stored and later placed in a prompt gets the same escaping or folding as user text, so a stored value cannot pose as an instruction or as a trusted label.
 
-### D. Access control
-- Every new endpoint / mutation enforces **object-level authorization** — the caller may act on *this specific resource*, not merely that they are authenticated. Guards against IDOR and missing function-level authz (the authn↔authz confusion agents ship).
-
-### E. Insecure defaults & transport (web-facing only)
+### D. Insecure defaults & transport (web-facing only)
 - Hosting config sets the standard response headers: `Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`. The fix lands in the hosting config owned by `<PREFIX>-deploy`. (When a static host can't inject per-request nonces, an inline-script `unsafe-inline` allowance is a documented tradeoff — not a bug — where there is no reachable sink; skip deprecated `X-XSS-Protection`, CSP supersedes it.)
 - CORS is not `*` combined with credentials; cookies set `Secure` + `HttpOnly` + `SameSite`; TLS verification is not disabled (`verify=False`, `rejectUnauthorized: false`, `InsecureSkipVerify`); debug mode and verbose stack traces are off in production.
 
-### F. Dead / unused surface
+### E. Dead / unused surface
 - Genuinely-unused endpoints, exports, and dependencies are attack surface — flag for removal, evidenced by a usage grep returning zero callers.
 
-## Escalate
-For complex authentication, cryptography, or multi-file logic changes, hand off to the built-in `/security-review` (diff-aware deep reasoning across ~25 vulnerability classes) rather than reasoning it through here.
+## Before ship
+Claude Code's own `/security-review` runs before anything leaves the machine — the first prod deploy or push of a close-out. It reviews exactly what is not yet pushed (`origin/HEAD...HEAD`) and takes no range, so that is the one moment its scope is the change. `security-gate.sh` blocks a push or prod deploy it has not covered.
 
-Two moments owe that deep pass outright, because "periodically" means never:
-- before a branch's **first push** to a remote;
-- before a **prod deploy that ships a new external input surface** — a new endpoint, fetcher, parser, or upload path.
-
-Its scope is the branch's pending changes, so its unit is a branch diff and not a calendar — run it when the branch carries commits no deep pass has covered. It resolves the diff against `origin/HEAD` and fails with `fatal: ambiguous argument 'origin/HEAD...'` on a repo that has never fetched that ref; `git remote set-head origin <default-branch>` fixes it.
+1. **When.** The unpushed commits touch governed or deploy paths (`GOVERNED_ROOTS` / `DEPLOY_PATHS` in `governed-paths.conf`). Skip when they touch neither, or when it already passed this session and no commit since touches them. Reverts are not exempt.
+2. **Setup.** No remote → skip, and the close-out report says the changes shipped unreviewed. A remote without `origin/HEAD` → run `git remote set-head origin -a` first; the review cannot load without it.
+3. **Run.** Use the `security-review` skill, at the top level. It asks nothing. On the default branch its scope is exactly what this ship carries; on a long-lived feature branch it is the whole branch since the default branch.
+4. **Weigh.** Read each finding's cited lines before acting on it (`issuing-findings.md`).
+5. **Hold or ship.** A verified HIGH or MEDIUM finding holds the ship — no prod deploy, no push. File each as a roadmap item in `<PREFIX>-dev` step 1.5's format, then delete the review mark, `rm -f "$(git rev-parse --absolute-git-dir)/<PREFIX>-security-reviewed"`, so a later push re-runs the review instead of passing on this one. A LOW finding is filed and the ship goes ahead.
 ````
 
 (Verification gates content lives in `<PREFIX>-debug/references/verification.md` — `<PREFIX>-review` references it instead of carrying its own copy.)
@@ -1363,7 +1356,7 @@ Read `references/deploy-config.yaml` before any deploy action.
 
 **Caller contract.** Caller passes `target`:
 - `target: non-prod` → deploy only to the **first** non-prod env **with a `deploy:` command** (declaration order). Serve-envs (`run:`) are never deployed — they are started at the command top level, not here. If a component has no non-prod ship-env, return silently for that component. **Early exit:** if no component in the yaml declares a non-prod ship-env at all, report `non-prod: no-op (no non-prod ship-env declared)` immediately — don't walk components one by one.
-- `target: prod` → deploy only to the env named `prod`. If `prod` is not declared (pre-launch component), return silently.
+- `target: prod` → deploy only to the env named `prod`. If `prod` is not declared (pre-launch component), return silently. Otherwise use the `<PREFIX>-review` skill § Before ship first — before the gate below asks anything; a hold returns `gate: held — security review` and deploys nothing.
 
 Never deploy across the boundary regardless of caller request. `<PREFIX>-dev` always passes `non-prod` (mid-pipeline, so `<PREFIX>-qa` tests a running stack). `target: prod` is passed only by the top-level `/code --prod` / `/fix --prod` command step **after** QA sign-off — never by a subagent, because the prod gate below needs `AskUserQuestion` and that only reaches the user at the top level. If `target: prod` is ever requested from a context where `AskUserQuestion` can't reach the user (i.e. invoked inside a subagent), refuse and return without deploying — prod requires the top-level command.
 
@@ -1408,8 +1401,9 @@ A ship-env's build must produce what was verified, not whatever the package inde
 
 ## Push policy
 
-`git push` is a deploy action whenever a CI ship-env fires on push. Callers (the `/code`/`/fix` close-out step, `/tweak` exit, `/revert`) resolve pushability here — raw pushes must not bypass this skill's gates:
+`git push` is a deploy action whenever a CI ship-env fires on push. Callers (the `/code`/`/fix`/`/pilot` close-out step, `/tweak` exit, `/tidy`, `/wrap`, `/revert`) resolve pushability here — raw pushes must not bypass this skill's gates:
 
+0. Use the `<PREFIX>-review` skill § Before ship first. A hold means no push — return `push: held — security review`.
 1. Read `references/deploy-config.yaml`. If any component declares a ship-env with `trigger: ci` whose deploy fires on a push to the current branch, pushing **is** shipping to that env.
 2. If that env is `prod` (or gated `user_confirm`): push only after the prod gate passed this session, or after an explicit `AskUserQuestion` confirm with the same context block. Unanswered → `gate: unanswered — parked`; never push on silence.
 3. Otherwise pushing is safe — push directly.

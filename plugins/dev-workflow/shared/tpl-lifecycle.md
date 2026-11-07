@@ -119,7 +119,7 @@ license: MIT
 
 # <PREFIX>-review
 
-Static reference content — load the right reference for the situation. No `## Reference Sync` (this skill ships its references; the project does not author them). The one exception is `references/vex.yaml`, which is project state rather than shipped content — keep it current per the checklist below.
+Static reference content — load the right reference for the situation. No `## Reference Sync` (this skill ships its references; the project does not author them). The exceptions are `references/vex.yaml` and `references/scanners.yaml`, which are project state rather than shipped content — keep them current per the checklist below.
 
 **Core principle:** Evidence before claims — a finding blocks only once its cited lines are read.
 
@@ -150,11 +150,14 @@ SITUATION?
 - `references/issuing-findings.md` — evidence requirements for review findings (no blocking finding without file:line)
 - `references/security-review.md` — the per-task security pass for what Claude Code's `/security-review` skips: dependencies and look-alike packages, committed secret files, values a model chooses, insecure defaults + headers, dead surface; recon→verify triage; VEX status per advisory (§ Triage); Claude Code's `/security-review` on everything about to ship, and what holds a ship (§ Before ship)
 - `references/vex.yaml` — the VEX status held for every advisory this project has assessed, so a settled one is never re-decided at the same package version. Project state, not shipped content: written by this pass and by `/audit`
+- `references/scanners.yaml` — the whole-repository security scans this project re-runs on a cadence, and when each last ran. Project state: `/audit --scan` runs the due ones and files what they find
 - `<PREFIX>-design/references/ux-patterns.md` — how this app already does a thing: a UI change that stands up a second pattern beside an existing one, a waiting, choosing or optional-depth state that misses its baseline without a recorded divergence, or a visual value absent from `design-tokens.md`, is a finding (single source of truth — owned by `<PREFIX>-design`)
 - `<PREFIX>-design/references/voice.md` — how this app writes: a user-readable string that breaks a rule or shows a word listed in § Vocabulary is a finding (single source of truth — owned by `<PREFIX>-design`)
 - `<PREFIX>-debug/references/verification.md` — completion verification gates (single source of truth — owned by `<PREFIX>-debug`)
 
-## Update `references/vex.yaml` when:
+## Update `references/vex.yaml` and `references/scanners.yaml` when:
+
+- [ ] A scanner was added, dropped, or its command or cadence changed — edit its `scanners.yaml` entry; `last_run`, `filed` and `job` are written only by `/audit --scan`
 
 - [ ] The audit tool reports an advisory id this file does not carry — add it, `under_investigation` at minimum
 - [ ] A carried id's package version moved — the old status was decided against the old version; re-assess
@@ -380,6 +383,32 @@ statements:
 `path`, `action`, `reason`-shaped strings and every `compensating_control` field are **single-quoted** (double any internal `'`) for the same reason `custom-tests.yaml` quotes `assert`: they routinely carry colons, arrows and braces, which break unquoted *and* double-quoted YAML.
 
 A statement is **never deleted** — an advisory that stops appearing in the audit output is `fixed` with the commit that removed it, because the record of what was decided and why is the whole point of the file. Deleting one returns the pass to re-deciding it from scratch the next time the id reappears.
+
+`references/scanners.yaml` — the whole-repository security scans this project runs on a cadence. Created at install, seeded from the known-scanners table below; `/audit --scan` runs the due ones and files their findings, and `graph.py scans-due` is the one place that decides what is due:
+
+````yaml
+# scanners.yaml — whole-repository security scans, each re-run every_days after its last one.
+# Add a scanner by adding an entry; nothing else changes. /audit --scan writes last_run, filed and job.
+
+scanners:
+  - name: <scanner name>
+    every_days: 90
+    skill: <skill name>                  # either skill + args …
+    args: '<the request passed to it>'
+    command: '<shell command>'           # … or a command; one that prints a job id runs long
+    results: '<path glob of its findings, or a command that prints them for the recorded job>'
+    cost: '<one line shown before it starts>'   # blank when the scanner asks its own question
+    finding_key: <field that stays the same across runs>   # blank → file + CWE
+    job: <id of a long run still in flight>
+    filed: <the results path last filed>
+    last_run: YYYY-MM-DD <sha7>          # when the filed results were produced; the cadence clock
+````
+
+**Known scanners** — install and upgrade seed one entry per row whose plugin `claude plugin list --json` shows installed, with `job:`, `filed:` and `last_run:` empty — a placeholder left in `job:` reads as a run in flight and the scanner is never due again. A scanner not listed here is added to `scanners.yaml` by hand; it needs no row.
+
+| Scanner | Installed when the list carries | Entry |
+|---|---|---|
+| claude-security | `claude-security@` | `skill: claude-security:claude-security` · `args: 'scan the whole repository at medium effort'` · `results: 'CLAUDE-SECURITY-*/CLAUDE-SECURITY-RESULTS.jsonl'` · `cost:` blank (it asks its own) · `finding_key: claudeSecurityPluginFindingId` |
 
 ---
 

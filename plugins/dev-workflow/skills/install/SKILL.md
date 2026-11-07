@@ -27,6 +27,7 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 - `.claude/hooks/ref-sync-check.sh` — PostToolUse Bash: warns after `git commit` on reference-worthy drift (structural changes or `REF_WATCH` matches; modify-only cosmetic commits stay silent) on deploy-mechanism drift without `deploy-config.yaml` updates, on dependency drift without `vex.yaml`, and on an em dash added to user-facing copy (`COPY_PATHS`); warnings reach the model as `additionalContext`
 - `.claude/hooks/skill-mark.sh` — PostToolUse Skill: records invoked skills to a session-scoped marker
 - `.claude/hooks/post-commit.sh` — PostToolUse Bash: reminds to run `<PREFIX>-log` after every commit
+- `.claude/hooks/scan-due.sh` — SessionStart: names every whole-repository security scan past its cadence (`graph.py scans-due`), so `/audit --scan` is due in front of you, not only in `/whats-up`
 - `.claude/graph/graph.py` — delivery-graph projector + query engine (copied verbatim from `../../shared/graph.py`); `edges.jsonl` is generated and gitignored
 - `.claude/skills/<PREFIX>-test/scripts/run-checks.py` — batched execution of resolved Integration commands and `last:` recording for every type (copied verbatim from `../../shared/run-checks.py`); returns observations, never verdicts
 - `.srun.json` — written by the `srun:setup` skill (the srun plugin, installed with this one as a dependency): the project's `namespace` (from the repo folder name), so its secrets get their own store ids, and the list of secret NAMES, with the store that holds them when the project names one — never values. Agents use a secret by NAME and never see its value
@@ -191,7 +192,7 @@ Create these files (skip if already present, offer to overwrite if stale):
 .claude/agents/<PREFIX>-pm.md         ← from tpl-agents.md § tosk-pm
 .claude/agents/<PREFIX>-verify.md     ← from tpl-agents.md § tosk-verify
 .claude/skills/<PREFIX>-log/SKILL.md
-.claude/skills/<PREFIX>-review/SKILL.md       ← also create references/{requesting-code-review,issuing-findings,security-review}.md and references/vex.yaml (`statements: []`) (see tpl-lifecycle.md § tosk-review)
+.claude/skills/<PREFIX>-review/SKILL.md       ← also create references/{requesting-code-review,issuing-findings,security-review}.md and references/vex.yaml (`statements: []`) and references/scanners.yaml (`scanners:` seeded from the known-scanners table for each one `claude plugin list --json` shows installed; `scanners: []` when none) (see tpl-lifecycle.md § tosk-review)
 .claude/skills/<PREFIX>-debug/SKILL.md        ← also create 4 reference files + scripts (see tpl-lifecycle.md § debug)
 .claude/skills/<PREFIX>-deploy/SKILL.md       ← from tpl-lifecycle.md § tosk-deploy/SKILL.md
 .claude/skills/<PREFIX>-deploy/references/deploy-config.yaml  ← populated, not a stub — see "Populate deploy-config.yaml" below

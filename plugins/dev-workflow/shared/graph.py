@@ -27,6 +27,8 @@ read from the sibling checkout beside this one — read-only, never written, nev
                                      condition and age in days
     graph.py open-advisories [<path>...]      advisories assessed exploitable and not yet
                                               fixed, plus the count still unassessed
+    graph.py scans-due               scanners.yaml entries past their every_days, or never run;
+                                     read directly, nothing projected
     graph.py item <roadmap-id>       one item's full text; a stub's body is read from git;
                                      `<repo>:<id>` reads it from the sibling checkout
     graph.py dependents <roadmap-id> open items in sibling checkouts whose Parent or
@@ -95,6 +97,7 @@ class Sources:
         self.conf = root / ".claude" / "hooks" / "governed-paths.conf"
         self.tests = one(root, ".claude/skills/*-test/references/custom-tests.yaml")
         self.vex = one(root, ".claude/skills/*-review/references/vex.yaml")
+        self.scanners = one(root, ".claude/skills/*-review/references/scanners.yaml")
         self.deploy = one(root, ".claude/skills/*-deploy/references/deploy-config.yaml")
         self.out = root / ".claude" / "graph" / "edges.jsonl"
 
@@ -655,6 +658,25 @@ def parse_block_yaml(
         else:
             target[k] = _scalar(v)
     return tests
+
+
+def scans_due(text: str, today: datetime) -> list[dict]:
+    """Each scanner whose last run is older than its `every_days`, or that never ran. A long
+    run still in flight (`job:` set) is not due — it is waiting on its own results."""
+    due = []
+    for s in parse_block_yaml(text, "name"):
+        if s.get("job"):
+            continue
+        every = int(s.get("every_days") or 90)
+        last = (s.get("last_run") or "").split(" ")[0]
+        try:
+            age = (today - datetime.strptime(last, "%Y-%m-%d").replace(tzinfo=timezone.utc)).days
+        except ValueError:
+            age = None
+        if age is None or age >= every:
+            due.append({"name": s["name"], "last_run": last or None,
+                        "overdue_days": None if age is None else age - every})
+    return due
 
 
 def parse_custom_tests(text: str) -> list[dict]:
@@ -1621,6 +1643,23 @@ def main(argv: list[str]) -> int:
             {"dependents": rows},
             as_json,
             [f"{r['repo']}:{r['id']} [{r['status']}] via {r['field']}" for r in rows],
+        )
+        return 0
+
+    if cmd == "scans-due":
+        rows = scans_due(read(src.scanners), datetime.now(timezone.utc))
+        emit(
+            {"due": rows},
+            as_json,
+            [
+                f"{r['name']} · "
+                + (
+                    f"last run {r['last_run']}, {r['overdue_days']}d overdue"
+                    if r["last_run"]
+                    else "never run"
+                )
+                for r in rows
+            ],
         )
         return 0
 

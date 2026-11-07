@@ -19,7 +19,7 @@ This is the **only** file that should contain path→skill mappings. Do not dupl
 
 **Step 2 — Create hook scripts**
 
-Create all 14 hooks from their templates in `tpl-skill-guard.md`. Substitute `<PREFIX>` throughout:
+Create all 15 hooks from their templates in `tpl-skill-guard.md`. Substitute `<PREFIX>` throughout:
 
 | Hook | Template section |
 |---|---|
@@ -36,11 +36,12 @@ Create all 14 hooks from their templates in `tpl-skill-guard.md`. Substitute `<P
 | `agent-mark.sh` | § agent-mark.sh |
 | `pilot-cleanup.sh` | § pilot-cleanup.sh |
 | `limit-mark.sh` | § limit-mark.sh |
+| `scan-due.sh` | § scan-due.sh |
 | `precompact-handover.sh` | § precompact-handover.sh |
 
 For `pre-handoff-check.sh`, also substitute `<LINT_CMD>` and `<TYPECHECK_CMD>` with the commands discovered in Phase 1, and `<LINT_SCOPE>`/`<TYPECHECK_SCOPE>` with the directory each one checks — one scoped block per component check, and only checks that pass with no server running (the template's **Self-contained rule**) — following the **Bare-shell rule** in `tpl-skill-guard.md § pre-handoff-check.sh`: the hook runs without the project's activated environment, so a bare interpreter/tool command (`ruff check .`, `python -m ruff`, `eslint .`, `tsc`) that works in a terminal will silently fail the gate. Substitute an env-launcher (`uv run …`, `poetry run …`, `pnpm exec …`, `npx --no-install …`) or an absolute project-env path (`.venv/bin/…`, `node_modules/.bin/…`); when the interpreter path itself may or may not exist, resolve it defensively at the top of the hook (the venv-fallback snippet in the template Note). If no lint/typecheck command was discovered, leave the `<fill in>` stub and tell the user. A command counts as *discovered* only if it **verifiably resolves** — the `lint` script exists under `scripts` in `package.json`, or the linter is an installed dependency; a conventional-but-unwired `npm run lint` errors on every run, so stub it rather than substitute it.
 
-Make all 13 executable:
+Make all 15 executable:
 ```bash
 chmod +x .claude/hooks/skill-guard.sh
 chmod +x .claude/hooks/path-coverage-check.sh
@@ -55,6 +56,7 @@ chmod +x .claude/hooks/post-commit.sh
 chmod +x .claude/hooks/agent-mark.sh
 chmod +x .claude/hooks/pilot-cleanup.sh
 chmod +x .claude/hooks/limit-mark.sh
+chmod +x .claude/hooks/scan-due.sh
 chmod +x .claude/hooks/precompact-handover.sh
 ```
 

@@ -1416,9 +1416,9 @@ Run when the user says done, or asks to push or deploy. (The `close-out-gate` ho
 ```markdown
 ---
 name: audit
-description: Assess the project's dependency advisories — give each one a VEX status, block only on the exploitable ones, and never re-decide a settled one.
+description: Assess the project's dependency advisories — give each one a VEX status, block only on the exploitable ones, and never re-decide a settled one. With --scan, run the whole-repository security scans that are due and file what they find.
 pilot-lane:
-  routing: A task that assesses dependency advisories — evidence gathering against the audit tool and the repo, never code work. Fixing an advisory is a `pipeline` task, not this lane. A task invokes it as `/audit --max-packages 5`, so one mission task never spends a window on a large backlog.
+  routing: A task that assesses dependency advisories — evidence gathering against the audit tool and the repo, never code work. Fixing an advisory is a `pipeline` task, not this lane. A task invokes it as `/audit --max-packages 5`, so one mission task never spends a window on a large backlog. `--scan` is never dispatched — a person must answer its cost question, so a due scan is a row only a person can act on.
   close-out: 'vex.yaml statements + a roadmap item per `affected` one'
   spend: none
   apply: >-
@@ -1429,20 +1429,20 @@ pilot-lane:
     (non-mutating): the audit command exits, `vex.yaml` parses, `docs/roadmap.md` is writable.
   reversal: statements and roadmap items land in one commit — `git revert <sha>` replays it.
 whats-up-store:
-  reads: python3 .claude/graph/graph.py open-advisories — the exploitable rows and the unassessed count — plus the newest commit touching a DEPENDENCY_MANIFESTS path from governed-paths.conf against vex.yaml's newest `ts`
-  healthy: zero unassessed, every `affected` row carries an `addressed:` id, and no manifest commit is newer than the newest recorded status — all three, since a file nobody has run the pass over reports zero exploitable rows exactly like a clean one
+  reads: python3 .claude/graph/graph.py open-advisories — the exploitable rows and the unassessed count — plus the newest commit touching a DEPENDENCY_MANIFESTS path from governed-paths.conf against vex.yaml's newest `ts`, plus python3 .claude/graph/graph.py scans-due
+  healthy: zero unassessed, every `affected` row carries an `addressed:` id, no manifest commit is newer than the newest recorded status, and scans-due prints none — all four, since a file nobody has run the pass over reports zero exploitable rows exactly like a clean one; a due scan's row says `Next: /audit --scan`
   when-bad: degraded
 ---
 
 # Audit
 
-**Usage:** `/audit` — assess every advisory this project has not assessed, in one run. `/audit --max-packages N` — stop after N packages.
+**Usage:** `/audit` — assess every advisory this project has not assessed, in one run. `/audit --max-packages N` — stop after N packages. `/audit --scan` — run the whole-repository security scans that are due (§ Scan) instead.
 
 An advisory count is not risk. This lane turns the audit tool's output into one VEX status per advisory and files only what is exploitable here. The triage rule, the five justifications and the compensating-control rule live in `<PREFIX>-review/references/security-review.md § Triage` — **read it and do not restate it**; this file is the driver, not a second copy of the rule.
 
 ## Step 0 — What is already decided
 
-**Flag parse (first):** `--max-packages N` bounds Step 1 to the top N packages. Anything else in `$ARGUMENTS` filters the candidate set to advisory ids or package names matching it case-insensitively; nothing matching → say so and assess the unfiltered set, because a typo'd filter must never read as "nothing to assess".
+**Flag parse (first):** `--scan` → go to § Scan; Steps 0–2 do not run. `--max-packages N` bounds Step 1 to the top N packages. Anything else in `$ARGUMENTS` filters the candidate set to advisory ids or package names matching it case-insensitively; nothing matching → say so and assess the unfiltered set, because a typo'd filter must never read as "nothing to assess".
 
 1. Read `<PREFIX>-review/references/vex.yaml`. Absent → this is the first run; create it.
 2. Run the project's audit command — `vex.yaml`'s `audit_command:` when it names one, otherwise whichever of `npm audit` / `pnpm audit` / `pip-audit` / `cargo audit` / `osv-scanner` this project's ecosystem ships, and write that choice back as `audit_command:` so no later run re-picks it. Where the ecosystem ships more than one, **prefer the one that emits severity**, since Step 1's floor reads it — `pip-audit`, for one, emits ids and fix versions and no severity at all. **The command reads what ships, not only what the manifests ask for.** A component that ships as a built image installs packages its manifest never names — the base image's own, and resolved versions of the rest — so for it the command scans the image (`osv-scanner scan image`, `trivy image`, `grype` — recognition aids) or a package list its build writes; a manifest scan stays right for a component that ships none. A recorded `audit_command:` that misses an image is filed as a roadmap item and run as it stands — rewriting it mid-run would change the set the batches were counted against. No audit tool, or one that errors rather than reports — a non-zero exit with no findings, a network failure — → record that in `vex.yaml` as the reason the tree is unassessed, file the fix as a roadmap item, and stop; do not report the tree clean, and do not stand in for the tool by hand — a substitute nobody recorded is re-improvised by every run, and once the fix lands the next run loses nothing, since every answer is kept.
@@ -1472,9 +1472,20 @@ Each `affected` statement gets a `docs/roadmap.md` item in the format `<PREFIX>-
 
 Commit the batch's statements and items together, then reproject: `python3 .claude/graph/graph.py build`.
 
+## Scan — only with `--scan`
+
+Whole-repository scanners find what a per-change review never sees. Which ones this project runs, how, and how often live in `<PREFIX>-review/references/scanners.yaml`; this step drives them and owns no scanner's details.
+
+1. **Attended only.** `echo "$CLAUDE_CODE_SESSION_ATTENDED"` in Bash prints anything but `1` → say "`/audit --scan` needs you present: a scan asks its cost before it starts", and stop.
+2. **File what is already on disk first.** For each entry, the newest results its `results:` names (a glob, or its command run for the recorded `job:`). Newer than `filed:`, or `filed:` blank → file them in step 5; nothing new runs for that entry. An entry with a `job:` and no results yet is a Status row: still running.
+3. **What is due:** `python3 .claude/graph/graph.py scans-due`. None, and nothing filed in step 2 → say so and stop.
+4. **Run the due ones step 2 did not file** — results just filed from disk are that scanner's run, so it starts no second one. One AskUserQuestion, multi-select, listing each such scanner with its `cost:` line — skipped when every one has a blank `cost:`, because those ask their own question. For each one run: a `skill:` entry → use that skill at the top level with its `args:` as the request, and wait for its results; a `command:` entry → run it, and when it prints a job id, write `job:`, commit, and leave it for a later `/audit --scan` to file — a long run is never waited on.
+5. **File.** Read each finding's cited lines before filing it (`<PREFIX>-review/references/issuing-findings.md`). Skip one that is already tracked: `grep` `docs/roadmap.md` — never read it whole — for its `finding_key:` value and for its file plus CWE, both every time, since the key moves when nearby lines change. CRITICAL or HIGH → one roadmap item each in `<PREFIX>-dev` step 1.5's format; MEDIUM or LOW → one item per scan run, a line each. Every item cites `<scanner> <key>`.
+6. **Record.** Per entry filed: `filed:` the results path, `last_run:` the date those results were produced and the HEAD sha, `job:` cleared. Commit `scanners.yaml` with the roadmap items, then `python3 .claude/graph/graph.py build`.
+
 ## Done
 
-Report per `.claude/skills/code/references/close-out.md` — the five blocks, the closing line, the same closed status words. `<N> assessed` is a Status row. Anything still unassessed — `--max-packages` or the allowance stopped the run — is an Open row with `Next: /audit`, **naming the packages it sits in** and what stopped the run, since a bare count tells the next run nothing about what it is ranking. Each `affected` one filed is an Emerged row naming its roadmap id, and the closing line carries its fix command; an `affected` one you could not trace to a sink stays Open, because nobody else will pick it up.
+Report per `.claude/skills/code/references/close-out.md` — the five blocks, the closing line, the same closed status words. `<N> assessed` is a Status row; on `--scan`, one Status row per scanner — ran, filed from disk, still running, or not due. Anything still unassessed — `--max-packages` or the allowance stopped the run — is an Open row with `Next: /audit`, **naming the packages it sits in** and what stopped the run, since a bare count tells the next run nothing about what it is ranking. Each `affected` one filed is an Emerged row naming its roadmap id, and the closing line carries its fix command; an `affected` one you could not trace to a sink stays Open, because nobody else will pick it up.
 
 This lane runs no `<PREFIX>-dev`, so scope it uncovers has no writer but this one — file it per `.claude/skills/code/references/close-out.md` block 4 and cite the id.
 ```

@@ -254,6 +254,8 @@ Create `references/voice.md` from the same section's stub. `§ Rules` ships as w
 
 **`envs.local.stack`** (composed local stack — see `tpl-domain-skill.md § deploy-config.yaml schema`): when a component's plain dev-run command starts it wired to prod (e.g. the frontend's API-base-URL env var points at the prod API) or unusable headless (no data, no auth), derive a `stack:` block: find the env var that selects the API base url (framework config, `.env.example`, code) and override it to the local backend's url; record a `seed:` command only if a real one exists (fixtures script, `scripts/seed*`); record the headless `auth:` strategy only if one exists (test-user credentials — named as secrets in `.srun.json`, never values — or a local auth bypass). Never invent seed commands or auth strategies — if local verification is genuinely impossible, omit `stack:` and typed verifications will honestly report blocked.
 
+**`envs.<non-prod ship-env>.auth`** (walk identity — same schema section): when a non-prod ship-env is reached by logging in or by messaging as a user, record the test identity `<PREFIX>-qa` walks it as, with the `.srun.json` secret NAMES holding its credentials — only when such a test identity and its secrets exist. Never the owner's account, never a value. None yet → leave it out; qa names the missing declaration once and the report asks for it.
+
 **Determine components** from `CATEGORY_MAP`:
 - `frontend` component if the Frontend category is present
 - `backend` component if the Backend category is present
@@ -294,6 +296,11 @@ prior reference the moment the title changes.
 A plan written by `/blueprint` is one umbrella item plus children that carry `**Parent:**` (the
 umbrella's id) and `**Depends on:**` (sibling ids, or `nothing`). Readers nest children under their
 umbrella; the umbrella closes when its last child does.
+
+An umbrella may carry `**Milestone:** <n>` — the order of the project's phases (1 = the one being
+worked now). Its children carry its number, and the lowest open milestone ranks ahead of every
+other item except a `critical` one, whatever priority the rest were filed at. A later phase not
+yet planned is an umbrella with no children and a `**Needs from you:**` line.
 
 A closed item is shrunk to its heading and ids plus `**Body:** <commit>` once it is committed; read
 its full text with `python3 .claude/graph/graph.py item <id>`.

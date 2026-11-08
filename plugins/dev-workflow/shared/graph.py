@@ -20,7 +20,8 @@ read from the sibling checkout beside this one — read-only, never written, nev
                                      pack a task's qa and pm prompts carry inline
     graph.py history <path>          what has been delivered, verified and reverted here
     graph.py roadmap-open [--for <path>...]   open items, path-affine ones marked ~match,
-                                              a plan's children nested under their umbrella,
+                                              a plan's children nested under their umbrella
+                                              and carrying its milestone number,
                                               each `waiting on` any open `<repo>:<id>` dependency
     graph.py open-deferrals [--with-fail] [<path>...]   deferred or blocked, not passing since
     graph.py open-gates              every parking no later decision answered, with its
@@ -457,6 +458,14 @@ def parse_roadmap(text: str) -> list[dict]:
         refs = id_refs(it["fields"].get("Parent", ""))
         it["parent"] = refs[0] if refs else ""
         it["depends_on"] = id_refs(it["fields"].get("Depends on", ""))
+        m = re.match(r"\d+", it["fields"].get("Milestone", "").strip())
+        it["milestone"] = int(m.group(0)) if m else None
+    # A milestone is written once, on the umbrella; its children rank in its slot, so they
+    # carry its number rather than each repeating it. An item's own value wins.
+    by_id = {it["id"]: it for it in items}
+    for it in items:
+        if it["milestone"] is None and it["parent"] in by_id:
+            it["milestone"] = by_id[it["parent"]]["milestone"]
     return items
 
 
@@ -510,9 +519,11 @@ def dependents(items: list[dict], root: Path, rid: str) -> list[dict]:
 # Every field the graph reads from a roadmap item, in the order a stub writes them. A closed
 # item keeps exactly these plus `**Body:**`; the rest of its text lives in git. Measured on
 # jobzeeker: 45% of the roadmap text agents pulled into context came from closed item bodies.
-STUB_FIELDS = ("Id", "Status", "Priority", "Parent", "Depends on", "Category")
+STUB_FIELDS = ("Id", "Status", "Priority", "Milestone", "Parent", "Depends on", "Category")
 # The invariant `compact` checks before it writes: the graph's view of every item is unchanged.
-VIEW_KEYS = ("id", "title", "section", "status", "open", "priority", "parent", "depends_on")
+VIEW_KEYS = (
+    "id", "title", "section", "status", "open", "priority", "milestone", "parent", "depends_on"
+)
 
 
 def roadmap_spans(text: str) -> list[tuple[int, int]]:
@@ -1444,6 +1455,7 @@ def roadmap_open(edges: list[dict], src: "Sources", changed: list[str]) -> dict:
                 "title": it["title"],
                 "status": it["status"],
                 "priority": it["priority"],
+                "milestone": it["milestone"],
                 "prior_tasks": prior,
                 "last_addressed": latest_addr.get(it["id"], ""),
                 "affine": bool(changed and prior),
@@ -1791,7 +1803,9 @@ def main(argv: list[str]) -> int:
             ]
             + [
                 "  " * i.get("depth", 0)
-                + f"{'~match ' if i['affine'] else ''}{i['id']} [{i['priority'] or '?'}] "
+                + f"{'~match ' if i['affine'] else ''}{i['id']} [{i['priority'] or '?'}"
+                + (f" · milestone {i['milestone']}" if i["milestone"] is not None else "")
+                + "] "
                 + (
                     f"{report['plans'][i['id']]['open']}/{report['plans'][i['id']]['total']} "
                     "children open · "

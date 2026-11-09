@@ -62,6 +62,9 @@ Parameter Store, Bitwarden, Vault, Doppler):
 A `cmd` runs from the folder holding `.srun.json`; its error output is
 discarded and one trailing newline is stripped. It is committed code, so it
 carries the same trust as a `package.json` script; srun only reads through it.
+srun looks for `.srun.json` from the working folder up to the repo root (or
+`$HOME`), never above, and refuses one that is not yours or that others can
+write, so a file planted in a shared folder such as `/tmp` never runs.
 
 ## Namespacing
 

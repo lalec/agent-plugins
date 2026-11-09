@@ -95,6 +95,42 @@ def test_load_manifest_walks_up(tmp_path, monkeypatch):
     assert m.secrets == {"A": {}} and m.namespace is None
 
 
+@pytest.mark.parametrize("marker", ["dir", "file"])     # a worktree's .git is a file
+def test_load_manifest_stops_at_the_repo_root(tmp_path, monkeypatch, marker):
+    _manifest(tmp_path, {"OUTSIDE": {"cmd": "echo x"}})
+    repo = tmp_path / "repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / ".git").mkdir() if marker == "dir" else (repo / ".git").write_text("gitdir: x")
+    monkeypatch.chdir(repo / "src")
+    assert manifest.load_manifest().secrets == {}
+
+
+def test_load_manifest_stops_at_home(tmp_path, monkeypatch):
+    _manifest(tmp_path, {"OUTSIDE": {}})
+    (tmp_path / "home" / "proj").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.chdir(tmp_path / "home" / "proj")
+    assert manifest.load_manifest().secrets == {}
+
+
+@pytest.mark.parametrize("target", ["file", "folder"])
+def test_load_manifest_refuses_one_others_can_write(tmp_path, monkeypatch, target):
+    _manifest(tmp_path, {"A": {"cmd": "echo x"}})
+    os.chmod(tmp_path / ".srun.json" if target == "file" else tmp_path, 0o777)
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(stores.SrunError) as e:
+        manifest.load_manifest()
+    assert "refusing" in str(e.value)
+
+
+def test_load_manifest_refuses_one_another_user_owns(tmp_path, monkeypatch):
+    _manifest(tmp_path, {"A": {"cmd": "echo x"}})
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(os, "getuid", lambda: 4242)
+    with pytest.raises(stores.SrunError):
+        manifest.load_manifest()
+
+
 # ------------------------------------------------------------- cmd store ---- #
 def test_cmd_store_reads_env_file_from_manifest_dir(tmp_path, monkeypatch):
     (tmp_path / ".env").write_text("OTHER=1\nMAPS_KEY=val-from-file-99\n")

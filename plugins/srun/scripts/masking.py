@@ -6,6 +6,19 @@ import urllib.parse
 
 MIN_MASK_LEN = 4             # never mask ultra-short values (would nuke output)
 CHUNK = 65536
+_URLSAFE = bytes.maketrans(b"+/", b"-_")
+
+
+def _embedded_b64(raw):
+    """The value's base64 inside a longer encoded string (`user:secret` in an
+    HTTP Basic header): at each of the 3 byte offsets, only the characters the
+    value alone decides. Up to one edge character each side stays unmasked."""
+    out = []
+    for k in range(3):
+        enc = base64.b64encode(b"\0" * k + raw)
+        core = enc[-(-8 * k // 6):8 * (k + len(raw)) // 6]
+        out += [core, core.translate(_URLSAFE)]
+    return out
 
 
 def mask_forms(name, value):
@@ -18,6 +31,7 @@ def mask_forms(name, value):
         urllib.parse.quote(raw, safe="").encode(),
         json.dumps(raw.decode("utf-8", "surrogateescape"))[1:-1]
         .encode("utf-8", "surrogateescape"),
+        *_embedded_b64(raw),
     }
     return [(f, label) for f in forms if len(f) >= MIN_MASK_LEN]
 

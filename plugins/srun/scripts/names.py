@@ -8,7 +8,7 @@ import json
 import os
 import subprocess
 
-from base import SrunError, srun_home
+from base import SrunError, srun_home, write_atomic
 from stores import SERVICE
 
 
@@ -54,11 +54,7 @@ def index_load():
 def index_save(names):
     path = index_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(sorted(set(names)), f, indent=2)
-        f.write("\n")
-    os.replace(tmp, path)       # atomic: never leave a half-written index
+    write_atomic(path, json.dumps(sorted(set(names)), indent=2) + "\n")
 
 
 def index_update(name, add):

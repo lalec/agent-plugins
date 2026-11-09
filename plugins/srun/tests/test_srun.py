@@ -51,6 +51,19 @@ def test_mask_raw_and_encoded_forms():
     assert out.count(b"[REDACTED:K]") == 2
 
 
+@pytest.mark.parametrize("encode", ["b64encode", "urlsafe_b64encode"])
+@pytest.mark.parametrize("before,after", [(b"", b":"), (b"abc:", b""), (b"user:", b""),
+                                          (b"user:", b":x"), (b"ab", b"pad")])
+def test_mask_value_inside_a_longer_base64_string(encode, before, after):
+    import base64
+    v = b"sk_live_51Hq?Zx>9~"                           # 18 bytes, + and / when encoded
+    enc = getattr(base64, encode)(before + v + after)
+    out = _mask({"K": bytearray(v)}, b"Authorization: Basic " + enc + b"\n")
+    # every character of the value's encoding is masked but one at each edge
+    kept = out.split(b"Basic ")[1].rstrip(b"=\n").replace(b"[REDACTED:K]", b"")
+    assert len(kept) <= len(enc.rstrip(b"=")) - (4 * len(v) // 3 - 2)
+
+
 def test_mask_split_across_chunks():
     v = b"supersecret123"
     dst = io.BytesIO()
@@ -93,6 +106,42 @@ def test_load_manifest_walks_up(tmp_path, monkeypatch):
     monkeypatch.chdir(sub)
     m = manifest.load_manifest()
     assert m.secrets == {"A": {}} and m.namespace is None
+
+
+@pytest.mark.parametrize("marker", ["dir", "file"])     # a worktree's .git is a file
+def test_load_manifest_stops_at_the_repo_root(tmp_path, monkeypatch, marker):
+    _manifest(tmp_path, {"OUTSIDE": {"cmd": "echo x"}})
+    repo = tmp_path / "repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / ".git").mkdir() if marker == "dir" else (repo / ".git").write_text("gitdir: x")
+    monkeypatch.chdir(repo / "src")
+    assert manifest.load_manifest().secrets == {}
+
+
+def test_load_manifest_stops_at_home(tmp_path, monkeypatch):
+    _manifest(tmp_path, {"OUTSIDE": {}})
+    (tmp_path / "home" / "proj").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.chdir(tmp_path / "home" / "proj")
+    assert manifest.load_manifest().secrets == {}
+
+
+@pytest.mark.parametrize("target", ["file", "folder"])
+def test_load_manifest_refuses_one_others_can_write(tmp_path, monkeypatch, target):
+    _manifest(tmp_path, {"A": {"cmd": "echo x"}})
+    os.chmod(tmp_path / ".srun.json" if target == "file" else tmp_path, 0o777)
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(stores.SrunError) as e:
+        manifest.load_manifest()
+    assert "refusing" in str(e.value)
+
+
+def test_load_manifest_refuses_one_another_user_owns(tmp_path, monkeypatch):
+    _manifest(tmp_path, {"A": {"cmd": "echo x"}})
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(os, "getuid", lambda: 4242)
+    with pytest.raises(stores.SrunError):
+        manifest.load_manifest()
 
 
 # ------------------------------------------------------------- cmd store ---- #
@@ -366,6 +415,7 @@ def test_redactor_keeps_the_response_shape(monkeypatch):
     "see task-runner-configuration-loader and disk-usage-report-generator",
     "cannot mint a Bearer token\npost-body-injection-true-positive-live",
     "the token budget-allocation-for-the-quarter",              # keyword, then prose
+    "Basic internationalization support",                       # Basic, then prose
 ])
 def test_redactor_leaves_normal_text(text):
     assert redact._scrub(text) == (text, 0)
@@ -374,6 +424,7 @@ def test_redactor_leaves_normal_text(text):
 @pytest.mark.parametrize("text", [
     "key=sk-proj-abcdefghijklmnop1234",
     "Authorization: Bearer abcdefghij0123456789",
+    "> Authorization: Basic c2tfbGl2ZV81MUhxP1p4Pjl+Og==",
     '{"token": "abcdefghij0123456789"}',
     "export OPENAI=sk-abcdefghijklmnopqrstuvwx",
     "jwt eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.abcdefghijkl",

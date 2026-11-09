@@ -40,6 +40,9 @@ KEYWORDS = [
     re.compile(r"(?i)(api[_-]?key|secret|token|passwd|password|bearer|authorization)"
                r"(['\"]?\s*[:=]\s*['\"]?)" + _VALUE),
     re.compile(r"(?i)\b(bearer)([ \t]+)" + _VALUE),
+    # HTTP Basic credentials: base64 holding a digit, + / or =, so prose such
+    # as "Basic internationalization" stays.
+    re.compile(r"\b(Basic)([ \t]+)(?=[A-Za-z]*[0-9+/=])" + _VALUE),
 ]
 
 

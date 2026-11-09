@@ -13,7 +13,7 @@ import os
 import re
 import subprocess
 
-from base import MANIFEST, SrunError
+from base import MANIFEST, SrunError, write_atomic
 from manifest import tidy
 
 HERE = os.path.dirname(os.path.realpath(__file__))
@@ -27,9 +27,20 @@ def _repo_root():
     return p.stdout.strip() if p.returncode == 0 and p.stdout.strip() else os.getcwd()
 
 
+def _rule_target(path):
+    """The file a CLAUDE.md write lands in: through a link to a file in the
+    project (AGENTS.md); a link that leads out of the project is refused."""
+    root = os.path.realpath(os.path.dirname(path))
+    real = os.path.realpath(path)
+    if not real.startswith(root + os.sep):
+        raise SrunError(f"refusing to write CLAUDE.md: it links outside {root}")
+    return real
+
+
 def upsert_rule(path):
     """Put the current Secrets section into a CLAUDE.md. Returns 'added',
     'updated' or None (already current)."""
+    path = _rule_target(path)
     with open(RULE) as f:
         rule = f.read().strip() + "\n"
     try:
@@ -45,8 +56,7 @@ def upsert_rule(path):
         new, how = text[:m.start()] + rule + ("\n" + rest if rest else ""), "updated"
     else:
         new, how = (text.rstrip() + "\n\n" if text.strip() else "") + rule, "added"
-    with open(path, "w") as f:
-        f.write(new)
+    write_atomic(path, new)
     return how
 
 
@@ -61,7 +71,9 @@ def _parse(args):
 def setup(args):
     root = _repo_root()
     try:
+        md = _rule_target(os.path.join(root, "CLAUDE.md"))   # refuse before writing
         ns, changed = tidy(root, _parse(args))
+        how = upsert_rule(md)
     except (SrunError, OSError) as e:
         print(f"srun setup: {e}")
         return 1
@@ -70,7 +82,6 @@ def setup(args):
               f"store ids are {ns}/NAME (gcp: {ns}_NAME).")
     else:
         print(f"updated {MANIFEST}" if changed else f"{MANIFEST} is current")
-    how = upsert_rule(os.path.join(root, "CLAUDE.md"))
     print(f"{how} the Secrets section in CLAUDE.md" if how
           else "CLAUDE.md Secrets section is current")
     if changed or how:

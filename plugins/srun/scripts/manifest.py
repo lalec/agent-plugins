@@ -18,7 +18,8 @@ import os
 import re
 from collections import namedtuple
 
-from base import DEFAULT_STORE, MANIFEST, SrunError, find_manifest, srun_home
+from base import (DEFAULT_STORE, MANIFEST, SrunError, find_manifest, srun_home,
+                  write_atomic)
 from stores import RESOLVERS
 
 Manifest = namedtuple("Manifest", "secrets namespace path store",
@@ -38,11 +39,7 @@ def _read(path):
 
 
 def _write(path, data):
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(data, f, indent=2)
-        f.write("\n")
-    os.replace(tmp, path)
+    write_atomic(path, json.dumps(data, indent=2) + "\n")
 
 
 def _entries(raw):

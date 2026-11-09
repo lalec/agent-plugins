@@ -77,4 +77,4 @@ Read `references/apply.md` now and apply the confirmed steps in its order — th
 
 ## Step 8 — Verify
 
-Read `references/verify.md` now and run every check that the applied steps touched. Report each as passed, failed with what was seen, or not runnable here with why; the next real delivery proves the rest.
+Read `references/verify.md` now and run every check that the applied steps touched. Report each as passed, failed with what was seen, or not runnable here with why; the next real delivery proves the rest. The report's steps for the user name only what no workflow command does on its own — a gate the workflow's own push or deploy satisfies is not one.

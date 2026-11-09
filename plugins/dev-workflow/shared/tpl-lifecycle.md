@@ -408,7 +408,7 @@ scanners:
 
 | Scanner | Installed when the list carries | Entry |
 |---|---|---|
-| claude-security | `claude-security@` | `skill: claude-security:claude-security` · `args: 'scan the whole repository at medium effort'` · `results: 'CLAUDE-SECURITY-*/CLAUDE-SECURITY-RESULTS.jsonl'` · `cost:` blank (it asks its own) · `finding_key: claudeSecurityPluginFindingId` |
+| claude-security | `claude-security@` | `skill: claude-security:claude-security` · `args: 'scan the whole repository at medium effort. I understand it may take a while and use a lot of tokens.'` (the second sentence is the plugin's own consent phrase — without it the scan asks a question of its own, which a 60-second timeout cancels) · `results: 'CLAUDE-SECURITY-*/CLAUDE-SECURITY-RESULTS.jsonl'` · `cost: 'a medium-effort scan of the whole repository — runs a long time and uses a lot of tokens'` · `finding_key: claudeSecurityPluginFindingId` |
 
 ---
 

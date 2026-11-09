@@ -13,7 +13,7 @@ import os
 import re
 import subprocess
 
-from base import MANIFEST, SrunError
+from base import MANIFEST, SrunError, write_atomic
 from manifest import tidy
 
 HERE = os.path.dirname(os.path.realpath(__file__))
@@ -29,7 +29,12 @@ def _repo_root():
 
 def upsert_rule(path):
     """Put the current Secrets section into a CLAUDE.md. Returns 'added',
-    'updated' or None (already current)."""
+    'updated' or None (already current). A CLAUDE.md that links to a file in
+    the project (AGENTS.md) is written through; one that leads out is refused."""
+    root = os.path.realpath(os.path.dirname(path))
+    path = os.path.realpath(path)
+    if not path.startswith(root + os.sep):
+        raise SrunError(f"refusing to write CLAUDE.md: it links outside {root}")
     with open(RULE) as f:
         rule = f.read().strip() + "\n"
     try:
@@ -45,8 +50,7 @@ def upsert_rule(path):
         new, how = text[:m.start()] + rule + ("\n" + rest if rest else ""), "updated"
     else:
         new, how = (text.rstrip() + "\n\n" if text.strip() else "") + rule, "added"
-    with open(path, "w") as f:
-        f.write(new)
+    write_atomic(path, new)
     return how
 
 
@@ -62,6 +66,7 @@ def setup(args):
     root = _repo_root()
     try:
         ns, changed = tidy(root, _parse(args))
+        how = upsert_rule(os.path.join(root, "CLAUDE.md"))
     except (SrunError, OSError) as e:
         print(f"srun setup: {e}")
         return 1
@@ -70,7 +75,6 @@ def setup(args):
               f"store ids are {ns}/NAME (gcp: {ns}_NAME).")
     else:
         print(f"updated {MANIFEST}" if changed else f"{MANIFEST} is current")
-    how = upsert_rule(os.path.join(root, "CLAUDE.md"))
     print(f"{how} the Secrets section in CLAUDE.md" if how
           else "CLAUDE.md Secrets section is current")
     if changed or how:

@@ -1,6 +1,8 @@
 """What every srun module shares: the value-free error, buffer zeroing, the
 names in flight, and where srun keeps its files."""
 import os
+import stat
+import tempfile
 
 MANIFEST = ".srun.json"
 DEFAULT_STORE = "keychain"
@@ -22,6 +24,25 @@ def zero(buf):
 
 def strip_nl(out):
     return out[:-1] if out.endswith(b"\n") else out
+
+
+def write_atomic(path, text):
+    """Replace `path` with `text` through a fresh, randomly named temp file
+    beside it — never a guessable name a committed symlink could redirect.
+    Keeps the old file's mode (a new file gets 0644)."""
+    try:
+        mode = stat.S_IMODE(os.stat(path).st_mode)
+    except FileNotFoundError:
+        mode = 0o644
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path) or ".", prefix=".srun-")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
 
 
 def srun_home():

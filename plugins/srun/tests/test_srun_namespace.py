@@ -138,6 +138,40 @@ def test_setup_replaces_an_older_rule_and_keeps_neighbours(tmp_path):
     assert text.startswith("# P\n\n" + _rule() + "\n\n## Roadmap\n\nkeep\n")
 
 
+def test_setup_ignores_a_committed_tmp_symlink(tmp_path, monkeypatch):
+    root = _git_repo(tmp_path, "p")
+    victim = tmp_path / "victim"
+    victim.write_text("keep\n")
+    write_manifest(root, ["A"])                         # no namespace: forces a rewrite
+    (root / ".srun.json").chmod(0o640)
+    (root / ".srun.json.tmp").symlink_to(victim)
+    monkeypatch.chdir(root)
+    assert setup.setup([]) == 0
+    assert victim.read_text() == "keep\n"
+    assert _read(root)["namespace"] == "p"
+    assert (root / ".srun.json").stat().st_mode & 0o777 == 0o640
+    assert [p.name for p in root.iterdir() if p.name.startswith(".srun-")] == []
+
+
+def test_setup_writes_through_a_claude_md_link_inside_the_project(tmp_path):
+    (tmp_path / "AGENTS.md").write_text("# A\n")
+    (tmp_path / "CLAUDE.md").symlink_to("AGENTS.md")
+    assert setup.upsert_rule(str(tmp_path / "CLAUDE.md")) == "added"
+    assert (tmp_path / "CLAUDE.md").is_symlink()
+    assert _rule() in (tmp_path / "AGENTS.md").read_text()
+
+
+def test_setup_refuses_a_claude_md_link_out_of_the_project(tmp_path, monkeypatch, capsys):
+    root = _git_repo(tmp_path, "p")
+    victim = tmp_path / "victim"
+    victim.write_text("keep\n")
+    (root / "CLAUDE.md").symlink_to(victim)
+    monkeypatch.chdir(root)
+    assert setup.setup([]) == 1
+    assert victim.read_text() == "keep\n"
+    assert "refusing" in capsys.readouterr().out
+
+
 # --------------------------------------------------------------- migrate ---- #
 @pytest.fixture
 def fake_keychain(monkeypatch):

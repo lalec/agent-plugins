@@ -169,6 +169,7 @@ def test_setup_refuses_a_claude_md_link_out_of_the_project(tmp_path, monkeypatch
     monkeypatch.chdir(root)
     assert setup.setup([]) == 1
     assert victim.read_text() == "keep\n"
+    assert not (root / ".srun.json").exists()          # refused before any write
     assert "refusing" in capsys.readouterr().out
 
 

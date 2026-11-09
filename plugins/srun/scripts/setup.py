@@ -27,14 +27,20 @@ def _repo_root():
     return p.stdout.strip() if p.returncode == 0 and p.stdout.strip() else os.getcwd()
 
 
+def _rule_target(path):
+    """The file a CLAUDE.md write lands in: through a link to a file in the
+    project (AGENTS.md); a link that leads out of the project is refused."""
+    root = os.path.realpath(os.path.dirname(path))
+    real = os.path.realpath(path)
+    if not real.startswith(root + os.sep):
+        raise SrunError(f"refusing to write CLAUDE.md: it links outside {root}")
+    return real
+
+
 def upsert_rule(path):
     """Put the current Secrets section into a CLAUDE.md. Returns 'added',
-    'updated' or None (already current). A CLAUDE.md that links to a file in
-    the project (AGENTS.md) is written through; one that leads out is refused."""
-    root = os.path.realpath(os.path.dirname(path))
-    path = os.path.realpath(path)
-    if not path.startswith(root + os.sep):
-        raise SrunError(f"refusing to write CLAUDE.md: it links outside {root}")
+    'updated' or None (already current)."""
+    path = _rule_target(path)
     with open(RULE) as f:
         rule = f.read().strip() + "\n"
     try:
@@ -65,8 +71,9 @@ def _parse(args):
 def setup(args):
     root = _repo_root()
     try:
+        md = _rule_target(os.path.join(root, "CLAUDE.md"))   # refuse before writing
         ns, changed = tidy(root, _parse(args))
-        how = upsert_rule(os.path.join(root, "CLAUDE.md"))
+        how = upsert_rule(md)
     except (SrunError, OSError) as e:
         print(f"srun setup: {e}")
         return 1

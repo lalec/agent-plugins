@@ -126,6 +126,7 @@ Session transcripts stay readable — debugging across sessions keeps working.
 ## Limits
 
 - It serves your own machine. Claude cloud sessions and CI do not install the plugin, so a step there that needs a secret stops as `blocked`; deployed services read their secret manager themselves.
+- A project on a FAT or exFAT drive shows every file as writable by others and cannot be `chmod`ed, so srun refuses its `.srun.json`; keep the project on an APFS volume.
 - Grep over a whole folder in content mode, or `grep -r`, can still print a `.env` line; the guard catches a secret file only when it is named.
 - The guard reads a command's text, not what it does: a heredoc or `echo` whose text names `cat .env` or `op read` is denied too. Write such text with the Edit or Write tool.
 - Masking covers output, not intent: a child that sends a value over the network sends the real value.

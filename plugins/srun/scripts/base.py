@@ -41,7 +41,10 @@ def write_atomic(path, text):
         os.chmod(tmp, mode)
         os.replace(tmp, path)
     except BaseException:
-        os.unlink(tmp)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
         raise
 
 

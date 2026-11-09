@@ -51,6 +51,19 @@ def test_mask_raw_and_encoded_forms():
     assert out.count(b"[REDACTED:K]") == 2
 
 
+@pytest.mark.parametrize("encode", ["b64encode", "urlsafe_b64encode"])
+@pytest.mark.parametrize("before,after", [(b"", b":"), (b"abc:", b""), (b"user:", b""),
+                                          (b"user:", b":x"), (b"ab", b"pad")])
+def test_mask_value_inside_a_longer_base64_string(encode, before, after):
+    import base64
+    v = b"sk_live_51Hq?Zx>9~"                           # 18 bytes, + and / when encoded
+    enc = getattr(base64, encode)(before + v + after)
+    out = _mask({"K": bytearray(v)}, b"Authorization: Basic " + enc + b"\n")
+    # every character of the value's encoding is masked but one at each edge
+    kept = out.split(b"Basic ")[1].rstrip(b"=\n").replace(b"[REDACTED:K]", b"")
+    assert len(kept) <= len(enc.rstrip(b"=")) - (4 * len(v) // 3 - 2)
+
+
 def test_mask_split_across_chunks():
     v = b"supersecret123"
     dst = io.BytesIO()
@@ -402,6 +415,7 @@ def test_redactor_keeps_the_response_shape(monkeypatch):
     "see task-runner-configuration-loader and disk-usage-report-generator",
     "cannot mint a Bearer token\npost-body-injection-true-positive-live",
     "the token budget-allocation-for-the-quarter",              # keyword, then prose
+    "Basic internationalization support",                       # Basic, then prose
 ])
 def test_redactor_leaves_normal_text(text):
     assert redact._scrub(text) == (text, 0)
@@ -410,6 +424,7 @@ def test_redactor_leaves_normal_text(text):
 @pytest.mark.parametrize("text", [
     "key=sk-proj-abcdefghijklmnop1234",
     "Authorization: Bearer abcdefghij0123456789",
+    "> Authorization: Basic c2tfbGl2ZV81MUhxP1p4Pjl+Og==",
     '{"token": "abcdefghij0123456789"}',
     "export OPENAI=sk-abcdefghijklmnopqrstuvwx",
     "jwt eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.abcdefghijkl",

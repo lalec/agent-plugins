@@ -78,6 +78,8 @@ RESOLVERS = {
 
 # Each value goes in on stdin; `security -w` with no value prompts twice, so
 # it gets the value and its retype. Special chars survive (unlike `security -i`).
+# `security` reads those prompts from the terminal when it has one, so store()
+# detaches it from the terminal to make it read stdin.
 _WRITE = {
     "keychain": (lambda sid: ["security", "add-generic-password", "-U", "-s",
                               SERVICE, "-a", sid, "-w"],
@@ -119,7 +121,8 @@ def store(backend, name, sid, vb):
     managers.READY.get(backend, lambda n: None)(name)
     argv, blob = _WRITE[backend]
     p = subprocess.run(argv(sid), input=blob(vb), stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL)
+                       stderr=subprocess.DEVNULL,
+                       start_new_session=backend == "keychain")
     if p.returncode != 0:
         hint = f" (does secret '{sid}' exist?)" if backend in ("aws", "gcp") else ""
         raise SrunError(f"{backend} store failed{hint}: {name}")

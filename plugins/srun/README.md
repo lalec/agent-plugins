@@ -50,22 +50,20 @@ with "run `lpass login`" once its agent has timed out, rather than let it
 prompt). Each title must be unique; srun refuses a duplicate rather than guess.
 
 **One secret somewhere else.** A name can carry its own entry instead of
-following the project's store — a store, a fixed `"id"` (a secret shared on
-purpose across projects), or a `"cmd"` that prints the value (an env file, AWS
-Parameter Store, Bitwarden, Vault, Doppler):
+following the project's store — a store, or a fixed `"id"` (a secret shared on
+purpose across projects):
 
 ```json
 "secrets": { "E2E_PASSWORD": {},
-             "SHARED_TOKEN": { "store": "aws", "id": "shared/token" },
-             "MAPS_KEY": { "cmd": "sed -n 's/^MAPS_KEY=//p' .env" } }
+             "SHARED_TOKEN": { "store": "aws", "id": "shared/token" } }
 ```
 
-A `cmd` runs from the folder holding `.srun.json`; its error output is
-discarded and one trailing newline is stripped. It is committed code, so it
-carries the same trust as a `package.json` script; srun only reads through it.
+srun never runs a command named in `.srun.json`, so a repo you clone cannot run
+code through `srun check`. Older versions had a `"cmd"` entry; it is now
+ignored and `srun setup` removes it. Store that value with `srun add NAME`.
 srun looks for `.srun.json` from the working folder up to the repo root (or
 `$HOME`), never above, and refuses one that is not yours or that others can
-write, so a file planted in a shared folder such as `/tmp` never runs.
+write, so a file planted in a shared folder such as `/tmp` is never used.
 
 ## Namespacing
 

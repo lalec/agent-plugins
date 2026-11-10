@@ -150,8 +150,8 @@ def _manager_read(cmds):
 
 def _deny_read(path):
     _deny(f"reading {path} prints secret values into the transcript. "
-          "Use the value by NAME: `srun NAME -- cmd` (a `cmd` entry in "
-          ".srun.json can read it from that file); `srun check "
+          "Use the value by NAME: `srun NAME -- cmd` (the user stores it "
+          "once with `srun add NAME`); `srun check "
           "NAME` says whether it is set. `grep -c '^NAME=' FILE` counts "
           "without printing.")
 

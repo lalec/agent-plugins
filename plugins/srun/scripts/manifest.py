@@ -44,8 +44,7 @@ def _write(path, data):
 
 
 def _entries(raw):
-    """NAME -> override dict, from the list form or the (legacy) dict form. An
-    old `cmd` key is dropped unread, so the NAME is looked up in its store."""
+    """NAME -> override dict, from the list form or the (legacy) dict form."""
     if isinstance(raw, list):
         return {n: {} for n in raw if isinstance(n, str)}
     if not isinstance(raw, dict):
@@ -55,7 +54,6 @@ def _entries(raw):
         e = dict(e) if isinstance(e, dict) else {}
         if "backend" in e:
             e.setdefault("store", e.pop("backend"))
-        e.pop("cmd", None)
         out[name] = e
     return out
 
@@ -124,15 +122,25 @@ def plan(name, cli_store, manifest):
 
 def resolve(name, cli_store, manifest):
     store, sid = plan(name, cli_store, manifest)
-    return RESOLVERS[store](name, sid)
+    try:
+        return RESOLVERS[store](name, sid)
+    except SrunError as e:
+        if "cmd" not in (manifest.secrets.get(name) or {}):
+            raise
+        raise SrunError(f'{e}; srun no longer runs the "cmd" for {name} in '
+                        f"{MANIFEST}: store the value with `srun add {name}`, "
+                        "then run `srun setup`")
 
 
 # ------------------------------------------------------------------ setup -- #
 def _compact(data):
     """The manifest in its short form: `backend` read as `store`; a store every
     entry names explicitly hoisted to the project; per-entry stores equal to
-    the project's dropped; the plain name list when no override is left."""
+    the project's dropped; an old `cmd` key dropped; the plain name list when
+    no override is left."""
     entries = _entries(data.get("secrets", {}))
+    for e in entries.values():
+        e.pop("cmd", None)
     store = data.get("store")
     named = [e.get("store") for e in entries.values()]
     if store is None and named and None not in named and len(set(named)) == 1:

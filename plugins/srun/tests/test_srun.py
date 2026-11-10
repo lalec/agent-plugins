@@ -165,10 +165,12 @@ def test_an_old_cmd_entry_is_never_run(tmp_path, monkeypatch, keychain_values, c
     monkeypatch.chdir(tmp_path)
     assert manifest.plan("K", None, manifest.load_manifest()) == ("keychain", "K")
     assert manage.cmd_check([]) == 1
-    with pytest.raises(stores.SrunError):
+    with pytest.raises(stores.SrunError) as e:
         sr.cmd_run(["K", "--", "true"])
     assert not ran.exists()
-    assert "MISS  K  (keychain K)" in capsys.readouterr().out
+    assert "srun add K" in str(e.value)
+    out = capsys.readouterr().out
+    assert "MISS  K  (keychain K)" in out and "srun add K" in out
 
 
 def test_run_masks_output(tmp_path, monkeypatch, keychain_values, capfdbinary):

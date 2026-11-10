@@ -5,13 +5,14 @@ live. Names, stores and ids only; it never holds a value.
 
 `store` is optional: without it each NAME lives in the personal default store
 (`srun default`), else the keychain. `secrets` may instead map a NAME to an
-override, `{"store": "...", "id": "..."}` or `{"cmd": "..."}`, for the rare
-secret kept somewhere else. Older manifests say `backend` for `store`; they load
-as is and `srun setup` rewrites them.
+override, `{"store": "...", "id": "..."}`, for the rare secret kept somewhere
+else. Older manifests say `backend` for `store`; they load as is and `srun
+setup` rewrites them; a `cmd` key from older srun versions is ignored, never
+run, and `srun setup` drops it.
 
 `namespace` keeps projects that share a machine or a store apart: a NAME without
 an explicit `id` is stored as <namespace>/NAME (gcp: <namespace>_NAME, its ids
-reject "/"). Without a namespace the id is NAME. `cmd` entries have no id.
+reject "/"). Without a namespace the id is NAME.
 """
 import json
 import os
@@ -43,7 +44,8 @@ def _write(path, data):
 
 
 def _entries(raw):
-    """NAME -> override dict, from the list form or the (legacy) dict form."""
+    """NAME -> override dict, from the list form or the (legacy) dict form. An
+    old `cmd` key is dropped unread, so the NAME is looked up in its store."""
     if isinstance(raw, list):
         return {n: {} for n in raw if isinstance(n, str)}
     if not isinstance(raw, dict):
@@ -53,14 +55,15 @@ def _entries(raw):
         e = dict(e) if isinstance(e, dict) else {}
         if "backend" in e:
             e.setdefault("store", e.pop("backend"))
+        e.pop("cmd", None)
         out[name] = e
     return out
 
 
 def check_store(store, what):
-    if store not in RESOLVERS or store == "cmd":
+    if store not in RESOLVERS:
         raise SrunError(f"unknown store '{store}' for {what}; use one of "
-                        + ", ".join(s for s in RESOLVERS if s != "cmd"))
+                        + ", ".join(RESOLVERS))
     return store
 
 
@@ -92,7 +95,7 @@ def default_store():
             store = json.load(f).get("store")
     except (OSError, ValueError, AttributeError):
         return None
-    return store if store in RESOLVERS and store != "cmd" else None
+    return store if store in RESOLVERS else None
 
 
 def set_default_store(store):
@@ -109,14 +112,9 @@ def store_for(cli_store, manifest):
 
 
 def plan(name, cli_store, manifest):
-    """Decide (store, id) for a NAME. A NAME's own override is authoritative;
-    an entry with a `cmd` key is the cmd store, and the command is its id."""
+    """Decide (store, id) for a NAME. A NAME's own override is authoritative."""
     entry = manifest.secrets.get(name) or {}
-    if entry.get("cmd"):
-        return "cmd", entry["cmd"]
     store = entry.get("store") or store_for(cli_store, manifest)
-    if store == "cmd":
-        raise SrunError(f'the cmd store needs a "cmd" entry for {name} in {MANIFEST}')
     check_store(store, name)
     if entry.get("id"):
         return store, entry["id"]
@@ -136,7 +134,7 @@ def _compact(data):
     the project's dropped; the plain name list when no override is left."""
     entries = _entries(data.get("secrets", {}))
     store = data.get("store")
-    named = [e.get("store") for e in entries.values() if not e.get("cmd")]
+    named = [e.get("store") for e in entries.values()]
     if store is None and named and None not in named and len(set(named)) == 1:
         store = named[0]
     for e in entries.values():

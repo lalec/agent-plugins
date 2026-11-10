@@ -98,7 +98,7 @@ def cmd_check(rest):
     missing = 0
     for name in names:
         b, sid = plan(name, None, manifest)
-        where = b if b == "cmd" else f"{b} {sid}"
+        where = f"{b} {sid}"
         CURRENT_NAMES[:] = [name]
         try:
             zero(resolve(name, None, manifest))
@@ -120,8 +120,6 @@ def _move(name, manifest):
     """(status, detail) for moving one keychain value from the bare NAME to its
     namespaced id: resolve old, store new, read new back, delete old."""
     backend, sid = plan(name, None, manifest)
-    if backend == "cmd":
-        return "skipped", "cmd entry: nothing is stored here"
     if backend != "keychain":     # moving needs create/delete rights there
         return "skipped", f"{backend} store: move it in {backend} itself"
     if (manifest.secrets.get(name) or {}).get("id"):

@@ -159,9 +159,8 @@ USAGE = """srun — run a command with named secrets, values never exposed
                                       form) and the Secrets rule in CLAUDE.md
 
 Stores: keychain (built-in default, macOS), 1password, dashlane, lastpass, aws,
-gcp, or a per-NAME `cmd` in .srun.json that prints the value. A NAME's store:
-its own entry, else -s, else the project's "store", else `srun default`, else
-the keychain. Ids are <namespace>/NAME (gcp: <namespace>_NAME). See README.md.
+gcp. A NAME's store: its own entry, else -s, else the project's "store", else
+`srun default`, else the keychain. Ids are <namespace>/NAME (gcp: <namespace>_NAME). See README.md.
 """
 
 

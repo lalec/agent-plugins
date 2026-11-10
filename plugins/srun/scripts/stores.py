@@ -4,17 +4,17 @@ Every resolver returns a bytearray (zeroable) or raises SrunError. Only a
 secret's NAME/id ever reaches a subprocess argv; values come back on the child's
 stdout pipe, or go in on its stdin, and stay inside the srun process.
 
-Stores: keychain (default, macOS), aws (Secrets Manager), gcp (Secret Manager),
-the password managers in managers.py (1password, dashlane, lastpass), and cmd —
-any command that prints the value, declared per NAME in .srun.json.
+Stores: keychain (default, macOS), aws (Secrets Manager), gcp (Secret Manager)
+and the password managers in managers.py (1password, dashlane, lastpass). srun
+never runs a command named in .srun.json: a committed file must not be a way to
+run code on whoever reads its secrets.
 """
 import json
-import os
 import subprocess
 
 import managers
 from base import (CURRENT_NAMES, DEFAULT_STORE, MANIFEST, SrunError,  # noqa: F401
-                  find_manifest, strip_nl, zero)
+                  strip_nl, zero)
 
 SERVICE = "srun"        # dedicated Keychain generic-password service
 
@@ -54,26 +54,11 @@ def _resolve_gcp(name, sid):
     return bytearray(p.stdout)     # gcloud emits the exact payload, no newline
 
 
-def _resolve_cmd(name, sid):
-    # The command comes from the committed manifest — the same trust as a
-    # package.json script. It runs from the manifest's directory so relative
-    # paths (an env file) work; stderr is discarded so an error cannot echo it.
-    path = find_manifest()
-    p = subprocess.run(["sh", "-c", sid],
-                       cwd=os.path.dirname(path) if path else None,
-                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    out = strip_nl(p.stdout)
-    if p.returncode != 0 or not out:
-        raise SrunError(f"command printed no value: {name}")
-    return bytearray(out)
-
-
 RESOLVERS = {
     "keychain": _resolve_keychain,
     "aws": _resolve_aws,
     "gcp": _resolve_gcp,
     **managers.RESOLVERS,
-    "cmd": _resolve_cmd,
 }
 
 # Each value goes in on stdin; `security -w` with no value prompts twice, so
@@ -104,9 +89,6 @@ def writable(store):
 
 
 def not_writable(store, name, sid):
-    if store == "cmd":
-        return SrunError(f"{name} is read by a command in {MANIFEST}; store or "
-                         "remove it in that secret manager, not here")
     return SrunError(f"{name} lives in {managers.LABEL[store]}: "
                      f"{managers.WHERE[store].format(sid=sid)}")
 

@@ -54,9 +54,9 @@ def srun_home():
 
 
 def _check_owner(path):
-    """A manifest's `cmd` entries run as you, so only trust one that you own and
-    no one else can change: the file and its folder yours (the folder may be
-    root's) and neither writable by group or others."""
+    """A manifest decides where values are read from and written to, so only
+    trust one that you own and no one else can change: the file and its folder
+    yours (the folder may be root's) and neither writable by group or others."""
     st, dst = os.stat(path), os.stat(os.path.dirname(path))
     uid = os.getuid()
     if (st.st_uid != uid or dst.st_uid not in (uid, 0)

@@ -28,10 +28,9 @@ def test_plan_namespaces_ids_per_store(store, sid):
     assert manifest.plan("X", store, M({}, "app"))[1] == sid.replace("K", "X")
 
 
-def test_plan_explicit_id_wins_and_cmd_is_unchanged():
-    m = M({"S": {"store": "aws", "id": "shared/s"}, "C": {"cmd": "op read x"}}, "app")
+def test_plan_explicit_id_wins():
+    m = M({"S": {"store": "aws", "id": "shared/s"}}, "app")
     assert manifest.plan("S", None, m) == ("aws", "shared/s")
-    assert manifest.plan("C", None, m) == ("cmd", "op read x")
 
 
 def test_plan_without_namespace_is_the_bare_name():
@@ -89,8 +88,8 @@ def test_setup_keeps_overrides_and_never_rewrites_the_namespace(tmp_path, monkey
     ({"A": {"backend": "keychain"}, "B": {"backend": "keychain"}},
      {"store": "keychain", "secrets": ["A", "B"]}),
     ({"A": {}, "B": {"backend": "aws"}}, {"secrets": {"A": {}, "B": {"store": "aws"}}}),
-    ({"A": {"backend": "aws"}, "C": {"cmd": "op read x"}},
-     {"store": "aws", "secrets": {"A": {}, "C": {"cmd": "op read x"}}}),
+    ({"A": {"backend": "aws"}, "C": {"cmd": "op read x"}},     # an old cmd is dropped
+     {"secrets": {"A": {"store": "aws"}, "C": {}}}),
     (["A", "B"], {"secrets": ["A", "B"]}),
 ])
 def test_setup_rewrites_old_manifests_in_the_short_form(tmp_path, monkeypatch, secrets, want):
@@ -198,7 +197,7 @@ def fake_keychain(monkeypatch):
 def test_migrate_reports_each_name_and_never_prints_a_value(
         tmp_path, monkeypatch, capsys, fake_keychain):
     write_manifest(tmp_path, {"MOVE": {}, "GONE": {}, "BOTH": {}, "PIN": {"id": "shared"},
-                              "OP": {"cmd": "op read x"}, "CLOUD": {"store": "aws"}},
+                              "CLOUD": {"store": "aws"}},
                    namespace="app")
     fake_keychain.update({"MOVE": b"val-move-1", "BOTH": b"val-old-2",
                           "app/BOTH": b"val-new-3", "shared": b"val-pin-4"})
@@ -207,7 +206,7 @@ def test_migrate_reports_each_name_and_never_prints_a_value(
     out = capsys.readouterr().out
     lines = {ln[12:].split()[0]: ln[:10].strip() for ln in out.splitlines()}
     assert lines == {"MOVE": "moved", "GONE": "not stored", "BOTH": "kept", "PIN": "skipped",
-                     "OP": "skipped", "CLOUD": "skipped"}
+                     "CLOUD": "skipped"}
     assert fake_keychain == {"app/MOVE": b"val-move-1", "BOTH": b"val-old-2",
                              "app/BOTH": b"val-new-3", "shared": b"val-pin-4"}
     assert "val-" not in out

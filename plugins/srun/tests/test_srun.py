@@ -89,12 +89,12 @@ def test_plan_default_and_cli_store():
     assert manifest.plan("K", "gcp", M({})) == ("gcp", "K")
 
 
-def test_plan_cmd_entry_is_the_cmd_store():
-    assert manifest.plan("K", "aws", M({"K": {"cmd": "op read x"}})) == ("cmd", "op read x")
+def test_plan_ignores_an_old_cmd_key():
+    assert manifest.plan("K", "aws", M({"K": {"cmd": "op read x"}})) == ("aws", "K")
 
 
 @pytest.mark.parametrize("store", ["vault", "cmd"])
-def test_plan_unknown_store_or_cmd_without_entry_raises(store):
+def test_plan_unknown_store_raises(store):
     with pytest.raises(stores.SrunError):
         manifest.plan("K", store, M({}))
 
@@ -110,7 +110,7 @@ def test_load_manifest_walks_up(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("marker", ["dir", "file"])     # a worktree's .git is a file
 def test_load_manifest_stops_at_the_repo_root(tmp_path, monkeypatch, marker):
-    _manifest(tmp_path, {"OUTSIDE": {"cmd": "echo x"}})
+    _manifest(tmp_path, {"OUTSIDE": {}})
     repo = tmp_path / "repo"
     (repo / "src").mkdir(parents=True)
     (repo / ".git").mkdir() if marker == "dir" else (repo / ".git").write_text("gitdir: x")
@@ -128,7 +128,7 @@ def test_load_manifest_stops_at_home(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("target", ["file", "folder"])
 def test_load_manifest_refuses_one_others_can_write(tmp_path, monkeypatch, target):
-    _manifest(tmp_path, {"A": {"cmd": "echo x"}})
+    _manifest(tmp_path, {"A": {}})
     os.chmod(tmp_path / ".srun.json" if target == "file" else tmp_path, 0o777)
     monkeypatch.chdir(tmp_path)
     with pytest.raises(stores.SrunError) as e:
@@ -137,57 +137,57 @@ def test_load_manifest_refuses_one_others_can_write(tmp_path, monkeypatch, targe
 
 
 def test_load_manifest_refuses_one_another_user_owns(tmp_path, monkeypatch):
-    _manifest(tmp_path, {"A": {"cmd": "echo x"}})
+    _manifest(tmp_path, {"A": {}})
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(os, "getuid", lambda: 4242)
     with pytest.raises(stores.SrunError):
         manifest.load_manifest()
 
 
-# ------------------------------------------------------------- cmd store ---- #
-def test_cmd_store_reads_env_file_from_manifest_dir(tmp_path, monkeypatch):
-    (tmp_path / ".env").write_text("OTHER=1\nMAPS_KEY=val-from-file-99\n")
-    _manifest(tmp_path, {"MAPS_KEY": {"cmd": "sed -n 's/^MAPS_KEY=//p' .env"}})
-    sub = tmp_path / "web"
-    sub.mkdir()
-    monkeypatch.chdir(sub)                       # runs from the manifest's dir
-    assert bytes(stores.RESOLVERS["cmd"]("MAPS_KEY", "sed -n 's/^MAPS_KEY=//p' .env")) \
-        == b"val-from-file-99"
+# ------------------------------------------------------- resolve via store -- #
+@pytest.fixture
+def keychain_values(monkeypatch):
+    """The keychain replaced by a dict of id -> value."""
+    kc = {}
+
+    def get(name, sid):
+        if sid not in kc:
+            raise stores.SrunError(f"not found in keychain: {name}")
+        return bytearray(kc[sid])
+
+    monkeypatch.setitem(stores.RESOLVERS, "keychain", get)
+    return kc
 
 
-@pytest.mark.parametrize("cmd", ["exit 3", "true", "echo oops >&2; exit 1"])
-def test_cmd_store_without_value_is_missing(cmd):
-    with pytest.raises(stores.SrunError) as e:
-        stores.RESOLVERS["cmd"]("K", cmd)
-    assert "oops" not in str(e.value)
-
-
-def test_cmd_store_is_read_only(tmp_path, monkeypatch):
-    _manifest(tmp_path, {"K": {"cmd": "printf v"}})
+def test_an_old_cmd_entry_is_never_run(tmp_path, monkeypatch, keychain_values, capsys):
+    ran = tmp_path / "ran"
+    _manifest(tmp_path, {"K": {"cmd": f"touch {ran}; printf v"}})
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(manage, "read_hidden", lambda n: pytest.fail("prompted"))
-    with pytest.raises(stores.SrunError) as e:
-        manage.cmd_add(["K"])
-    assert "secret manager" in str(e.value)
+    assert manifest.plan("K", None, manifest.load_manifest()) == ("keychain", "K")
+    assert manage.cmd_check([]) == 1
     with pytest.raises(stores.SrunError):
-        manage.cmd_rm(["K"])
+        sr.cmd_run(["K", "--", "true"])
+    assert not ran.exists()
+    assert "MISS  K  (keychain K)" in capsys.readouterr().out
 
 
-def test_run_with_cmd_store_masks_output(tmp_path, monkeypatch, capfdbinary):
-    _manifest(tmp_path, {"PW": {"cmd": "printf Dummy-Pw-91x"}})
+def test_run_masks_output(tmp_path, monkeypatch, keychain_values, capfdbinary):
+    keychain_values["PW"] = b"Dummy-Pw-91x"
+    _manifest(tmp_path, ["PW"])
     monkeypatch.chdir(tmp_path)
     rc = sr.cmd_run(["PW", "--", "sh", "-c", 'echo "pw=$PW"'])
     out, _ = capfdbinary.readouterr()
     assert rc == 0 and out == b"pw=[REDACTED:PW]\n"
 
 
-def test_check_reports_ok_and_miss_without_values(tmp_path, monkeypatch, capsys):
-    _manifest(tmp_path, {"A": {"cmd": "printf value-aaaa"}, "B": {"cmd": "exit 1"}})
+def test_check_reports_ok_and_miss_without_values(tmp_path, monkeypatch, keychain_values,
+                                                  capsys):
+    keychain_values["p/A"] = b"value-aaaa"
+    _manifest(tmp_path, ["A", "B"], namespace="p")
     monkeypatch.chdir(tmp_path)
     assert manage.cmd_check([]) == 1
     out = capsys.readouterr().out
-    assert "OK    A  (cmd)" in out and "MISS  B  (cmd)" in out
-    assert "printf" not in out
+    assert "OK    A  (keychain p/A)" in out and "MISS  B  (keychain p/B)" in out
     assert "value-aaaa" not in out
     assert manage.cmd_check(["A"]) == 0
 

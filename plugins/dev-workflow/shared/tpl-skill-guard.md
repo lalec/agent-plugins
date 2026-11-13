@@ -17,7 +17,7 @@ Replace these placeholders before writing the files:
 - `<LINT_SCOPE>` / `<TYPECHECK_SCOPE>` → the directory each command checks, with a trailing slash (the component's root); `''` when it checks the whole repo
 
 **Hook conduct rules (apply to every script below):**
-- *Gates* (skill-guard, path-coverage, dependency-guard, package-edit-guard, pre-handoff, close-out-gate) exit 2 with an actionable message on violation, 0 otherwise. `agent-mark` is the one gate on a lifecycle event: it blocks a stop through `decision: block` JSON (exit codes carry no meaning on `SubagentStop`), and only once per agent.
+- *Gates* (skill-guard, path-coverage, dependency-guard, package-edit-guard, pre-handoff, close-out-gate) exit 2 with an actionable message on violation, 0 otherwise. `agent-mark` and `pilot-continue` are the gates on lifecycle events: each blocks a stop through `decision: block` JSON (exit codes carry no meaning on `SubagentStop` or `Stop`), and only once in a row.
 - *Lifecycle recorders* (pilot-cleanup on `SessionEnd`, limit-mark on `StopFailure`, precompact-handover on `PreCompact`) write a file and exit 0; Claude Code ignores their output entirely, so the file is their whole effect.
 - *Recorders* (ref-sync-check, skill-mark, post-commit, scan-due) must **always exit 0** — a recorder that exits non-zero makes successful commands surface as errors and burns a reasoning turn. A recorder with something to tell the model prints it as `hookSpecificOutput.additionalContext` JSON on stdout. Stderr from a hook that exits 0 goes to the debug log only, so a warning written there reaches neither the model nor the user.
 
@@ -673,6 +673,28 @@ exit 0
 
 ---
 
+## § pilot-continue.sh
+
+Fires on `Stop`, the end of every main-session turn. A `/pilot` run is a chain of short turns: each dispatches a background agent and ends, and the agent's completion wakes the next. The chain breaks when a turn ends with nothing in flight — measured: the built-in `security-review` skill's instructions make its report the turn's final reply, the orchestrator ran it inline with no agent behind it, and the run sat idle 5½ hours with 10 of 17 tasks left. Claude Code hands this hook what tells the two apart: `background_tasks` (in-flight work, each with a `type`) and `session_crons` (scheduled wake-ups). So it blocks **once** when this session owns `.claude/pilot/running`, no `subagent`, `workflow` or `teammate` task is in flight and no wake-up is scheduled — the turn then continues the mission in place, with no timer and no new session. A `shell` or `monitor` task does not count: a dev stack left running would otherwise switch the hook off for the whole run. It never blocks twice in a row (`stop_hook_active`), so a run that truly cannot proceed still ends, and it does nothing when either field is absent — an older Claude Code that sends neither is unknown, never idle.
+
+```bash
+#!/bin/bash
+# Stop hook — continues this session's /pilot run when a turn ends with nothing in flight to wake it.
+INPUT=$(cat) || exit 0
+[ "$(echo "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null)" = "true" ] && exit 0
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+[ -z "$SESSION_ID" ] && exit 0
+[ "$(sed -n 2p "${CLAUDE_PROJECT_DIR:-.}/.claude/pilot/running" 2>/dev/null)" = "$SESSION_ID" ] || exit 0
+WAKERS=$(echo "$INPUT" | jq -r 'if has("background_tasks") and has("session_crons")
+  then ([.background_tasks[] | select(.type == "subagent" or .type == "workflow" or .type == "teammate")] | length) + (.session_crons | length)
+  else "unknown" end' 2>/dev/null)
+[ "$WAKERS" = "0" ] || exit 0
+jq -n '{decision: "block", reason: "This session'"'"'s /pilot run is still open (.claude/pilot/running) and nothing is in flight to wake it: no agent, no workflow, no scheduled wake-up. A report is not the end of the run. Continue from the step you are on: push if the push was next, dispatch the next task, or close out per Step 3, which removes the marker. If a Step 2 stop applies, apply it."}'
+exit 0
+```
+
+---
+
 ## § scan-due.sh
 
 Fires on `SessionStart` for `startup|resume` — not after a compaction or `/clear`, so it speaks once per session — and says when a whole-repository security scan in `<PREFIX>-review/references/scanners.yaml` is past its cadence — so a due scan reaches you every time a session opens, not only when someone thinks to run `/whats-up`. The due rule is `graph.py scans-due`'s, never restated here. It prints the same line to you (`systemMessage`) and to the model (`additionalContext`), never blocks, and is silent when nothing is due, when `python3` or the graph script is missing, or when the project has no `scanners.yaml`.
@@ -726,7 +748,7 @@ exit 0
 
 ## § settings.json
 
-Wire all 15 hook scripts — 18 entries, since `skill-guard.sh` sits under both `Edit` and `Write`, `pre-handoff-check.sh` under both `Skill` and `Task|Agent`, and `security-gate.sh` under both `Bash` and `Skill`. If the file already exists, merge the `hooks` key without removing unrelated settings. Timeout unit: **seconds**. The `Task|Agent` matcher is what makes `pre-handoff-check.sh` fire when qa is spawned as a subagent — without it the gate never runs in the pipeline. The `SubagentStop` matcher names the four pipeline agents so a research fork or an Explore child never gets blocked for lacking a handoff block. The secrets hooks are not in this file: they ship with the srun plugin, so they guard projects without dev-workflow too.
+Wire all 16 hook scripts — 19 entries, since `skill-guard.sh` sits under both `Edit` and `Write`, `pre-handoff-check.sh` under both `Skill` and `Task|Agent`, and `security-gate.sh` under both `Bash` and `Skill`. If the file already exists, merge the `hooks` key without removing unrelated settings. Timeout unit: **seconds**. The `Task|Agent` matcher is what makes `pre-handoff-check.sh` fire when qa is spawned as a subagent — without it the gate never runs in the pipeline. The `SubagentStop` matcher names the four pipeline agents so a research fork or an Explore child never gets blocked for lacking a handoff block. The secrets hooks are not in this file: they ship with the srun plugin, so they guard projects without dev-workflow too.
 
 ```json
 {
@@ -803,6 +825,13 @@ Wire all 15 hook scripts — 18 entries, since `skill-guard.sh` sits under both 
       {
         "hooks": [
           { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pilot-cleanup.sh", "timeout": 5 }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pilot-continue.sh", "timeout": 5 }
         ]
       }
     ],

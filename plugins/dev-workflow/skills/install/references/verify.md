@@ -38,7 +38,7 @@ Walk the checklist before declaring done:
 - [ ] `.claude/hooks/skill-mark.sh` is executable and writes to the session-scoped marker (same derivation as the guards)
 - [ ] `.claude/hooks/post-commit.sh` is executable, references `<PREFIX>-log`, exits 0 on success paths (recorders never exit non-zero), and emits its reminder as `additionalContext` JSON — stderr from an exit-0 hook reaches no one
 - [ ] `.claude/hooks/scan-due.sh` is executable, always exits 0, and prints its line as `systemMessage` plus `additionalContext` JSON only when `graph.py scans-due` names a scanner
-- [ ] `.claude/settings.json` exists and wires all 15 hook scripts (18 entries): `precompact-handover.sh` on `PreCompact`, `scan-due.sh` on `SessionStart`, plus 10 across `PreToolUse`/`PostToolUse` + `Edit`/`Write`/`Bash`/`Skill`/`Task|Agent` matchers, plus `agent-mark.sh` on `SubagentStop` (matcher naming the four pipeline agents), `pilot-cleanup.sh` on `SessionEnd`, `limit-mark.sh` on `StopFailure` (`rate_limit`)
+- [ ] `.claude/settings.json` exists and wires all 16 hook scripts (19 entries): `precompact-handover.sh` on `PreCompact`, `scan-due.sh` on `SessionStart`, plus 10 across `PreToolUse`/`PostToolUse` + `Edit`/`Write`/`Bash`/`Skill`/`Task|Agent` matchers, plus `agent-mark.sh` on `SubagentStop` (matcher naming the four pipeline agents), `pilot-cleanup.sh` on `SessionEnd`, `limit-mark.sh` on `StopFailure` (`rate_limit`), `pilot-continue.sh` on `Stop`
 - [ ] `CLAUDE.md` has `## Plan Mode`, `## Agents`, `## Skills`, and `## Roadmap` sections with correct references
 - [ ] `docs/roadmap.md` exists (even as a stub) and its format line documents `**Id:**` as the item's permanent handle and its `**Milestone:** <n>` paragraph
 - [ ] `docs/project-log.md` exists

@@ -37,6 +37,9 @@ read from the sibling checkout beside this one — read-only, never written, nev
                                      closes
     graph.py compact [--dry-run]     stub every closed roadmap item already committed;
                                      the body stays in git behind its `**Body:**` commit
+    graph.py check-decisions         round-trip the newest entry's `**Decisions:**` terms
+                                     through the parser; exit 1 naming each one the store
+                                     would lose (the log skill runs it before its commit)
 
 Add --json to any query for machine-readable output.
 """
@@ -185,7 +188,7 @@ def decision_terms(value: str) -> list[str]:
 # into the canonical `<word> — <condition>` so `condition_of` reads it like any other. Measured
 # across all 284 entries of this project's log: this rejoins exactly one term, the one it was
 # written for, so it widens nothing else.
-PROVENANCE_THEN_DASH_RE = re.compile(r"^(.*?)\s*\(([^()]*)\)\s+[—–-]\s+(.+)$")
+PROVENANCE_THEN_DASH_RE = re.compile(r"^(.*?)\s*\(([^()]*)\)\s+(?:--?|[—–])\s+(.+)$")
 
 
 def split_provenance(rest: str) -> tuple[str, str]:
@@ -215,9 +218,24 @@ def split_provenance(rest: str) -> tuple[str, str]:
     return rest.strip(), ""
 
 
+LEADING_WORD_RE = re.compile(r"^[A-Za-z0-9_-]+")
+
+
+def value_word(value: str) -> str:
+    """A decision value's leading word, lowercased — the token the gate logic compares.
+
+    A person qualifies the word in the value itself: `adopt=parked, NOT adoption-ready
+    (human-gated)` is a parking, and `keep=KEEP, n=3 holds (user)` is an answer. Comparing the
+    whole string dropped the first from `open-gates` (its gate then sat parked for 23 days
+    beside its own written-down answer). The full value stays on the edge; only the test reads
+    the word."""
+    m = LEADING_WORD_RE.match(value.strip())
+    return m.group(0).lower() if m else ""
+
+
 def decisions(value: str) -> list[tuple[str, str, str]]:
     """`(gate, value, by)` per term. `value` is normalised — markdown stripped, collapsed —
-    because the only test anyone runs on it is `== "parked"`, and `**KEEP**` must not read as
+    because the only test anyone runs on it is `value_word(v) == "parked"`, and `**KEEP**` must not read as
     a different word than `KEEP`. `by` is normalised the same way: the log writes a sha as
     `` commit `<sha>` `` and a reader grepping for `commit <sha>` must find it either way."""
     out = []
@@ -237,8 +255,10 @@ def decisions(value: str) -> list[tuple[str, str, str]]:
 # A parked gate records what would answer it after the provenance word: `parked
 # (human-gated — wait for a set that trips 0.05 on its own)`. That text is the only input a
 # reader has for deciding whether a gate waits on a person or on evidence, and it is the same
-# question `last.reason` answers for a deferral.
-CONDITION_RE = re.compile(r"^.*?\s[—–-]\s(.+)$")
+# question `last.reason` answers for a deferral. A typed ` -- ` is a dash too — a person on a
+# keyboard without `—` writes one, and reading it as no boundary dropped a real condition.
+SPACED_DASH = r"\s(?:--?|[—–])\s"
+CONDITION_RE = re.compile(rf"^.*?{SPACED_DASH}(.+)$")
 
 
 def slug(text: str, limit: int = 60) -> str:
@@ -1186,7 +1206,7 @@ def open_gates(edges: list[dict]) -> list[dict]:
     settled: set[tuple[str, str]] = set()  # (task, gate) answered by that entry itself
     for d in decided:
         p = d.get("props", {})
-        if p.get("value") != "parked":
+        if value_word(p.get("value", "")) != "parked":
             gate = node_id(d["to"])
             settled.add((d["from"], gate))
             if p.get("ts", "") > answered.get(gate, ""):
@@ -1198,7 +1218,7 @@ def open_gates(edges: list[dict]) -> list[dict]:
         p = d.get("props", {})
         gate = node_id(d["to"])
         ts = p.get("ts", "")
-        if p.get("value") != "parked":
+        if value_word(p.get("value", "")) != "parked":
             continue
         # Strictly older than the answer, or answered by this very entry. A *tie* keeps the
         # parking open: entries written before the format carried `HH:MM` all collapse to
@@ -1227,6 +1247,122 @@ def condition_of(by: str) -> str:
     entry recorded only the provenance word."""
     m = CONDITION_RE.match(by.strip())
     return m.group(1).strip() if m else ""
+
+
+# --------------------------------------------------------------------- decisions check
+#
+# `**Decisions:**` is free prose parsed back out, and every past parser bug was found only
+# after a real gate had been silently dropped for weeks. `check-decisions` moves that
+# discovery to write time: it round-trips each line through the projector's OWN functions
+# (`decision_terms`, `decisions`, `value_word`, `condition_of`) and fails on anything the store
+# would lose. The one independent input is `RAW_PARKING_RE`, deliberately dumber than the
+# parser — it answers only "which names does the text show followed by `=parked`?" — so a
+# parser regression shows up as a disagreement instead of agreeing with itself. It scans only
+# text OUTSIDE balanced parentheses (`outside_parens`), so a condition that mentions another
+# gate (`after speckle=parked clears`) is not read as a second parking — which borrows the
+# parser's own paren-balance rule and trades some of that independence for no false refusals.
+
+RAW_PARKING_RE = re.compile(
+    r"(?<![A-Za-z0-9_/-])([A-Za-z0-9_/-]+)\s*=\s*[^\sA-Za-z0-9]*parked(?![A-Za-z0-9-])",
+    re.IGNORECASE,
+)
+PROVENANCE_WORDS = ("user", "timeout", "agent", "pilot-auto")
+PARKED_PROVENANCE = "human-gated"
+
+
+def term_problems(term: str) -> list[tuple[str, str]]:
+    """`(subject, reason)` for one `·`-term, judged by what the parser returns for it."""
+    t = term.strip()
+    if not t:
+        return []
+    if not DECISION_TERM_RE.match(t):
+        return [(t.split()[0], f"unreadable term, dropped from the store: {clip(t, 80)!r}")]
+    out = []
+    for gate, val, by in decisions(t):
+        word = LEADING_WORD_RE.match(by)
+        word = word.group(0) if word else ""
+        if value_word(val) != "parked":
+            if word not in PROVENANCE_WORDS:
+                out.append((gate, f"provenance {by!r} is not one of {'|'.join(PROVENANCE_WORDS)}"))
+            continue
+        if word != PARKED_PROVENANCE:
+            out.append((gate, f"a parking's provenance must be {PARKED_PROVENANCE!r}, read {by!r}"))
+        cond = condition_of(by)
+        tail = val[len(value_word(val)) :]
+        if re.search(SPACED_DASH, f" {tail} "):
+            out.append((gate, f"condition read as part of the value {val!r}, not as the condition"))
+        elif re.search(SPACED_DASH, by) and not cond:
+            out.append((gate, f"condition lost — provenance reads {by!r}, condition empty"))
+        elif cond and cond not in " ".join(t.replace("`", "").split()):
+            out.append((gate, f"condition garbled — read {cond!r}, not in the written term"))
+    return out
+
+
+def outside_parens(raw: str) -> tuple[str, str]:
+    """`raw` with every balanced parenthetical's content blanked, plus a note naming the first
+    unbalanced paren (`""` when they balance). Unbalanced text is returned unblanked: with no
+    reliable depth, nothing can be ruled out of the scan."""
+    out, depth, opened = [], 0, []
+    for i, ch in enumerate(raw):
+        if ch == ")" and depth == 0:
+            seen = clip(raw[max(0, i - 30) : i + 1], 40)
+            return raw, f"an unmatched `)` at character {i + 1}: {seen!r}"
+        if ch == "(":
+            depth += 1
+            opened.append(i)
+        out.append(ch if depth == 0 or ch in "()" else " ")
+        if ch == ")":
+            depth -= 1
+            opened.pop()
+    if depth:
+        i = opened[0]
+        return raw, f"an unclosed `(` at character {i + 1}: {clip(raw[i : i + 30], 40)!r}"
+    return "".join(out), ""
+
+
+def check_decisions(text: str) -> list[tuple[str, str]]:
+    """`(subject, reason)` for every `**Decisions:**` term of the NEWEST entry the store cannot
+    read back. Only the newest: the log is append-only, so an older entry written before a rule
+    existed can never be fixed, and checking it would refuse every log commit after it."""
+    entries = parse_log(text)
+    lines = strip_fences(text).splitlines()
+    starts = [i for i, ln in enumerate(lines) if ENTRY_RE.match(ln)]
+    top = lines[: starts[1] if len(starts) > 1 else len(lines)]
+    raw = entries[0]["fields"].get("Decisions", "") if entries else ""
+    # A newest entry whose heading does not parse is invisible here: entries[0] is then the
+    # one below it, and its Decisions line is the only trace — count lines above that entry.
+    if sum(1 for ln in top if ln.startswith("**Decisions:**")) > bool(raw):
+        return [("Decisions", "the newest entry's `### ` heading does not parse, so none of "
+                 "its gates reach the store")]
+    found: list[tuple[str, str]] = []
+    for term in decision_terms(raw):
+        found += term_problems(term)
+    parked = {g for g, v, _ in decisions(raw) if value_word(v) == "parked"}
+    scan, stray = outside_parens(raw)
+    for m in RAW_PARKING_RE.finditer(scan):
+        if m.group(1) not in parked:
+            found.append((m.group(1), "written as parked, but the store reads no parking"))
+    note = f" — the line's parentheses do not balance ({stray})" if stray else ""
+    return [(s, r + note) for s, r in found]
+
+
+def check_decisions_cmd(src: Sources) -> int:
+    if not src.log.is_file():
+        print(f"check-decisions: no log at {src.log}", file=sys.stderr)
+        return 2
+    fails = check_decisions(read(src.log))
+    for subject, reason in fails:
+        print(f"{subject} · {reason}", file=sys.stderr)
+    if fails:
+        print(
+            f"check-decisions: {len(fails)} `**Decisions:**` term(s) would not read back from the "
+            "store — rewrite as `<gate>=<value> (<user|timeout|agent|pilot-auto>)`, a parking as "
+            "`<gate>=parked (human-gated — <what would answer it>)`",
+            file=sys.stderr,
+        )
+        return 1
+    print("check-decisions: every `**Decisions:**` term reads back")
+    return 0
 
 
 def days_since(ts: str, today) -> int | str:
@@ -1642,6 +1778,9 @@ def main(argv: list[str]) -> int:
 
     if cmd == "compact":
         return compact_cmd(src, "--dry-run" in rest)
+
+    if cmd == "check-decisions":
+        return check_decisions_cmd(src)
 
     if cmd == "item":
         return item_cmd(src, rest)

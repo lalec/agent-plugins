@@ -46,6 +46,7 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
 
    Two accepted limits: a session that ran several tasks accumulates skills across all of them in that one marker, so a second task in one session can over-report slightly; and agents (`<PREFIX>-dev`/`-qa`/`-pm`) never appear, because they are not skills — and in a pipeline run they always ran anyway, so their presence carries no information.
 4. Write the new entry at the **top** of `docs/project-log.md`, immediately below the header block, before the previous `---` separator
+   Then run `python3 .claude/graph/graph.py check-decisions` and fix every term it names before committing — it reads the new entry's `**Decisions:**` line back through the parser the store uses, so a gate the store would silently drop is caught while the entry can still be edited. It checks only the newest entry: older ones are append-only history. If the script is absent or exits 2, note it in the handoff and continue.
 5. Commit the log entry — stage `docs/project-log.md` only and commit:
    ```bash
    git add docs/project-log.md
@@ -99,7 +100,7 @@ Required steps before writing the log entry:
 4. [ ] Body is 1–3 sentences, no `What:` label
 5. [ ] `Deployed:` line included when a deploy occurred this session (env + url sourced from the deploy-owning skill's report); omitted otherwise
 6. [ ] `Addresses:` carries the roadmap `**Id:**` the pm step confirmed, or the line is omitted — never a guessed id
-7. [ ] `Decisions:` records every gate that came up with its true `user` / `timeout` / `agent` / `pilot-auto` origin — exactly one of those four words in the parentheses, nothing else; every `parked` says what would answer it; every value is a plain word; every `approved` sits in an entry that also cites the commit or an `**Addresses:**` id for the work it authorised
+7. [ ] `Decisions:` records every gate that came up with its true `user` / `timeout` / `agent` / `pilot-auto` origin — exactly one of those four words in the parentheses, nothing else; every `parked` says what would answer it; every value is a plain word; every `approved` sits in an entry that also cites the commit or an `**Addresses:**` id for the work it authorised; `graph.py check-decisions` exits 0
 8. [ ] `Checklist:` line omitted when nothing was updated
 9. [ ] No field outside the closed set above — leftover scope went to `docs/roadmap.md`, unrunnable verifications to `UAT-deferred:`
 10. [ ] `docs/project-log.md` committed with `log: <short title>`
@@ -2255,6 +2256,8 @@ python3 .claude/graph/graph.py item <roadmap-id>      one item's full text — a
 python3 .claude/graph/graph.py dependents <roadmap-id>  open items in sibling checkouts that name this id — who
                                                       to signal when it closes
 python3 .claude/graph/graph.py compact [--dry-run]    stub every closed roadmap item already committed
+python3 .claude/graph/graph.py check-decisions        the newest log entry's `**Decisions:**` terms the store cannot
+                                                      read back; exit 1 names each (run by `<PREFIX>-log` step 4)
 ```
 
 **`compact` is the graph's one write** — it shrinks closed roadmap items to stubs and keeps their
@@ -2355,7 +2358,16 @@ per run keeps one live row per unanswered parking. Taking the newest edge per na
 of four on a real install — and hiding is the wrong direction, because a claim that reads answered
 when it is open is reachable from nowhere. Each row also carries `condition` (what the parking said
 would answer it, taken from the text after a **spaced** dash in the provenance — `human-gated`'s own
-hyphen is not a boundary) and `age_days`.
+hyphen is not a boundary; a typed ` -- ` is one) and `age_days`. A parking is recognised by its value's
+**leading word**, so `adopt=parked, NOT adoption-ready (human-gated — …)` still lists: comparing the
+whole value dropped one such gate from `open-gates` for 23 days beside its own written answer.
+
+**`check-decisions` moves parser failures to write time.** Every past parser bug surfaced only after a
+real gate had been dropped for weeks. It round-trips each term of the newest entry through the
+projector's own functions and fails on a parking that reads back as none, a condition lost or read as
+part of the value, a term with no `=`, or a provenance outside `user|timeout|agent|pilot-auto`
+(`human-gated` for a parking). Its one independent input is a deliberately dumber scan for
+`<name>=parked` outside parentheses, so a parser regression shows up as a disagreement.
 
 **A VEX statement is edited in place, so it needs no reconcile.** `vex.yaml` holds one record
 per advisory and the pass overwrites its `status`, unlike the delivery log, which is append-only and

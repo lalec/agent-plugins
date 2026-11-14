@@ -16,7 +16,7 @@ Upgrades an existing dev-workflow install to the current templates. Idempotent �
 
 ## Flags
 
-- `--yes` — ask nothing. Step 6 confirms every gap Step 5 found. An apply step that asks its own question (a set to confirm, a choice, an unknown file to claim) and preflight's missing-skill question are left undone: list each under **Needs you** in the Step 8 report with the one question it would have asked. `/dev-workflow:upgrade-all` types this flag into every session, where nobody is at the prompt and a question waits forever.
+- `--yes` — ask nothing. Step 6 confirms every gap Step 5 found. An apply step that asks its own question (a set to confirm, a choice, an unknown file to claim) and preflight's missing-skill question are left undone: list each under **Needs you** in the Step 8 report with the one question it would have asked. `/dev-workflow:rollout` types this flag into every session, where nobody is at the prompt and a question waits forever.
 
 ---
 

@@ -1,11 +1,11 @@
 ---
-name: upgrade-all
+name: rollout
 description: Upgrade dev-workflow in every other live Claude Code session on this machine — update the plugins once, then in each session's own iTerm tab compact, reload and run the upgrade. Run it from any one session after a plugin change; macOS + iTerm2 only.
 argument-hint: "[--restart] [--session <id>]... [--dry-run]"
 disable-model-invocation: true
 ---
 
-# upgrade-all
+# rollout
 
 `/dev-workflow:upgrade` upgrades the project it runs in. This command runs it in every **other** live session whose project has an install, so one plugin change reaches every running project without visiting each tab.
 

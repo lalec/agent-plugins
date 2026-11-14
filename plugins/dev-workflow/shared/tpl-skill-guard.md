@@ -17,7 +17,7 @@ Replace these placeholders before writing the files:
 - `<LINT_SCOPE>` / `<TYPECHECK_SCOPE>` → the directory each command checks, with a trailing slash (the component's root); `''` when it checks the whole repo
 
 **Hook conduct rules (apply to every script below):**
-- *Gates* (skill-guard, path-coverage, dependency-guard, package-edit-guard, pre-handoff, close-out-gate) exit 2 with an actionable message on violation, 0 otherwise. `agent-mark` and `pilot-continue` are the gates on lifecycle events: each blocks a stop through `decision: block` JSON (exit codes carry no meaning on `SubagentStop` or `Stop`), and only once in a row.
+- *Gates* (skill-guard, path-coverage, dependency-guard, package-edit-guard, pre-handoff, close-out-gate, paid-meter) exit 2 with an actionable message on violation, 0 otherwise. `agent-mark` and `pilot-continue` are the gates on lifecycle events: each blocks a stop through `decision: block` JSON (exit codes carry no meaning on `SubagentStop` or `Stop`), and only once in a row.
 - *Lifecycle recorders* (pilot-cleanup on `SessionEnd`, limit-mark on `StopFailure`, precompact-handover on `PreCompact`) write a file and exit 0; Claude Code ignores their output entirely, so the file is their whole effect.
 - *Recorders* (ref-sync-check, skill-mark, post-commit, scan-due) must **always exit 0** — a recorder that exits non-zero makes successful commands surface as errors and burns a reasoning turn. A recorder with something to tell the model prints it as `hookSpecificOutput.additionalContext` JSON on stdout. Stderr from a hook that exits 0 goes to the debug log only, so a warning written there reaches neither the model nor the user.
 
@@ -56,6 +56,17 @@ The single source of truth for path→skill ownership. Both `skill-guard.sh` and
 #
 # COPY_PATHS: optional ERE of user-facing source (the Frontend category, when <PREFIX>-design exists).
 # ref-sync-check.sh warns when a commit adds an em dash on a non-comment line there. '' = skipped.
+#
+# PAID_* — tests that spend money outside Claude (the app's own model calls, cloud runs). Read by
+# paid-meter.sh and pre-handoff-check.sh; derived, never asked (§ How to generate). How each was
+# derived goes in a comment above it.
+# PAID_USAGE_CMD: read-only command printing one '<unit> <N>' line per capped unit — 0 when nothing
+#   ran today — for the test target only. '' = not declared yet (reports say unmetered); 'none' = tests
+#   spend nothing. A capped unit with no line reads as unreadable.
+# PAID_DAILY_CAP: '<unit>:<N>' per unit PAID_USAGE_CMD prints; at or over it, paid commands stop.
+# PAID_COMMANDS: ERE per paid entry point, matching the launcher that runs it plus the script — never the
+#   bare name, or `git add`, `cat` and a commit message naming the script would count as paid.
+# PAID_FULL_FORMS: '<match ERE>!<sample ERE>' — a paid set run in full: matches the first, not the second.
 
 GOVERNED_ROOTS='<GOVERNED_ROOTS>'
 DEPLOY_PATHS='<DEPLOY_PATHS>'
@@ -63,6 +74,10 @@ REF_WATCH='<REF_WATCH>'
 DEPENDENCY_MANIFESTS='<DEPENDENCY_MANIFESTS>'
 COPY_PATHS='<COPY_PATHS>'
 UNATTENDED_DENY='<UNATTENDED_DENY>'
+PAID_USAGE_CMD='<PAID_USAGE_CMD>'
+PAID_DAILY_CAP=(<PAID_DAILY_CAP>)
+PAID_COMMANDS=(<PAID_COMMANDS>)
+PAID_FULL_FORMS=(<PAID_FULL_FORMS>)
 
 PATH_MAP=(
   '^docs/roadmap\.md$:EXEMPT'
@@ -110,6 +125,10 @@ REF_WATCH='^(api/routes/|api/models/|api/auth/)'
 DEPENDENCY_MANIFESTS='(^|/)(package\.json|package-lock\.json|pnpm-lock\.yaml|requirements[^/]*\.txt|pyproject\.toml|uv\.lock)$'
 COPY_PATHS='^app/'
 UNATTENDED_DENY='^(infra/|\.github/workflows/|scripts/deploy\.sh$|fly\.toml$|api/auth/)'
+PAID_USAGE_CMD='none'   # discovery: no test calls a paid service
+PAID_DAILY_CAP=()
+PAID_COMMANDS=()
+PAID_FULL_FORMS=()
 
 PATH_MAP=(
   '^docs/project-log\.md$:EXEMPT'
@@ -139,6 +158,12 @@ For projects with no deploy mechanism (e.g. a static prototype), set `DEPLOY_PAT
 Rules:
 - `docs/project-log.md` is always `EXEMPT` (written by `<PREFIX>-log` without skill loading)
 - `UNATTENDED_DENY` is read by `/pilot` only (Step 2, the unattended skip); no hook enforces it, because the run that would violate it is the one deciding what to start, and a hook on `Edit` would fire inside the agent after the work had begun.
+- **`PAID_*` are derived, never asked** — at install Phase 2 and by the upgrade item, attended or `--yes` alike. The project gives no number and types no flag; it can edit the result afterwards.
+  - *Paid services and entry points:* read deploy-config, the infra code and the test scripts for every service the **test target** calls that bills per use (a hosted model, a metered cloud API, a deployed agent runtime), and every command that reaches one — test sets, live-walk scripts, direct invocations. Each becomes a `PAID_COMMANDS` ERE that matches **running** it — the interpreter or launcher and the script, `(^|[;&|] *)<launcher>[^;&|]* <script>` — never the bare script name, which also matches `git add`, `cat` and a commit message that mentions it, and would refuse dev's own commit. None found → `PAID_USAGE_CMD='none'` and the arrays empty.
+  - *Full forms:* a paid set that runs many paid calls per invocation gets a `PAID_FULL_FORMS` entry — its command, and the option that narrows it to chosen cases as the sample marker. A set with no such option gets no entry; file a roadmap item to add one, since until then every run is a full run.
+  - *Usage command:* a read-only provider query that prints today's usage of the test target as one `<unit> <N>` line per capped unit, `0` when nothing ran — the provider's near-real-time metrics, never its billing export, which lags a day. Scope it to what tests use (the test environment, account, or tag), or ordinary traffic trips the cap. Prove it through the hook: `bash .claude/hooks/paid-meter.sh --read --fresh` must print `ok` (or `over`); anything else → leave `PAID_USAGE_CMD=''` and report `unmetered` with what it printed. It runs in the hook's bare shell (`§ pre-handoff-check.sh` Bare-shell rule).
+  - *Cap:* query the last 14 days of the same usage and set each unit's cap to 2× the median day, floored at **three** full runs of every declared paid set — one task's worst case (the sign-off pass plus two fix cycles), so a task can always finish. No history → the floor. Write the derivation (`# 2x median of 14 days = <N>`) as a comment above `PAID_DAILY_CAP`.
+- `paid-meter.sh` fires on Bash **mid-task**, unlike `UNATTENDED_DENY`: an edit can be reverted, money spent cannot, so the guard sits where the spend happens.
 - The entry-point skills (`code`, `fix`, `pilot`, … — the fixed names in `preflight.md § Where the entry points live`) are `OPEN`, exactly as `.claude/commands/` always was: they are commands in Rules 1–2's sense and no lifecycle skill owns them. The entry sits **before** the `.claude/skills/` catch-all, or every edit to one would demand `<PREFIX>-skill` loaded.
 - `.claude/pilot/` is always `EXEMPT` and gitignored whole — `/pilot` writes its run markers there at the top level and the lifecycle hooks write `limit-hit`; nothing in it is tracked. (Legacy note, kept so a grep finds it: the directory once held a tracked `shift.sh`, a verbatim plugin copy that no skill authors
 - `<PREFIX>-test/references/custom-tests.yaml` is always `EXEMPT` — the `/code`/`/fix` Step 1.5 persist step writes it at the top level and carries the schema itself; gating it forces a full skill load per pipeline run for a 10-line append
@@ -313,7 +338,7 @@ exit 0
 
 ## § pre-handoff-check.sh
 
-Blocks invocation of `<PREFIX>-qa` if the working tree has uncommitted changes, or lint or typecheck fails for a part of the project the commits under review changed — and blocks **every** pipeline-agent dispatch while `.claude/pilot/stop` exists, so a stop dropped from a phone lands at the next subagent boundary. Enforces commit-before-review and clean-code gates mechanically. **Must match both invocation paths:** the Skill tool (`tool_input.skill`) *and* an Agent/Task spawn (`tool_input.subagent_type`) — in the pipeline qa is spawned as a subagent, so a Skill-only match makes this gate dead code.
+Blocks invocation of `<PREFIX>-qa` if the working tree has uncommitted changes, or lint or typecheck fails for a part of the project the commits under review changed — and blocks **every** pipeline-agent dispatch while `.claude/pilot/stop` exists, so a stop dropped from a phone lands at the next subagent boundary, and every dev/qa/verify dispatch while today's paid usage is over its cap (`§ paid-meter.sh`), which stops paid calls no `PAID_COMMANDS` pattern recognises. Enforces commit-before-review and clean-code gates mechanically. **Must match both invocation paths:** the Skill tool (`tool_input.skill`) *and* an Agent/Task spawn (`tool_input.subagent_type`) — in the pipeline qa is spawned as a subagent, so a Skill-only match makes this gate dead code.
 
 ```bash
 #!/bin/bash
@@ -328,6 +353,13 @@ AGENT_TYPE=$(echo "$INPUT" | jq -r '.tool_input.subagent_type // empty' 2>/dev/n
 STOP="${CLAUDE_PROJECT_DIR:-.}/.claude/pilot/stop"
 if [ -f "$STOP" ] && [ -n "$AGENT_TYPE" ] && echo "$AGENT_TYPE" | grep -qE '^<PREFIX>-(dev|qa|pm|verify)$'; then
   echo "Stop gate: .claude/pilot/stop exists ($(head -1 "$STOP")) — no further agent is dispatched; close out the run, which removes the file." >&2
+  exit 2
+fi
+
+# Paid cap: no agent that can spend is dispatched while today's paid usage is over its cap.
+if [ -n "$AGENT_TYPE" ] && echo "$AGENT_TYPE" | grep -qE '^<PREFIX>-(dev|qa|verify)$' \
+   && [ "$("$(dirname "$0")/paid-meter.sh" --read | head -1)" = over ]; then
+  echo "Paid cap gate: today's paid usage is over its cap — no agent that can spend is dispatched; park the task (reason 'paid cap: …') and close out." >&2
   exit 2
 fi
 
@@ -753,9 +785,74 @@ exit 0
 
 ---
 
+## § paid-meter.sh
+
+Fires on every Bash call and stops paid test spend the same day, inside a running task. It reads the project's own usage — `PAID_USAGE_CMD`, cached for 5 minutes in `.claude/pilot/paid-usage` — and refuses a command matching `PAID_COMMANDS` once any unit reaches its `PAID_DAILY_CAP`, or when the usage cannot be read (closed for paid work only). Every other command passes, so git, `run-checks.py record`, the run record and close-out keep working at the cap. It also refuses a `PAID_FULL_FORMS` run from inside `<PREFIX>-dev`: dev iterates on the sample form, and the full set runs at qa's sign-off. Measured: one project's dev agent re-ran a several-hundred-case paid set dozens of times in a day while tuning, and nothing counted it until the monthly bill.
+
+It only reads usage — no counter is written per call, so parallel calls cannot race. A command that starts under the cap runs to its end: one Bash call (a batch, a background script) is the overshoot unit, which is why the cap's floor is three full runs. Ad-hoc paid calls that match no pattern are stopped at the next agent dispatch instead (`§ pre-handoff-check.sh`). `--read` prints the reading — state on the first line, then `<unit> <N>` lines — for `/pilot` and `pre-handoff-check.sh`; `--fresh` re-queries regardless of age.
+
+```bash
+#!/bin/bash
+# PreToolUse Bash hook — caps paid test usage per day, and keeps paid full runs out of <PREFIX>-dev.
+# Also: paid-meter.sh --read [--fresh] prints the reading (ok|over|unreadable|unmetered|none, then usage).
+DIR="${CLAUDE_PROJECT_DIR:-.}"
+source "$DIR/.claude/hooks/governed-paths.conf" 2>/dev/null || exit 0
+CACHE="$DIR/.claude/pilot/paid-usage"
+
+reading() { # $1 = fresh → re-query regardless of age
+  [ "$PAID_USAGE_CMD" = none ] && { echo none; return; }
+  [ -z "$PAID_USAGE_CMD" ] && { echo unmetered; return; }
+  local now ts; now=$(date +%s); ts=$(sed -n 2p "$CACHE" 2>/dev/null)
+  local age=$(( now - ${ts:-0} ))
+  if [ "$1" = fresh ] || [ "$age" -ge 300 ] || [ "$(date -r "$CACHE" +%F 2>/dev/null)" != "$(date +%F)" ]; then
+    mkdir -p "$(dirname "$CACHE")"; local tmp; tmp=$(mktemp "$CACHE.XXXX") || return
+    local out state=ok
+    if out=$(perl -e 'alarm shift; exec @ARGV' 20 bash -c "$PAID_USAGE_CMD" 2>/dev/null) && [ -n "$out" ]; then
+      for c in "${PAID_DAILY_CAP[@]}"; do   # a capped unit with no line is unreadable; over wins
+        local used; used=$(printf '%s\n' "$out" | awk -v u="${c%%:*}" '$1 == u {print $2; exit}')
+        if [ -z "$used" ]; then [ $state = over ] || state=unreadable
+        elif awk -v a="$used" -v b="${c##*:}" 'BEGIN {exit !(a >= b)}'; then state=over; fi
+      done
+    else state=unreadable; out=; fi
+    printf '%s\n%s\n%s\n' "$state" "$now" "$out" > "$tmp" && mv "$tmp" "$CACHE"
+  fi
+  sed '2d' "$CACHE"
+}
+
+if [ "$1" = --read ]; then reading "${2#--}"; exit 0; fi
+
+INPUT=$(cat) || exit 0
+CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
+[ -z "$CMD" ] && exit 0
+
+# Dev iterates on samples: a full run from inside <PREFIX>-dev is refused (agent_id = a subagent call).
+if [ -n "$(echo "$INPUT" | jq -r '.agent_id // empty' 2>/dev/null)" ] \
+   && [ "$(echo "$INPUT" | jq -r '.agent_type // empty' 2>/dev/null)" = "<PREFIX>-dev" ]; then
+  for f in "${PAID_FULL_FORMS[@]}"; do
+    if echo "$CMD" | grep -qE -e "${f%%!*}" && ! echo "$CMD" | grep -qE -e "${f#*!}"; then
+      echo "Paid gate: this runs a paid set in full — iterate on its sample form (.claude/skills/<PREFIX>-test/references/test-commands.md § Paid); the full set runs once, at qa's sign-off." >&2
+      exit 2
+    fi
+  done
+fi
+
+PAID=0
+for p in "${PAID_COMMANDS[@]}"; do echo "$CMD" | grep -qE -e "$p" && PAID=1 && break; done
+[ $PAID = 1 ] || exit 0
+
+R=$(reading)
+case "$(echo "$R" | head -1)" in
+  over) echo "Paid cap: today's paid usage reached its cap ($(echo "$R" | sed -n '2,$p' | tr '\n' ' ')/ ${PAID_DAILY_CAP[*]}) — report the verification blocked with reason 'paid cap: …' and park the task; do not retry or work around it." >&2; exit 2 ;;
+  unreadable) echo "Paid cap: today's paid usage could not be read (PAID_USAGE_CMD failed or timed out) — paid commands stay closed until it reads; report the verification blocked with reason 'paid cap: usage unreadable'." >&2; exit 2 ;;
+esac
+exit 0
+```
+
+---
+
 ## § settings.json
 
-Wire all 16 hook scripts — 20 entries, since `skill-guard.sh` sits under both `Edit` and `Write`, `pre-handoff-check.sh` under both `Skill` and `Task|Agent`, `security-gate.sh` under both `Bash` and `Skill`, and `pilot-continue.sh` under both `Stop` and `SessionStart` (`compact`). If the file already exists, merge the `hooks` key without removing unrelated settings. Timeout unit: **seconds**. The `Task|Agent` matcher is what makes `pre-handoff-check.sh` fire when qa is spawned as a subagent — without it the gate never runs in the pipeline. The `SubagentStop` matcher names the four pipeline agents so a research fork or an Explore child never gets blocked for lacking a handoff block. The secrets hooks are not in this file: they ship with the srun plugin, so they guard projects without dev-workflow too.
+Wire all 17 hook scripts — 21 entries, since `skill-guard.sh` sits under both `Edit` and `Write`, `pre-handoff-check.sh` under both `Skill` and `Task|Agent`, `security-gate.sh` under both `Bash` and `Skill`, and `pilot-continue.sh` under both `Stop` and `SessionStart` (`compact`). If the file already exists, merge the `hooks` key without removing unrelated settings. Timeout unit: **seconds**. The `Task|Agent` matcher is what makes `pre-handoff-check.sh` fire when qa is spawned as a subagent — without it the gate never runs in the pipeline. The `SubagentStop` matcher names the four pipeline agents so a research fork or an Explore child never gets blocked for lacking a handoff block. The secrets hooks are not in this file: they ship with the srun plugin, so they guard projects without dev-workflow too.
 
 ```json
 {
@@ -780,7 +877,8 @@ Wire all 16 hook scripts — 20 entries, since `skill-guard.sh` sits under both 
         "hooks": [
           { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/dependency-guard.sh", "timeout": 5 },
           { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/close-out-gate.sh", "timeout": 10 },
-          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/security-gate.sh", "timeout": 10 }
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/security-gate.sh", "timeout": 10 },
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/paid-meter.sh", "timeout": 30 }
         ]
       },
       {

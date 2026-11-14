@@ -1439,6 +1439,10 @@ A ship-env's build must produce what was verified, not whatever the package inde
 3. Otherwise pushing is safe — push directly.
 4. **After any CI-coupled push:** watch the CI run to completion (`gh run watch` or the platform equivalent) and verify the deployed env's url/health before reporting "deployed". A push with CI still running is "deploying", not "deployed" — never end a shipping turn without the health check.
 
+## Budget check
+
+Run at install, at upgrade, and at the start of an unattended `/pilot` — the moments nobody else is watching the bill. Run `billing.budget_check` from `references/deploy-config.yaml` and return one line: `billing: ok — <N> budgets, each reaches a confirmed recipient`, `billing: no recipient — <budget names>` (a budget exists but its alerts reach nobody — the caller reports it as an Open row naming where to add one), or `billing: unchecked — <why>` (no `billing:` key, or the command failed). Never create, edit or delete a budget from here: the account is the user's, and this check only reports.
+
 ## Reference Sync
 
 Verify before finishing any `<PREFIX>-deploy` invocation:
@@ -1476,7 +1480,7 @@ Testing authority for <PROJECT>. Runs three tiers — **Smoke** (always), **Func
 | **Functional Feature** | `references/custom-tests.yaml` | This task's verifications always; prior verifications whose `paths:` intersect the changed paths named in the prompt |
 | **Regression** | `references/test-commands.md § Regression` + every `custom-tests.yaml` verification | Only when the resolved scope is `full` — passed as `regression_mode: full`, or resolved from the change when the caller passes `auto` (see `references/custom-tests.md § Regression scope`) |
 
-**The end-state verification is non-negotiable.** Among this task's verifications, the one that asserts where the journey ends runs in **every** resolved scope including `smart`, on **every** invocation including `mode=retest`, and is never traded away for time. If its target is unreachable, it is reported `blocked` with a `reason` — never skipped, never quietly narrowed to the hop before it. A scope decision may change how much *else* runs; it may never decide whether the feature itself was proven.
+**The end-state verification is non-negotiable.** Among this task's verifications, the one that asserts where the journey ends runs in **every** resolved scope including `smart`, on **every** invocation including `mode=retest`, and is never traded away for time. If its target is unreachable, it is reported `blocked` with a `reason` — never skipped, never quietly narrowed to the hop before it. A scope decision may change how much *else* runs; it may never decide whether the feature itself was proven. A **paid** end-state check is no exception: it runs on every invocation in its sample form, and only its full form can record `pass` (`references/custom-tests.md § Paid verifications`).
 
 If the prompt names no changed paths and no new verifications (a bare smoke request), run Smoke only — plus Regression when `regression_mode: full`.
 
@@ -1488,7 +1492,7 @@ Always-run baseline: service/endpoint reachability + log check. Curl templates a
 
 ## Functional Feature Tests
 
-Per-task verifications captured up-front by `/code` and `/fix` and accumulated in `references/custom-tests.yaml`. This skill resolves *how* to verify each one at runtime — read `references/custom-tests.md` for the schema, the execution protocol (type → tool → pass criterion, including the UX/E2E screenshot rule), the prior-selection and carry-forward rules, how to split a large set across parallel children, and — when the caller passes `regression_mode: auto` — the regression-scope rule, before running this tier.
+Per-task verifications captured up-front by `/code` and `/fix` and accumulated in `references/custom-tests.yaml`. This skill resolves *how* to verify each one at runtime — read `references/custom-tests.md` for the schema, the execution protocol (type → tool → pass criterion, including the UX/E2E screenshot rule), the prior-selection, carry-forward and paid-verification rules, how to split a large set across parallel children, and — when the caller passes `regression_mode: auto` — the regression-scope rule, before running this tier.
 
 ## Regression
 
@@ -1500,7 +1504,7 @@ Full broad suite — `references/test-commands.md § Regression` (hand-authored)
 
 - Run tests after every significant change before closing the task.
 - **Never re-run domain unit/lint suites** — those are `<PREFIX>-dev`'s Quality Checklist gates, already run before handoff. This skill's tiers are Smoke, Functional Feature, and Regression only; a full unit suite is not an acceptable "superset" substitute for the selected tier set — it re-proves what dev proved and overrides the caller's `regression_mode`.
-- **`regression_mode: smart` and `full` are pinned — `auto` is the only one you decide.** A pinned value binds in both directions: never widen it, never narrow it. **Carrying a prior forward is not narrowing** — the scope still covers it, and the carry is recorded with the commit range that proves nothing it covers changed (`references/custom-tests.md § Carrying a prior forward`). Dropping a verification for any other reason — time, cost, a guess that it is unrelated — is narrowing, and is forbidden. On `auto`, resolve the scope once per task from the paths actually changed (`references/custom-tests.md § Regression scope`) and **report the value you resolved plus the one-clause reason** — that report is what the caller puts on its `Tests:` line and the delivery log records as an agent-derived decision. An unreported resolution reads as if the caller chose it.
+- **`regression_mode: smart` and `full` are pinned — `auto` is the only one you decide.** A pinned value binds in both directions: never widen it, never narrow it. **Carrying a prior forward is not narrowing** — the scope still covers it, and the carry is recorded with the commit range that proves nothing it covers changed (`references/custom-tests.md § Carrying a prior forward`). Dropping a verification for any other reason — time, cost, a guess that it is unrelated — is narrowing, and is forbidden. **Running a paid verification's sample form before the sign-off pass is not narrowing either**: its full form still runs before it can pass (`references/custom-tests.md § Paid verifications`). On `auto`, resolve the scope once per task from the paths actually changed (`references/custom-tests.md § Regression scope`) and **report the value you resolved plus the one-clause reason** — that report is what the caller puts on its `Tests:` line and the delivery log records as an agent-derived decision. An unreported resolution reads as if the caller chose it.
 - Never start automated actions against live targets without explicit user confirmation.
 - Use representative placeholder inputs for smoke tests; live/real targets require explicit opt-in.
 - In the `/code`/`/fix` pipeline this skill runs inside the `<PREFIX>-qa` subagent and **must not** ask the user interactively — resolve each verification deterministically; if a target cannot be resolved, report that verification as blocked rather than prompting. Interactive disambiguation is allowed only when this skill is invoked directly at top level (see `references/custom-tests.md`).
@@ -1510,7 +1514,7 @@ Full broad suite — `references/test-commands.md § Regression` (hand-authored)
 Verify before finishing any `<PREFIX>-test` invocation that touches API handlers or test infrastructure:
 - [ ] `references/test-commands.md` Smoke / Regression / Functional Feature Subjects match current handlers, endpoints, and run scripts
 - [ ] `references/custom-tests.yaml` verifications reflect current behavior; stale `type`/`paths` corrected
-- [ ] Every verification executed this invocation has its `last:` block written (including `blocked` ones, each with its `reason`)
+- [ ] Every verification executed this invocation has its `last:` block written (including `blocked` ones, each with its `reason`) — except a paid verification whose sample form passed, which writes none
 - [ ] `references/custom-tests.md` execution protocol matches the types in use
 - [ ] `references/sync-checklist.md` trigger rules reflect current API surface and test tooling
 
@@ -1536,6 +1540,7 @@ Verify before finishing any `<PREFIX>-test` invocation that touches API handlers
 - [ ] Database schema, table/collection name, or query pattern changes
 - [ ] A Smoke or Regression command no longer matches current handlers / run scripts
 - [ ] Dev server port changes
+- [ ] A paid set's command, sample option or failing-row naming changes (`## Paid`), or a new command reaches a paid service — then `PAID_COMMANDS` / `PAID_FULL_FORMS` in `governed-paths.conf` change with it
 
 ## Update `references/custom-tests.yaml` when:
 
@@ -1555,6 +1560,16 @@ Verify before finishing any `<PREFIX>-test` invocation that touches API handlers
 ## Regression
 
 <!-- Full broad suite, run only on regression_mode: full. Hand-authored; grows as broad invariants are added. -->
+
+## Paid
+
+<!-- Test commands that spend money outside Claude: the app's own model calls, metered cloud runs. One block per
+     paid set, matching its PAID_COMMANDS / PAID_FULL_FORMS entries in .claude/hooks/governed-paths.conf:
+     ### <set name>
+     - Full form: <command that runs every case>       — qa's sign-off pass only
+     - Sample form: <command narrowed to a fixed small subset plus named cases>  — every other run, dev included
+     - Failing cases: <how the full form names a failed case, so the sample can name it back>
+     A set with no sample form runs only in full; a roadmap item asks for one. Empty when PAID_USAGE_CMD='none'. -->
 
 ## Functional Feature Subjects
 
@@ -1970,6 +1985,31 @@ re-proving the assertion would silently carry a verdict nobody earned.
 which is the same blur the `pass`/`blocked` rule exists to prevent one level down. Do **not** rewrite
 `last:` for a carried verification: it was not executed, and its recorded commit is what a later carry
 measures the next diff from.
+
+## Paid verifications
+
+A verification whose command matches a `PAID_COMMANDS` entry in `.claude/hooks/governed-paths.conf`
+spends money outside Claude on every run, so how often it runs in full is a cost decision, not only a
+scope one. Carrying applies first: a paid verification whose paths are unchanged is carried and costs
+nothing. One that must run follows `test-commands.md § Paid`:
+
+- **Every pass runs its sample form** — the fixed subset plus every case that failed on its last
+  full run — including `mode=retest`, so a fix is checked against what broke without re-spending
+  the whole set.
+- **The full form runs on the pass that would sign off**: every other verification in scope has
+  passed and this one's sample passed. Only the full form records `pass`. A full-form failure is
+  `fail` with the failing cases named in `reason`, and those cases are what the next sample adds.
+- **`last:`** — the full form writes it either way; a sample *failure* writes `fail` with the
+  failing cases; a sample *pass* writes nothing, because it proved less than the last full run did.
+  Its Evidence line reads `sample: <N> cases pass — full run at sign-off`, never `pass`.
+- **A set with no sample form** runs in full, once per task, on the sign-off pass.
+- **`paid cap:`** — when `paid-meter.sh` refuses the command, record the verification `blocked`
+  with the hook's reason verbatim. It is a budget stop, not a defect: the caller parks the task and
+  spends no fix cycle on it, and it never counts toward the repeated-blocker rule or widens a later
+  task's scope (`§ Regression scope`) — none of those signals is about the code.
+
+Measured before this rule: one project re-ran a several-hundred-case paid set on every retest and
+in every dev iteration, about a hundred full runs in one day — one task's sign-off needs one.
 
 ## Regression scope
 

@@ -14,8 +14,10 @@ disable-model-invocation: true
 Run `scripts/fanout.sh` from this skill's directory with the user's arguments, using Bash `run_in_background` — it waits for each session to be idle, which can take as long as that session's current turn.
 
 1. **Once for the machine:** updates dev-workflow and every plugin its manifest depends on, each from its own marketplace.
-2. **Per session, in parallel, each only once it is idle**, typed into its own iTerm tab: `/compact`, `/reload-plugins`, `/dev-workflow:upgrade --yes`. A session that owns an open `/pilot` run resumes it after the upgrade (`upgrade` Step 8).
-3. **`--restart`** also runs `claude update` once, then per session `/compact`, `/exit`, and a relaunch in the same tab with that session's own launch flags plus `--resume <id> '/dev-workflow:upgrade --yes'`, so it runs the new Claude Code. The session id stays the same. A session that owns an open `/pilot` run is never exited — its in-flight agents would die — and gets step 2 instead.
+2. **Per session, in parallel, each only once it is idle**, typed into its own iTerm tab: `/compact`, `/reload-plugins`, `/dev-workflow:upgrade --yes`.
+3. **`--restart`** also runs `claude update` once, then per session `/compact`, `/exit`, and a relaunch in the same tab with that session's own launch flags plus `--resume <id> '/dev-workflow:upgrade --yes'`, so it runs the new Claude Code. The session id stays the same.
+
+**A session in the middle of a `/pilot` run is skipped** — the run's marker names that session and no usage limit has killed it since. Upgrading mid-run would switch the run's rules partway and rewrite files its agents are using; `--restart` would kill them.
 
 `--session <id>` limits it to those sessions; `--dry-run` lists each session and the mode it would get, and types nothing. Run `--dry-run` first when unsure what is live.
 
@@ -23,4 +25,4 @@ Run `scripts/fanout.sh` from this skill's directory with the user's arguments, u
 
 ## Report
 
-When the script ends, one row per session from its output: project, mode, the last step it reached, `done` or what stopped it. Add a last row for this session if its own project has an install: it is not included, so run `/dev-workflow:upgrade` here.
+When the script ends, one row per session from its output: project, mode, the last step it reached, `done`, `skipped` or what stopped it. A skipped row's next step is `/dev-workflow:upgrade` in that tab once its run ends. Add a last row for this session if its own project has an install: it is not included, so run `/dev-workflow:upgrade` here.

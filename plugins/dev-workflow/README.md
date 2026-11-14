@@ -95,7 +95,7 @@ When several projects are open in their own sessions, run this once from any ses
 /dev-workflow:upgrade-all
 ```
 
-It updates the plugins once, then in each other session's iTerm tab, as soon as that session is idle, compacts it, reloads the plugins and runs the upgrade with `--yes`, so every running project picks up the change without you visiting each tab. A session in the middle of a `/pilot` run carries on with it afterwards. `--restart` also updates Claude Code and relaunches each session on it, resuming the same conversation, except sessions with a run in progress, which are never cut off. `--dry-run` shows what it would do. macOS and iTerm2 only.
+It updates the plugins once, then in each other session's iTerm tab, as soon as that session is idle, compacts it, reloads the plugins and runs the upgrade with `--yes`, so every running project picks up the change without you visiting each tab. A session in the middle of a `/pilot` run is left alone, so the run finishes on the rules it started with; run `/dev-workflow:upgrade` there once it ends. `--restart` also updates Claude Code and relaunches each session on it, resuming the same conversation. `--dry-run` shows what it would do. macOS and iTerm2 only.
 
 ---
 

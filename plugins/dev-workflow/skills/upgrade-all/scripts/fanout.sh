@@ -7,8 +7,9 @@
 #   first, once for the machine: update dev-workflow and every plugin its manifest depends on
 #   (default)  per session: /compact, /reload-plugins, /dev-workflow:upgrade --yes
 #   --restart  also claude update once, then per session: /compact, /exit, relaunch with the same
-#              flags plus --resume <id> '/dev-workflow:upgrade --yes'. A session that owns an
-#              open /pilot run is never exited (its in-flight agents would die) — it gets the default.
+#              flags plus --resume <id> '/dev-workflow:upgrade --yes'
+#   A session that owns a live /pilot run is skipped: upgrading mid-run swaps its rules partway
+#   and rewrites files its agents are using. Run /dev-workflow:upgrade there once the run ends.
 #   --session  limit to these session ids
 #   --dry-run  list what would happen, type nothing
 set -euo pipefail
@@ -35,11 +36,28 @@ mkdir -p "$LOG_DIR"; rm -f "$LOG_DIR"/*.log
   exit 3
 }
 
-# pid<TAB>session id<TAB>cwd<TAB>owns-open-run(0|1) — live interactive sessions with an install, not this one
+# pid<TAB>session id<TAB>cwd<TAB>owns-live-run(0|1) — live interactive sessions with an install, not this one
 list_sessions() {
   python3 - "$SELF" "${ONLY[@]+"${ONLY[@]}"}" <<'PY'
 import glob, json, os, sys
 self_id, only = sys.argv[1], set(sys.argv[2:])
+
+def lines(path):
+    try:
+        return open(path).read().splitlines()
+    except OSError:
+        return []
+
+# The run marker names this session and no limit-hit from the same session is newer — a newer one is
+# a run the allowance killed. No age cut-off: a session's own run can last days (/pilot's 6 h rule
+# judges another session's marker), and the session-end hook clears the marker of a closed session.
+def owns_live_run(cwd, sid):
+    run = lines(os.path.join(cwd, ".claude/pilot/running"))
+    if run[1:2] != [sid]:
+        return False
+    hit = lines(os.path.join(cwd, ".claude/pilot/limit-hit"))
+    return not (hit[1:2] == [sid] and hit[0] > run[0])
+
 for f in glob.glob(os.path.expanduser("~/.claude/sessions/*.json")):
     try:
         d = json.load(open(f))
@@ -51,11 +69,7 @@ for f in glob.glob(os.path.expanduser("~/.claude/sessions/*.json")):
         continue
     if not os.path.isfile(os.path.join(cwd, ".claude/skills/pilot/SKILL.md")):
         continue
-    try:
-        owns = open(os.path.join(cwd, ".claude/pilot/running")).read().splitlines()[1:2] == [sid]
-    except Exception:
-        owns = False
-    print(f'{d["pid"]}\t{sid}\t{cwd}\t{int(owns)}')
+    print(f'{d["pid"]}\t{sid}\t{cwd}\t{int(owns_live_run(cwd, sid))}')
 PY
 }
 
@@ -119,14 +133,16 @@ one() { # pid sid cwd owns
   local pid=$1 sid=$2 cwd=$3 owns=$4 tty
   tty=/dev/$(ps -o tty= -p "$pid" | tr -d ' ')
   local mode=attach
-  [ $RESTART = 1 ] && [ "$owns" = 0 ] && mode=restart
-  echo "$(basename "$cwd") $sid $tty mode=$mode$([ "$owns" = 1 ] && echo ' (owns an open /pilot run)')"
+  [ $RESTART = 1 ] && mode=restart
+  [ "$owns" = 1 ] && mode=skip
+  echo "$(basename "$cwd") $sid $tty mode=$mode$([ $mode = skip ] && echo ' (live /pilot run — run /dev-workflow:upgrade there once it ends)')"
   [ $DRY = 1 ] && return 0
+  [ $mode = skip ] && { echo skipped; return 0; }
   step "$pid" "$tty" /compact || return 1
   if [ $mode = attach ]; then
     step "$pid" "$tty" /reload-plugins || return 1
     step "$pid" "$tty" "$UPGRADE" || return 1
-    return 0
+    echo done; return 0
   fi
   local cmd; cmd=$(relaunch_cmd "$pid" "$sid")
   step "$pid" "$tty" /exit || return 1
@@ -134,6 +150,7 @@ one() { # pid sid cwd owns
   kill -0 "$pid" 2>/dev/null && { echo "still running after /exit — not relaunched"; return 1; }
   [ "$(type_into "$tty" "cd $(printf %q "$cwd") && $cmd")" = ok ] || { echo "no iTerm tab on $tty"; return 1; }
   echo "relaunched: $cmd"
+  echo done
 }
 
 update_plugins() { # dev-workflow and its manifest dependencies, each from its own marketplace
@@ -157,7 +174,7 @@ fi
 while IFS=$'\t' read -r pid sid cwd owns; do
   log=$LOG_DIR/$sid.log
   if [ $DRY = 1 ]; then one "$pid" "$sid" "$cwd" "$owns"; else
-    ( one "$pid" "$sid" "$cwd" "$owns" > "$log" 2>&1 && echo done >> "$log" || echo FAILED >> "$log" ) &
+    ( one "$pid" "$sid" "$cwd" "$owns" > "$log" 2>&1 || echo FAILED >> "$log" ) &
   fi
 done <<< "$SESSIONS"
 wait

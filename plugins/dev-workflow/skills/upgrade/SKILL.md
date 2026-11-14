@@ -14,6 +14,12 @@ Upgrades an existing dev-workflow install to the current templates. Idempotent �
 
 ---
 
+## Flags
+
+- `--yes` — ask nothing. Step 6 confirms every gap Step 5 found. An apply step that asks its own question (a set to confirm, a choice, an unknown file to claim) and preflight's missing-skill question are left undone: list each under **Needs you** in the Step 8 report with the one question it would have asked. `/dev-workflow:upgrade-all` types this flag into every session, where nobody is at the prompt and a question waits forever.
+
+---
+
 ## Preflight
 
 Read `../../shared/preflight.md` and follow it before continuing.
@@ -65,7 +71,7 @@ Read `references/probes.md` now — every probe, in order, each stated as a grep
 
 ## Step 6 — Wait for explicit user confirmation
 
-Do not proceed until the user confirms which gaps to apply.
+Do not proceed until the user confirms which gaps to apply. With `--yes`, every gap is confirmed — see § Flags.
 
 ---
 
@@ -78,3 +84,5 @@ Read `references/apply.md` now and apply the confirmed steps in its order — th
 ## Step 8 — Verify
 
 Read `references/verify.md` now and run every check that the applied steps touched. Report each as passed, failed with what was seen, or not runnable here with why; the next real delivery proves the rest. The report's steps for the user name only what no workflow command does on its own — a gate the workflow's own push or deploy satisfies is not one.
+
+**An open run continues.** If `.claude/pilot/running` names this session (`$CLAUDE_CODE_SESSION_ID`), follow `.claude/skills/pilot/SKILL.md § After a compaction` now. The run instructions in this session's context are the pre-upgrade ones.

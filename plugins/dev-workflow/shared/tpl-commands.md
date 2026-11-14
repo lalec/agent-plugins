@@ -989,6 +989,8 @@ description: Resume work by loading a prior session's /handover file from .claud
 - `/proceed cloud-run-jobs` — match by slug substring
 - `/proceed 2026-05-13T0030_cloud-run-jobs.md` — exact filename
 
+**Inside an open `/pilot` run, ask nothing.** When the second line of `.claude/pilot/running` is this session's id (`$CLAUDE_CODE_SESSION_ID`), the run is unattended and invoked this command after a compaction: Step 1 takes the newest file, Step 3 is one line, Step 4 reports drift and never pauses — the run's own loop decides what drift means — and Step 5 resumes the listed next action without its question. Every question below would wait for a person the run was started without, and the question timeout never fires.
+
 ## Step 1 — Resolve which handover
 
 `ls -t .claude/handovers/*.md 2>/dev/null`, newest first.

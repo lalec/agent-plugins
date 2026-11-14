@@ -1,6 +1,6 @@
 # Upgrade — Step 8 verification
 
-> Paths of the form `../../shared/<file>` are relative to the upgrade skill's directory (`plugins/dev-workflow/skills/upgrade/`), i.e. the plugin's `shared/`. `<name>.md` for an entry point means `.claude/skills/<name>/SKILL.md` — see `../../shared/preflight.md § Where the entry points live`.
+> Paths of the form `../../shared/<file>` are relative to the upgrade skill's directory (`plugins/dev-workflow/skills/upgrade/`), i.e. the plugin's `shared/`. `<name>.md` for an entry point means `.claude/skills/<name>/SKILL.md`, and a check for a phrase in it searches that skill's `references/*.md` too — see `../../shared/preflight.md § Where the entry points live`.
 
 Run these verification checks on the upgrade-affected items:
 

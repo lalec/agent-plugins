@@ -84,7 +84,7 @@ All hooks wired in `.claude/settings.json`.
 | `path-coverage-check.sh` | PreToolUse Write | Blocks new files in governed roots with no matching owner |
 | `dependency-guard.sh` | PreToolUse Bash | Requires `<PREFIX>-skill` before adding packages |
 | `package-edit-guard.sh` | PreToolUse Edit | Requires `<PREFIX>-skill` before editing package files directly |
-| `pre-handoff-check.sh` | PreToolUse Skill + Task/Agent | Blocks `<PREFIX>-qa` (skill call or subagent spawn) if uncommitted changes, or lint fails for a component the commits changed |
+| `pre-handoff-check.sh` | PreToolUse Skill + Task/Agent | Blocks `<PREFIX>-qa` (skill call or subagent spawn) if uncommitted changes, or lint fails for a component the commits changed; blocks every pipeline-agent dispatch while `.claude/pilot/stop` exists, and dev/qa/verify dispatch while today's paid usage is over its cap |
 | `close-out-gate.sh` | PreToolUse Bash | Blocks `git push` while governed commits lack a delivery-log entry (`CLOSEOUT_OVERRIDE=1` escape) |
 | `security-gate.sh` | PreToolUse Bash + Skill | Blocks `git push` and a prod deploy while unpushed governed or deploy changes lack a Claude Code `/security-review` (`CLOSEOUT_OVERRIDE=1` escape for a push only) |
 | `ref-sync-check.sh` | PostToolUse Bash | Warns on reference-worthy drift (structural / `REF_WATCH`), deploy-config drift, dependency drift, and em dashes added to user-facing copy |
@@ -95,6 +95,7 @@ All hooks wired in `.claude/settings.json`.
 | `precompact-handover.sh` | PreCompact | Writes a file-derived fallback handover to `.claude/handovers/` the moment compaction starts, so `/proceed` always has a record |
 | `scan-due.sh` | SessionStart | Names every whole-repository security scan past its cadence in `scanners.yaml`, with `/audit --scan` as the next step |
 | `pilot-continue.sh` | Stop, SessionStart (compact) | Blocks a turn from ending **once** when this session's `/pilot` run is open and nothing is in flight to wake it (no agent, workflow or scheduled wake-up), so the run continues in place; after a compaction, tells the open run to invoke `proceed` and re-read its loop |
+| `paid-meter.sh` | PreToolUse Bash | Blocks a paid test command (`PAID_COMMANDS`) once today's paid usage reaches its cap or cannot be read, and a paid full run from inside `<PREFIX>-dev`; every other command passes |
 | `limit-mark.sh` | StopFailure `rate_limit` | Writes `.claude/pilot/limit-hit` (ts · session id · error_type) so the next `/pilot` resumes a limit-killed run instead of waiting it out |
 
 ## Delivery Log Format

@@ -270,6 +270,8 @@ Create `references/voice.md` from the same section's stub. `§ Rules` ships as w
 
 If the project has no deploy mechanism at all (no IaC/CI/CD/Build/Deployment categories AND no local run command anywhere), still create the file with an empty `components: {}` map and a leading comment `# No deploy mechanism detected at install time — invoke <PREFIX>-skill to add components and envs when the project gains a deploy story.` This keeps the contract uniform and lets the deploy skill no-op cleanly.
 
+**`billing:` and the `PAID_*` declarations are derived here too, never asked** — `billing.budget_check` per `tpl-domain-skill.md § deploy-config.yaml schema`, the `PAID_*` values per `tpl-skill-guard.md § How to generate governed-paths.conf` (written in Phase 3b). Run `<PREFIX>-deploy § Budget check` once the skill exists and report its line.
+
 ### Pin critical packages and add the start-up check
 
 For each component with a ship-env, apply `<PREFIX>-deploy`'s `## Build inputs` (`../../shared/tpl-lifecycle.md § tosk-deploy/SKILL.md`). Read the packages its deployed entrypoints import and propose the critical set by that section's four signals, one reason per package, plus the start-up check its build will run — in the same confirmation as the yaml. Never pin on inference alone: the user confirms the set. Pin each at the version the running artifact uses (or the last good build), not the newest release, and add the check to the build file, in one commit. A component that already installs from a committed lockfile needs only the check.

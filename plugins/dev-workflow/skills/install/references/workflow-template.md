@@ -94,7 +94,7 @@ All hooks wired in `.claude/settings.json`.
 | `pilot-cleanup.sh` | SessionEnd | Removes `.claude/pilot/running` when its second line is this session's id |
 | `precompact-handover.sh` | PreCompact | Writes a file-derived fallback handover to `.claude/handovers/` the moment compaction starts, so `/proceed` always has a record |
 | `scan-due.sh` | SessionStart | Names every whole-repository security scan past its cadence in `scanners.yaml`, with `/audit --scan` as the next step |
-| `pilot-continue.sh` | Stop | Blocks a turn from ending **once** when this session's `/pilot` run is open and nothing is in flight to wake it (no agent, workflow or scheduled wake-up), so the run continues in place |
+| `pilot-continue.sh` | Stop, SessionStart (compact) | Blocks a turn from ending **once** when this session's `/pilot` run is open and nothing is in flight to wake it (no agent, workflow or scheduled wake-up), so the run continues in place; after a compaction, tells the open run to invoke `proceed` and re-read its loop |
 | `limit-mark.sh` | StopFailure `rate_limit` | Writes `.claude/pilot/limit-hit` (ts · session id · error_type) so the next `/pilot` resumes a limit-killed run instead of waiting it out |
 
 ## Delivery Log Format

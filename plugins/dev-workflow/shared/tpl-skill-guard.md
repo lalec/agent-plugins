@@ -677,14 +677,21 @@ exit 0
 
 Fires on `Stop`, the end of every main-session turn. A `/pilot` run is a chain of short turns: each dispatches a background agent and ends, and the agent's completion wakes the next. The chain breaks when a turn ends with nothing in flight — measured: the built-in `security-review` skill's instructions make its report the turn's final reply, the orchestrator ran it inline with no agent behind it, and the run sat idle 5½ hours with 10 of 17 tasks left. Claude Code hands this hook what tells the two apart: `background_tasks` (in-flight work, each with a `type`) and `session_crons` (scheduled wake-ups). So it blocks **once** when this session owns `.claude/pilot/running`, no `subagent`, `workflow` or `teammate` task is in flight and no wake-up is scheduled — the turn then continues the mission in place, with no timer and no new session. A `shell` or `monitor` task does not count: a dev stack left running would otherwise switch the hook off for the whole run. It never blocks twice in a row (`stop_hook_active`), so a run that truly cannot proceed still ends — and the reason names the two honest ones: an agent that finished while the turn was busy drops out of `background_tasks` before its result is delivered, which happens only after the turn ends (measured: the continued turn said "not received yet", ended, and the result arrived), and a step only a person can give. It does nothing when either field is absent — an older Claude Code that sends neither is unknown, never idle.
 
+It also fires on `SessionStart` with matcher `compact`, the moment a compaction finishes. When this session owns the marker it adds one line to the new context: invoke `proceed` on the newest handover, read `.claude/skills/pilot/references/loop.md`, then continue. A compaction re-attaches the skills a session invoked newest first, each cut at 5,000 tokens and all of them together at 25,000; `/pilot` is invoked once, at the start of a run, so on a long run it is the oldest and the first dropped (measured: two live runs carried 20,000 of its 53,000 characters forward, and neither invoked `proceed`). This line does not depend on what was kept.
+
 ```bash
 #!/bin/bash
-# Stop hook — continues this session's /pilot run when a turn ends with nothing in flight to wake it.
+# Stop + SessionStart(compact) hook — keeps this session's /pilot run going: continues a turn that ends
+# with nothing in flight to wake it, and points the run back at its loop after a compaction.
 INPUT=$(cat) || exit 0
-[ "$(echo "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null)" = "true" ] && exit 0
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 [ -z "$SESSION_ID" ] && exit 0
 [ "$(sed -n 2p "${CLAUDE_PROJECT_DIR:-.}/.claude/pilot/running" 2>/dev/null)" = "$SESSION_ID" ] || exit 0
+if [ "$(echo "$INPUT" | jq -r '.hook_event_name // empty' 2>/dev/null)" = "SessionStart" ]; then
+  jq -n '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: "This session'"'"'s /pilot run is still open (.claude/pilot/running) and a compaction just ran. Before anything else: invoke the proceed skill on the newest .claude/handovers/ file, read .claude/skills/pilot/references/loop.md, then continue the task list from the next task."}}'
+  exit 0
+fi
+[ "$(echo "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null)" = "true" ] && exit 0
 WAKERS=$(echo "$INPUT" | jq -r 'if has("background_tasks") and has("session_crons")
   then ([.background_tasks[] | select(.type == "subagent" or .type == "workflow" or .type == "teammate")] | length) + (.session_crons | length)
   else "unknown" end' 2>/dev/null)
@@ -748,7 +755,7 @@ exit 0
 
 ## § settings.json
 
-Wire all 16 hook scripts — 19 entries, since `skill-guard.sh` sits under both `Edit` and `Write`, `pre-handoff-check.sh` under both `Skill` and `Task|Agent`, and `security-gate.sh` under both `Bash` and `Skill`. If the file already exists, merge the `hooks` key without removing unrelated settings. Timeout unit: **seconds**. The `Task|Agent` matcher is what makes `pre-handoff-check.sh` fire when qa is spawned as a subagent — without it the gate never runs in the pipeline. The `SubagentStop` matcher names the four pipeline agents so a research fork or an Explore child never gets blocked for lacking a handoff block. The secrets hooks are not in this file: they ship with the srun plugin, so they guard projects without dev-workflow too.
+Wire all 16 hook scripts — 20 entries, since `skill-guard.sh` sits under both `Edit` and `Write`, `pre-handoff-check.sh` under both `Skill` and `Task|Agent`, `security-gate.sh` under both `Bash` and `Skill`, and `pilot-continue.sh` under both `Stop` and `SessionStart` (`compact`). If the file already exists, merge the `hooks` key without removing unrelated settings. Timeout unit: **seconds**. The `Task|Agent` matcher is what makes `pre-handoff-check.sh` fire when qa is spawned as a subagent — without it the gate never runs in the pipeline. The `SubagentStop` matcher names the four pipeline agents so a research fork or an Explore child never gets blocked for lacking a handoff block. The secrets hooks are not in this file: they ship with the srun plugin, so they guard projects without dev-workflow too.
 
 ```json
 {
@@ -818,6 +825,12 @@ Wire all 16 hook scripts — 19 entries, since `skill-guard.sh` sits under both 
         "matcher": "startup|resume",
         "hooks": [
           { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/scan-due.sh", "timeout": 10 }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pilot-continue.sh", "timeout": 5 }
         ]
       }
     ],

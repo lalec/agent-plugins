@@ -9,7 +9,7 @@ Replace these placeholders before writing the files:
 - `<PATH_MAP_ENTRIES>` → generated entries from § How to generate governed-paths.conf
 - `<SKILL_SELF_OWNERSHIP_ENTRIES>` → one `'^\.claude/skills/<PREFIX>-<name>/:<PREFIX>-<name>'` entry per installed skill (lifecycle + domain), so each skill edits its own SKILL.md and `references/` with itself loaded — without these, a domain skill's own reference updates get blocked for lacking `<PREFIX>-skill`
 - `<REF_WATCH>` → optional ERE alternation of reference-worthy source files (API route/handler dirs, schema/model files, auth middleware) derived from the category map. Used by `ref-sync-check.sh` to decide whether a modify-only commit warrants a reference-sync warning. `''` when nothing clearly reference-worthy is identifiable — structural changes (add/delete/rename) in governed roots always warn regardless
-- `<DEPENDENCY_MANIFESTS>` → optional ERE alternation of the project's dependency manifests, matched by **filename, not layout** — `requirements*.txt`, `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `Gemfile` and their lock files, whichever of them this project actually has. Used by `ref-sync-check.sh` to warn when a dependency lands without its advisories being assessed. `''` when the project has none (the check is then silently skipped)
+- `<DEPENDENCY_MANIFESTS>` → optional ERE alternation of the project's dependency manifests, matched by **filename, not layout** — `requirements*.txt`, `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `Gemfile` and their lock files, whichever of them this project actually has. Read by the dependencies security slot (`paths: '$DEPENDENCY_MANIFESTS'` in `scanners.yaml`), so a manifest change runs the dependency scan at task review. `''` when the project has none (the check is then silently skipped)
 - `<COPY_PATHS>` → optional ERE of the directories holding this project's **user-facing** source — the Frontend category's paths, only when a `<PREFIX>-design` skill is installed. Used by `ref-sync-check.sh` to warn when a commit adds an em dash to a user-readable string. `''` when there is no design skill (the check is then silently skipped)
 - `<UNATTENDED_DENY>` → ERE alternation of the paths an **unattended** `/pilot` run must never touch: `DEPLOY_PATHS` plus the Auth category's paths from `CATEGORY_MAP`, plus a migrations directory when one was discovered under Database/storage. Nobody is present to notice a change there, so a task whose paths intersect it is skipped and reported, never started unattended. When the auth paths are unknown, set it to the `DEPLOY_PATHS` value and say so — the project widens it.
 - `<LINT_CMD>` → project lint command (e.g. `pnpm exec biome check .` or `npm run lint`)
@@ -51,8 +51,8 @@ The single source of truth for path→skill ownership. Both `skill-guard.sh` and
 # add/delete/rename in GOVERNED_ROOTS always warns. '' = structural-only warnings.
 #
 # DEPENDENCY_MANIFESTS: optional ERE of this project's dependency manifests, matched by filename
-# rather than layout. ref-sync-check.sh warns when one changes without vex.yaml being assessed.
-# '' = no manifests, check skipped.
+# rather than layout. The dependencies security slot runs at task review when one changes
+# (scanners.yaml paths: '$DEPENDENCY_MANIFESTS'). '' = no manifests.
 #
 # COPY_PATHS: optional ERE of user-facing source (the Frontend category, when <PREFIX>-design exists).
 # ref-sync-check.sh warns when a commit adds an em dash on a non-comment line there. '' = skipped.
@@ -84,6 +84,7 @@ PATH_MAP=(
   '^docs/project-log\.md$:EXEMPT'
   '^\.claude/skills/<PREFIX>-test/references/custom-tests\.yaml$:EXEMPT'
   '^\.claude/skills/<PREFIX>-review/references/vex\.yaml$:EXEMPT'
+  '^\.claude/skills/<PREFIX>-review/references/scan-baseline\.txt$:EXEMPT'
   '^\.claude/graph/edges\.jsonl$:EXEMPT'
   '^\.claude/pilot/:EXEMPT'
   '^\.claude/graph/:<PREFIX>-graph'
@@ -167,7 +168,7 @@ Rules:
 - The entry-point skills (`code`, `fix`, `pilot`, … — the fixed names in `preflight.md § Where the entry points live`) are `OPEN`, exactly as `.claude/commands/` always was: they are commands in Rules 1–2's sense and no lifecycle skill owns them. The entry sits **before** the `.claude/skills/` catch-all, or every edit to one would demand `<PREFIX>-skill` loaded.
 - `.claude/pilot/` is always `EXEMPT` and gitignored whole — `/pilot` writes its run markers there at the top level and the lifecycle hooks write `limit-hit`; nothing in it is tracked. (Legacy note, kept so a grep finds it: the directory once held a tracked `shift.sh`, a verbatim plugin copy that no skill authors
 - `<PREFIX>-test/references/custom-tests.yaml` is always `EXEMPT` — the `/code`/`/fix` Step 1.5 persist step writes it at the top level and carries the schema itself; gating it forces a full skill load per pipeline run for a 10-line append
-- `<PREFIX>-review/references/vex.yaml` is always `EXEMPT` — the security pass writes a status from inside `<PREFIX>-qa` and `/audit` writes one at the top level, and `<PREFIX>-review` is a read-only reference skill that owns no write path of its own
+- `<PREFIX>-review/references/vex.yaml` and `scan-baseline.txt` are always `EXEMPT` — the review writes a status from inside `<PREFIX>-qa`, `/audit` and the ship step write them at the top level, and `scan.py` treats a commit touching only `EXEMPT` paths as no change to rescan, and `<PREFIX>-review` is a read-only reference skill that owns no write path of its own
 - **Every installed `<PREFIX>-*` skill gets a self-ownership entry** (`'^\.claude/skills/<PREFIX>-<name>/:<PREFIX>-<name>'`) before the `.claude/skills/` catch-all — a skill maintains its own SKILL.md and `references/` with itself loaded. The `<PREFIX>-skill` catch-all after them still owns cross-skill structure (new skill dirs, renames)
 - `.claude/skills/` (catch-all), `.claude/hooks/`, `.claude/agents/`, and `CLAUDE.md` are owned by `<PREFIX>-skill`
 - The rest of `.claude/` is `OPEN` (no guard needed for other config)
@@ -419,11 +420,13 @@ The same bare-shell constraint applies to any tool a hook shells out to (typeche
 
 ## § security-gate.sh
 
-Blocks a `git push`, and a `<PREFIX>-deploy` call with `target=prod`, while the code about to ship carries source changes no security review has covered — so Claude Code's `/security-review` runs on everything that leaves the machine, not only when someone remembers. "Covered" means `skill-mark.sh` recorded a `security-review` at a commit that is newer than the remote's and an ancestor of HEAD, and nothing touching governed or deploy paths has landed since; a docs-only commit after the review passes. The review is the full protocol in `<PREFIX>-review/references/security-review.md § Before ship`; a review that holds the ship deletes the mark, so the held code stays blocked in any later session. The hook proves the review started on this code — it cannot read the verdict, which is why a hold clears the mark. A project with no remote has nothing to diff against and passes (§ Before ship reports it unreviewed); a remote without `origin/HEAD` blocks with the one-line fix, because the review cannot load either. `CLOSEOUT_OVERRIDE=1 git push …` bypasses the push half only — a prod deploy has no override, since a rollback's unshipped diff is one revert commit and the review is one pass.
+Blocks a `git push`, and a `<PREFIX>-deploy` call with `target=prod`, until the security slots have run on everything about to ship and every finding has a decision — so a scan cannot be skipped by forgetting it. The hook runs `<PREFIX>-review/scripts/scan.py gate`, which reuses a ship run of each tool slot that already covers `origin/HEAD..HEAD`, runs the missing ones in parallel, and exits 2 while a slot errored twice, a new finding has no `vex.yaml` statement, a finding that holds is open, or the change review has not recorded a result for governed or deploy paths in the range. What is new and what holds is decided in `scan.py` and `<PREFIX>-review/references/security-review.md`, not here. The hook checks that every finding has a decision, never that the decision is right; the baseline file and the change-review record are written by the session and trusted as written. A project with no remote passes — there is nothing to push to. `CLOSEOUT_OVERRIDE=1 git push …` bypasses the push half only; a prod deploy has no override.
+
+Its `settings.json` Bash entry carries `"if": "Bash(git push*)"`, so the hook never starts for any other command, and `"onFailure": "block"`, so a crash or a timeout blocks the push instead of letting it through (Claude Code lets a failed hook's call proceed otherwise); `scan.py` keeps a slot's two tries under the 600-second timeout. The Skill entry has no `onFailure`, so a broken hook cannot block every skill.
 
 ```bash
 #!/bin/bash
-# PreToolUse Bash + Skill hook — blocks a push or prod deploy of source changes no security review covered.
+# PreToolUse Bash + Skill hook — a push or prod deploy waits for the security slots (scan.py gate).
 INPUT=$(cat) || exit 0
 CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
 SKILL=$(echo "$INPUT" | jq -r '.tool_input.skill // empty' 2>/dev/null)
@@ -431,41 +434,15 @@ ARGS=$(echo "$INPUT" | jq -r '.tool_input.args // empty' 2>/dev/null)
 if [ -n "$CMD" ]; then
   echo "$CMD" | grep -qE "git push" || exit 0
   echo "$CMD" | grep -qE "CLOSEOUT_OVERRIDE=1" && exit 0
-  ACT="push"
 elif [ "$SKILL" = "<PREFIX>-deploy" ]; then
   echo "$ARGS" | grep -qiE "target[[:punct:][:space:]]*prod" || exit 0
-  ACT="prod deploy"
 else
   exit 0
 fi
-
-source "$(dirname "$0")/governed-paths.conf"
-[ -z "$GOVERNED_ROOTS" ] && [ -z "$DEPLOY_PATHS" ] && exit 0
-G() { git -C "${CLAUDE_PROJECT_DIR:-.}" "$@"; }
-[ -z "$(G remote 2>/dev/null)" ] && exit 0   # no remote: § Before ship reports the ship unreviewed
-if ! G rev-parse -q --verify origin/HEAD >/dev/null 2>&1; then
-  echo "Security gate: origin/HEAD is not set, so Claude Code's /security-review cannot load — run \`git remote set-head origin -a\`, then the review (<PREFIX>-review § Before ship)." >&2
-  exit 2
-fi
-
-# Reviewed up to the mark when it is newer than the remote and still in HEAD's history.
-BASE=origin/HEAD
-MARK=$(cat "$(G rev-parse --absolute-git-dir 2>/dev/null)/<PREFIX>-security-reviewed" 2>/dev/null)
-if [ -n "$MARK" ] && G merge-base --is-ancestor "$MARK" HEAD 2>/dev/null \
-   && G merge-base --is-ancestor origin/HEAD "$MARK" 2>/dev/null; then
-  BASE="$MARK"
-fi
-
-CHANGED=$(G diff --name-only "$BASE"...HEAD 2>/dev/null)
-UNREVIEWED=""
-[ -n "$GOVERNED_ROOTS" ] && UNREVIEWED=$(echo "$CHANGED" | grep -E "$GOVERNED_ROOTS")
-if [ -z "$UNREVIEWED" ] && [ -n "$DEPLOY_PATHS" ]; then
-  UNREVIEWED=$(echo "$CHANGED" | grep -E "$DEPLOY_PATHS")
-fi
-[ -z "$UNREVIEWED" ] && exit 0
-
-echo "Security gate: this $ACT ships source changes no security review has covered — use the \`security-review\` skill first, per <PREFIX>-review/references/security-review.md § Before ship. A review that held the ship cleared its mark, so held code stays blocked.${CMD:+ Emergency override for a push only: CLOSEOUT_OVERRIDE=1 git push …}" >&2
-echo "$UNREVIEWED" | head -10 | sed 's/^/  /' >&2
+ROOT="${CLAUDE_PROJECT_DIR:-.}"
+[ -z "$(git -C "$ROOT" remote 2>/dev/null)" ] && exit 0   # nothing to push to
+cd "$ROOT" && python3 .claude/skills/<PREFIX>-review/scripts/scan.py gate && exit 0
+echo "Fix what is listed, per <PREFIX>-review/references/security-review.md § Before ship.${CMD:+ Emergency override for a push only: CLOSEOUT_OVERRIDE=1 git push …}" >&2
 exit 2
 ```
 
@@ -473,12 +450,11 @@ exit 2
 
 ## § ref-sync-check.sh
 
-Warns after `git commit` when paths watched in `governed-paths.conf` changed without corresponding reference file updates, or when user-facing copy broke a mechanical voice rule. Four independent checks:
+Warns after `git commit` when paths watched in `governed-paths.conf` changed without corresponding reference file updates, or when user-facing copy broke a mechanical voice rule. Three independent checks:
 
 1. **Source drift** — warns only on commits that plausibly change what references describe: files **added/deleted/renamed** in `GOVERNED_ROOTS`, or modified files matching `REF_WATCH` (contracts, schemas, auth). Modify-only cosmetic commits (copy tweaks, style nudges) stay silent — an alarm that fires on every commit gets learned as ignorable and loses all signal.
 2. **Deploy drift** — `DEPLOY_PATHS` changed without `deploy-config.yaml` being touched → the deploy profile is now stale.
-3. **Dependency drift** — `DEPENDENCY_MANIFESTS` changed without `vex.yaml` being touched → a package landed whose advisories nobody has assessed. Warn, never block: a gate here fires on lockfile churn and gets overridden reflexively inside a week, which is worse than no hook. The value is the reminder at the moment the package lands.
-4. **Copy** — a line **added** under `COPY_PATHS` carries an em dash and is not a comment → a user-readable string breaks `voice.md` rule 3. Warn, never block: a gate would fire on the first edit to a line that already had one, in a project that has hundreds. The rest of `voice.md` is judgment, checked at review, not here.
+3. **Copy** — a line **added** under `COPY_PATHS` carries an em dash and is not a comment → a user-readable string breaks `voice.md` rule 3. Warn, never block: a gate would fire on the first edit to a line that already had one, in a project that has hundreds. The rest of `voice.md` is judgment, checked at review, not here.
 
 Sources `governed-paths.conf` — **no path patterns hardcoded in this script**. If a variable is empty, the corresponding check is silently skipped. Warn-only — always exits 0, and every warning goes out as one `additionalContext` block so the model actually reads it.
 
@@ -522,14 +498,7 @@ if [ -n "$DEPLOY_PATHS" ] && echo "$CHANGED" | grep -qE "$DEPLOY_PATHS"; then
   fi
 fi
 
-# Check 3 — dependency drift
-if [ -n "${DEPENDENCY_MANIFESTS:-}" ] && echo "$CHANGED" | grep -qE "$DEPENDENCY_MANIFESTS"; then
-  if ! echo "$CHANGED" | grep -qE '^\.claude/skills/.*/references/vex\.yaml$'; then
-    warn "Advisory triage: dependency manifests changed but vex.yaml was not updated — run /audit; rank by what the new package parses or fetches, not by severity"
-  fi
-fi
-
-# Check 4 — copy: em dashes on added, non-comment lines in user-facing source
+# Check 3 — copy: em dashes on added, non-comment lines in user-facing source
 if [ -n "${COPY_PATHS:-}" ]; then
   COPY_FILES=()
   while IFS= read -r f; do COPY_FILES+=("$f"); done < <(echo "$CHANGED" | grep -E "$COPY_PATHS")
@@ -551,7 +520,7 @@ exit 0
 
 ## § skill-mark.sh
 
-Records each invoked skill to a session-scoped marker file, and when the skill is Claude Code's `security-review`, writes the HEAD it reviewed to `<git dir>/<PREFIX>-security-reviewed` — the mark `security-gate.sh` checks before a push or a prod deploy. The git dir keeps it out of every commit, alive across sessions and separate per worktree. Used by `skill-guard.sh`, `dependency-guard.sh`, and `package-edit-guard.sh` to verify a skill was loaded, and by `<PREFIX>-log` to derive the delivery log's `**Skills:**` field. The marker key must match the guards' derivation exactly: session id alone.
+Records each invoked skill to a session-scoped marker file. Used by `skill-guard.sh`, `dependency-guard.sh`, and `package-edit-guard.sh` to verify a skill was loaded, and by `<PREFIX>-log` to derive the delivery log's `**Skills:**` field. The marker key must match the guards' derivation exactly: session id alone.
 
 **Do not key this per agent.** Subagents inherit the parent's `transcript_path`, so `basename "$TRANSCRIPT"` returns the session id itself — a per-agent suffix is provably always equal to the session id (verified across 12 real markers on a machine that had run `/code`, `/fix` and `/pilot` pipelines: every filename's two halves were identical). Session scope is also what makes the `Skills:` derivation work at all, since `<PREFIX>-review` and `<PREFIX>-debug` only ever load inside subagents.
 
@@ -563,11 +532,6 @@ SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 SKILL=$(echo "$INPUT" | jq -r '.tool_input.skill // empty' 2>/dev/null)
 [ -z "$SKILL" ] && exit 0
 echo "$SKILL" >> "/tmp/<PREFIX>-skills-${SESSION_ID}"  # session-scoped — see skill-guard.sh
-if [ "$SKILL" = "security-review" ]; then
-  ROOT="${CLAUDE_PROJECT_DIR:-.}"
-  GD=$(git -C "$ROOT" rev-parse --absolute-git-dir 2>/dev/null) && \
-    git -C "$ROOT" rev-parse HEAD > "$GD/<PREFIX>-security-reviewed" 2>/dev/null
-fi
 exit 0
 ```
 
@@ -877,7 +841,7 @@ Wire all 17 hook scripts — 21 entries, since `skill-guard.sh` sits under both 
         "hooks": [
           { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/dependency-guard.sh", "timeout": 5 },
           { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/close-out-gate.sh", "timeout": 10 },
-          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/security-gate.sh", "timeout": 10 },
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/security-gate.sh", "if": "Bash(git push*)", "timeout": 600, "onFailure": "block" },
           { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/paid-meter.sh", "timeout": 30 }
         ]
       },
@@ -885,7 +849,7 @@ Wire all 17 hook scripts — 21 entries, since `skill-guard.sh` sits under both 
         "matcher": "Skill",
         "hooks": [
           { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre-handoff-check.sh", "timeout": 60 },
-          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/security-gate.sh", "timeout": 10 }
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/security-gate.sh", "timeout": 600 }
         ]
       },
       {

@@ -23,13 +23,14 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 - `.claude/hooks/package-edit-guard.sh` — PreToolUse Edit: blocks direct dependency additions to `package.json` without `<PREFIX>-skill`
 - `.claude/hooks/pre-handoff-check.sh` — PreToolUse Skill + Task/Agent: blocks `<PREFIX>-qa` invocation (skill call or subagent spawn) if uncommitted changes exist, or lint or typecheck fails for a component the commits changed
 - `.claude/hooks/close-out-gate.sh` — PreToolUse Bash: blocks `git push` while commits after the last delivery-log entry touch governed/deploy paths (iterate-lane close-out enforcement; `CLOSEOUT_OVERRIDE=1` escape hatch)
-- `.claude/hooks/security-gate.sh` — PreToolUse Bash + Skill: blocks `git push`, and a `<PREFIX>-deploy` call with `target=prod`, while unpushed governed/deploy changes lack a Claude Code `/security-review` at or after them (`skill-mark.sh` records the reviewed HEAD in the git dir)
-- `.claude/hooks/ref-sync-check.sh` — PostToolUse Bash: warns after `git commit` on reference-worthy drift (structural changes or `REF_WATCH` matches; modify-only cosmetic commits stay silent) on deploy-mechanism drift without `deploy-config.yaml` updates, on dependency drift without `vex.yaml`, and on an em dash added to user-facing copy (`COPY_PATHS`); warnings reach the model as `additionalContext`
+- `.claude/hooks/security-gate.sh` — PreToolUse Bash + Skill: blocks `git push`, and a `<PREFIX>-deploy` call with `target=prod`, until `scan.py gate` passes — it runs every security slot with no ship run covering the unpushed range, in parallel, and blocks while a slot errored, a new finding has no `vex.yaml` decision, a finding holds, or Claude Code's `/security-review` has no recorded result for governed/deploy changes
+- `.claude/hooks/ref-sync-check.sh` — PostToolUse Bash: warns after `git commit` on reference-worthy drift (structural changes or `REF_WATCH` matches; modify-only cosmetic commits stay silent) on deploy-mechanism drift without `deploy-config.yaml` updates, and on an em dash added to user-facing copy (`COPY_PATHS`); warnings reach the model as `additionalContext`
 - `.claude/hooks/skill-mark.sh` — PostToolUse Skill: records invoked skills to a session-scoped marker
 - `.claude/hooks/post-commit.sh` — PostToolUse Bash: reminds to run `<PREFIX>-log` after every commit
 - `.claude/hooks/scan-due.sh` — SessionStart: names every whole-repository security scan past its cadence (`graph.py scans-due`), so `/audit --scan` is due in front of you, not only in `/whats-up`
 - `.claude/graph/graph.py` — delivery-graph projector + query engine (copied verbatim from `../../shared/graph.py`); `edges.jsonl` is generated and gitignored
 - `.claude/skills/<PREFIX>-test/scripts/run-checks.py` — batched execution of resolved Integration commands and `last:` recording for every type (copied verbatim from `../../shared/run-checks.py`); returns observations, never verdicts
+- `.claude/skills/<PREFIX>-review/scripts/scan.py` + `findings.py` — the security slot runner: runs the `scanners.yaml` tools a moment calls for in parallel, reads their output, and decides what is new and what holds (copied verbatim from `../../shared/`); the model decides each finding, never this script
 - `.srun.json` — written by the `srun:setup` skill (the srun plugin, installed with this one as a dependency): the project's `namespace` (from the repo folder name), so its secrets get their own store ids, and the list of secret NAMES, with the store that holds them when the project names one — never values. Agents use a secret by NAME and never see its value
 - `~/.claude/usage-snapshot.sh` — **outside the repo, opt-in** (Phase 3 Step 5): wraps the status line so a run can read the account's remaining allowance, writing one file per session under `~/.claude/usage/` and aggregating them on `--read`. Account-scoped, so one machine needs it once
 - `.claude/settings.json` — wires all hooks
@@ -40,6 +41,7 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 - `../../shared/tpl-lifecycle.md` — 8 lifecycle skill templates
 - `../../shared/graph.py` — the delivery-graph projector, copied verbatim to `.claude/graph/graph.py`
 - `../../shared/run-checks.py` — the verification runner/recorder, copied verbatim to `.claude/skills/<PREFIX>-test/scripts/run-checks.py`
+- `../../shared/scan.py` + `../../shared/findings.py` — the security slot runner, copied verbatim to `.claude/skills/<PREFIX>-review/scripts/`
 - `../../shared/usage-snapshot.sh` — the status-line allowance tee, copied verbatim to `~/.claude/usage-snapshot.sh` (opt-in, Phase 3 Step 5)
 - `../../shared/tpl-skill-guard.md` — all hook templates + governed-paths.conf + settings.json
 - `../../shared/tpl-domain-skill.md` — domain skill stub + project file sections
@@ -192,12 +194,13 @@ Create these files (skip if already present, offer to overwrite if stale):
 .claude/agents/<PREFIX>-pm.md         ← from tpl-agents.md § tosk-pm
 .claude/agents/<PREFIX>-verify.md     ← from tpl-agents.md § tosk-verify
 .claude/skills/<PREFIX>-log/SKILL.md
-.claude/skills/<PREFIX>-review/SKILL.md       ← also create references/{requesting-code-review,issuing-findings,security-review}.md and references/vex.yaml (`statements: []`) and references/scanners.yaml (`scanners:` seeded from the known-scanners table for each one `claude plugin list --json` shows installed; `scanners: []` when none) (see tpl-lifecycle.md § tosk-review)
+.claude/skills/<PREFIX>-review/SKILL.md       ← also create references/{requesting-code-review,issuing-findings,security-review}.md and references/vex.yaml (`statements: []`) and references/scanners.yaml — one entry per slot that applies to this project, filled by discovery from the Default tools table: a tool already on `PATH` for the slot, else the default installed per the template's install rule (never asked); a slot that applies with no tool after that keeps its entry with `command: ''` (see tpl-lifecycle.md § tosk-review). Once `graph.py`, `governed-paths.conf` and the scripts below exist, run `python3 .claude/skills/<PREFIX>-review/scripts/scan.py baseline` once — it writes references/scan-baseline.txt — and report each slot's state, time and finding count as Status rows
 .claude/skills/<PREFIX>-debug/SKILL.md        ← also create 4 reference files + scripts (see tpl-lifecycle.md § debug)
 .claude/skills/<PREFIX>-deploy/SKILL.md       ← from tpl-lifecycle.md § tosk-deploy/SKILL.md
 .claude/skills/<PREFIX>-deploy/references/deploy-config.yaml  ← populated, not a stub — see "Populate deploy-config.yaml" below
 .claude/skills/<PREFIX>-test/SKILL.md       ← also creates references/test-commands.md, sync-checklist.md, custom-tests.md, and custom-tests.yaml (tests: []) — see tpl-lifecycle.md § tosk-test
 .claude/skills/<PREFIX>-test/scripts/run-checks.py  ← copy ../../shared/run-checks.py VERBATIM — no substitution (it glob-discovers the test skill), so it stays byte-identical across projects; `git add` it, and no chmod (it runs as `python3 …`)
+.claude/skills/<PREFIX>-review/scripts/{scan,findings}.py  ← copy ../../shared/{scan,findings}.py VERBATIM — no substitution (they glob-discover the review skill); `git add` them, no chmod
 .claude/skills/<PREFIX>-skill/SKILL.md
 .claude/skills/<PREFIX>-skill/references/skill-manifest.md  ← stub; populate with all lifecycle + domain skills installed in this run
 .claude/skills/<PREFIX>-docs/SKILL.md
@@ -329,12 +332,15 @@ Also append to `.gitignore` (create it if absent) any of these lines not already
 .claude/graph/__pycache__/
 .claude/pilot/
 .claude/handovers/
+.claude/scans/
 ```
 The index is generated, churns on every delivery, and is rebuilt in under a second — committing it
 would add noise to every diff for no recoverable value. `__pycache__/` appears whenever anything
 imports `graph.py` rather than running it as a script. `.claude/pilot/` holds `/pilot`'s run
 markers (`running`, `last-run.json`, `limit-hit`) — per-machine facts about *when* a run happened,
 never *what* it decided (that lives in the log and the roadmap), so nothing in it belongs in the repo.
+`.claude/scans/` holds each security slot's raw output per commit — the decisions live in `vex.yaml`
+and `scan-baseline.txt`, which are committed.
 
 **`graph.py` itself must be committed** — stage it explicitly:
 ```bash

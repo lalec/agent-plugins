@@ -695,8 +695,10 @@ def scans_due(text: str, today: datetime) -> list[dict]:
     """Each scanner whose last run is older than its `every_days`, or that never ran. A long
     run still in flight (`job:` set) is not due — it is waiting on its own results."""
     due = []
-    for s in parse_block_yaml(text, "name"):
-        if s.get("job"):
+    for s in parse_block_yaml(text, "name", list_keys=("at",)):
+        # Only cadence entries are due; a slot that runs at task, ship or deploy has no clock.
+        # An entry with no `at` predates slots and is a cadence scan.
+        if s.get("job") or (s["at"] and "every" not in s["at"]):
             continue
         every = int(s.get("every_days") or 90)
         last = (s.get("last_run") or "").split(" ")[0]

@@ -70,6 +70,7 @@ Project delivery log for <PROJECT>. Appends one entry to `docs/project-log.md` a
 
 **Tests:** <what was actually verified>
 **Skills:** <PREFIX>-x · <PREFIX>-y
+**Security:** <the `scan.py status --one-line` summary: slots ran, empty, errored · new findings decided, held> (omit line entirely if no security slot ran for this change)
 **Deployed:** <component> → <env> · <url> (omit line entirely if no deploy happened)
 **Addresses:** <roadmap **Id:** value(s), comma-separated> (omit line entirely if no tracked item is addressed)
 **UAT-deferred:** <verification names — why each could not run, + how confirmed> (omit line entirely if nothing was deferred)
@@ -114,13 +115,13 @@ Required steps before writing the log entry:
 ```markdown
 ---
 name: <PREFIX>-review
-description: Code review and verification gates. Use when reviewing a diff (the built-in bug hunt, the security pass, the UI check), when issuing review findings (evidence before blocking), when triaging dependency advisories, or before claiming success (verify with evidence).
+description: Code review and verification gates. Use when reviewing a diff (the built-in bug hunt, the security slots, the UI check), when issuing review findings (evidence before blocking), when deciding security findings, or before claiming success (verify with evidence).
 license: MIT
 ---
 
 # <PREFIX>-review
 
-Static reference content — load the right reference for the situation. No `## Reference Sync` (this skill ships its references; the project does not author them). The exceptions are `references/vex.yaml` and `references/scanners.yaml`, which are project state rather than shipped content — keep them current per the checklist below.
+Static reference content — load the right reference for the situation. No `## Reference Sync` (this skill ships its references; the project does not author them). The exceptions are `references/vex.yaml`, `references/scanners.yaml` and `references/scan-baseline.txt`, which are project state rather than shipped content — keep them current per the checklist below. `scripts/scan.py` and `scripts/findings.py` are copied verbatim from the plugin and never edited here.
 
 **Core principle:** Evidence before claims — a finding blocks only once its cited lines are read.
 
@@ -133,11 +134,11 @@ SITUATION?
 │  review reads both files           + references/security-review.md
 ├─ Issuing review findings (you   → references/issuing-findings.md
 │  are the reviewer, e.g. <PREFIX>-qa)
-├─ Triaging dependency            → references/security-review.md § Triage
-│  advisories (which of these
-│  actually matter?)
+├─ Deciding security findings     → references/security-review.md § Triage
+│  (which of these actually
+│  matter?)
 ├─ About to deploy to prod or     → references/security-review.md § Before ship
-│  push source changes
+│  push
 ├─ Reviewing a UI change (does it → <PREFIX>-design/references/ux-patterns.md
 │  match how this app already      + <PREFIX>-design/references/voice.md
 │  does this, and does its copy
@@ -149,20 +150,22 @@ SITUATION?
 
 - `references/requesting-code-review.md` — the bug hunt: Claude Code's built-in `code-review` skill on the range under review, and how to wait for and weigh its findings
 - `references/issuing-findings.md` — evidence requirements for review findings (no blocking finding without file:line)
-- `references/security-review.md` — the per-task security pass for what Claude Code's `/security-review` skips: dependencies and look-alike packages, committed secret files, values a model chooses, insecure defaults + headers, dead surface; recon→verify triage; VEX status per advisory (§ Triage); Claude Code's `/security-review` on everything about to ship, and what holds a ship (§ Before ship)
-- `references/vex.yaml` — the VEX status held for every advisory this project has assessed, so a settled one is never re-decided at the same package version. Project state, not shipped content: written by this pass and by `/audit`
-- `references/scanners.yaml` — the whole-repository security scans this project re-runs on a cadence, and when each last ran. Project state: `/audit --scan` runs the due ones and files what they find
+- `references/security-review.md` — what the model does with what the security slots find: recon→verify, a VEX status per finding (§ Triage), the task-review steps and the one question no tool asks — values a model chooses — plus new package names (§ Task review), and the scans, Claude Code's `/security-review` and the hold rule before anything ships (§ Before ship)
+- `references/vex.yaml` — the VEX status held for every finding this project has decided, so a settled one is never re-decided. Project state: written by the review, at ship, and by `/audit`
+- `references/scanners.yaml` — the security slots: which tool fills each, when it runs (task, ship, deploy, or every N days), and what it sends off the machine. Project state: install and upgrade fill it; `/audit --scan` writes the cadence fields
+- `references/scan-baseline.txt` — findings that existed before the slots ran: `/audit`'s backlog, never a hold. Written only by `scan.py baseline`
+- `scripts/scan.py` + `scripts/findings.py` — run the slots in parallel, read their output, decide what is new and what holds; `security-gate.sh` calls `scan.py gate`
 - `<PREFIX>-design/references/ux-patterns.md` — how this app already does a thing: a UI change that stands up a second pattern beside an existing one, a waiting, choosing or optional-depth state that misses its baseline without a recorded divergence, or a visual value absent from `design-tokens.md`, is a finding (single source of truth — owned by `<PREFIX>-design`)
 - `<PREFIX>-design/references/voice.md` — how this app writes: a user-readable string that breaks a rule or shows a word listed in § Vocabulary is a finding (single source of truth — owned by `<PREFIX>-design`)
 - `<PREFIX>-debug/references/verification.md` — completion verification gates (single source of truth — owned by `<PREFIX>-debug`)
 
 ## Update `references/vex.yaml` and `references/scanners.yaml` when:
 
-- [ ] A scanner was added, dropped, or its command or cadence changed — edit its `scanners.yaml` entry; `last_run`, `filed` and `job` are written only by `/audit --scan`
+- [ ] A tool was added, swapped, or dropped for a slot, or its command, `paths:` or cadence changed — edit its `scanners.yaml` entry; `last_run`, `filed` and `job` are written only by `/audit --scan`. A slot's tool changed → run `scan.py baseline` again, so the new tool's existing findings start as backlog
 
-- [ ] The audit tool reports an advisory id this file does not carry — add it, `under_investigation` at minimum
-- [ ] A carried id's package version moved — the old status was decided against the old version; re-assess
-- [ ] An advisory was assessed this invocation — write its `status`, and the `path` + `action` or the `justification`
+- [ ] `scan.py` printed a `NEW` finding — add its decided statement; `under_investigation` still counts as undecided and holds the ship
+- [ ] A carried dependency's package version moved — the old status was decided against the old version; re-assess
+- [ ] A finding was decided this invocation — write its `status`, and the `path` + `action` + `cwe` or the `justification`
 - [ ] An `affected` one was remediated — set `fixed` with the commit; never delete the statement
 - [ ] A compensating control was added, removed, or stopped covering the path it was recorded against
 ```
@@ -258,31 +261,29 @@ If you cannot fill in **Evidence** with a fresh citation from this session, the 
 ````markdown
 # Security Review
 
-The per-task security pass — the classes Claude Code's own `/security-review` skips by design (third-party libraries, hardening, unused code, content a model handles), plus the cheap whole-tree checks a diff-scoped reviewer misses. That review covers injection, access control, secrets in source and data exposure, and runs on everything about to ship (§ Before ship), so this pass does not repeat it. This pass is grep- and audit-command-cheap, so run it on every review — agent-written code degrades in security across iterations and models over-trust their own output.
+Tools find, the model decides. The security slots in `scanners.yaml` — secrets, code, dependencies, infrastructure, image, live site, Claude Code's `/security-review` and the deep scan — detect; `scripts/scan.py` runs the ones a moment calls for in parallel, reads their output, and keeps only findings no `vex.yaml` statement or `scan-baseline.txt` line already covers. This file is what the model does with those: read each one, decide it, and answer the one question no tool asks. `security-gate.sh` runs the slots again at a push or prod deploy when no run covers it, so a slot is never skipped by forgetting it.
 
 ## Principle — recon → verify, evidence over artifact
 
-Deterministic first (grep + the project's audit tool), then reason. For every candidate:
-
-1. RECON — locate the candidate (grep / audit output / route file).
-2. VERIFY — confirm a **reachable, exploitable path** (trace untrusted input → sink; confirm the endpoint is actually served). A static-shell match, a scanner hit, or a pattern alone is **not** a finding.
+1. RECON — the tool's finding: rule, file, line.
+2. VERIFY — confirm a **reachable, exploitable path** (trace untrusted input → sink; confirm the endpoint is actually served). A scanner hit or a pattern alone is **not** a finding.
 3. Fix the underlying **enabler**, not the literal string the scanner matched.
 
-A verified finding blocks; an unverified one is `Suspected: <claim> — verifying`, advisory only. Use the `issuing-findings.md` Finding/Evidence/Severity format — no blocking finding without a fresh `file:line` read in this session.
+Read the cited lines in this session before deciding; use the `issuing-findings.md` Finding/Evidence/Severity format.
 
 ## Triage — VEX status, not severity
 
-A scanner match is not a verdict. Three layers sit between them: the **match** (your installed version falls in the advisory's affected range), **reachability** (the vulnerable symbol sits in a call path from your code), and **exploitability** (attacker-controlled input can traverse that path). Reachability is evidence; exploitability is the verdict.
+A scanner match is not a verdict. Three layers sit between them: the **match** (the rule fired, or your installed version falls in the advisory's range), **reachability** (the flagged code sits in a call path from your code), and **exploitability** (attacker-controlled input can traverse that path). Reachability is evidence; exploitability is the verdict.
 
-Rank by **package**, never by advisory: advisories in one package share a sink and usually a single fix, so a package is one act of tracing and counting its rows instead lets one noisy dependency consume everything. Rank the packages by **what they parse or fetch**, and among those by **how early on a route they receive it** — a parser reading user-uploaded bytes outranks a build tool with more advisories and a higher score, and the multipart parser or the token library sitting in front of that parser on the same route ranks *with* it, not below it, because they read the same attacker bytes one hop earlier. Advisory count and CVSS never order this list. Severity enters exactly once, as a **floor**: a critical in a package that ships at runtime is assessed even when its package ranks below the cut.
+Rank by **package** for dependencies and by **file** for everything else, never by finding: findings in one package or file share a sink and usually a single fix. Rank by **what they parse or fetch**, and among those by **how early on a route they receive it** — a parser reading user-uploaded bytes outranks a build tool with more findings and a higher score, and the multipart parser or the token library sitting in front of that parser on the same route ranks *with* it, because they read the same attacker bytes one hop earlier. Count and score never order this list. Severity enters exactly once, as a **floor**: a critical in something that ships at runtime is assessed even when it ranks below the cut.
 
-Every advisory gets one VEX status, recorded in `vex.yaml`:
+Every finding `scan.py` prints as `NEW` gets one VEX statement in `vex.yaml`, keyed by the `key=` it printed (a dependency: the advisory id + `package: <name>@<version>`):
 
 | Status | Means | Requires |
 |---|---|---|
-| `affected` | exploitable here — **blocks** | the path `<untrusted source> → <file:line> → <vulnerable API>`, and an action |
-| `not_affected` | not exploitable here | one justification from the five below |
-| `fixed` | remediated | the commit |
+| `affected` | exploitable here | the path `<untrusted source> → <file:line> → <vulnerable API>`, an action, and a CWE id |
+| `not_affected` | not exploitable here, or not what the tool thinks it is | one justification from the five below |
+| `fixed` | remediated | the commit — and the tool no longer reports it; `fixed` but still found holds |
 | `under_investigation` | seen, not yet decided | nothing — this is the untriaged state |
 
 The five justifications **are** the triage questions, in cost order. First "no" wins:
@@ -290,65 +291,56 @@ The five justifications **are** the triage questions, in cost order. First "no" 
 | Ask | No → justification |
 |---|---|
 | Is the component shipped at all? | `component_not_present` |
-| Is the vulnerable code in the build? | `vulnerable_code_not_present` |
+| Is the flagged code real — not a test value, a placeholder, or a pattern the tool misread? | `vulnerable_code_not_present` |
 | Does any call path reach it? | `vulnerable_code_not_in_execute_path` |
 | Can an attacker control input on that path? | `vulnerable_code_cannot_be_controlled_by_adversary` |
 | Is a control in front of it that cannot be turned off? | `inline_mitigations_already_exist` |
 
-Anything surviving all five is `affected`. A path you cannot write down is not a finding — record the status and keep moving. "Low severity" and "we'll get to it" are not justifications.
+Anything surviving all five is `affected`. A path you cannot write down is not a finding — record the status and keep moving. "Low severity" and "we'll get to it" are not justifications. Where the tool has its own way to silence a finding (an ignore file, an inline comment, its baseline), add it beside a `not_affected` statement with the same reason, so the tool stops reporting it too.
+
+**What holds is decided in `scan.py`, not here:** an undecided new finding; an `affected` one the tool rates above low or does not rate; a `fixed` one still reported; a slot that errored twice. A slot with no tool installed is `empty` — reported on every close-out, never a hold. A finding listed in `scan-baseline.txt` existed before the slots ran: it is `/audit`'s backlog and never holds.
 
 **The fifth justification is strict.** It means protection that cannot be subverted by the attacker and cannot be configured or disabled by the user, and it cites the control's `file:line`. Bearer-only auth qualifies — there is no ambient credential to steal and no setting that creates one. Left loose this is the one unverifiable justification, and it swallows the other four.
 
 **A control that can be turned off is a compensating control, not a justification.** A WAF, DDoS protection, a rate limit, a network policy, an auth gateway: real risk reduction, living outside the repo, going stale silently. The status stays `affected` and the control lowers the priority of the item filed for it — it never closes anything. Record three things or it is a claim rather than a control: what the control is, evidence it is active **on this path** (the rule matched *this route*, and where that was observed), and the known bypass class.
 
-**A status held at the same package version is not re-decided** — carry it forward. That is what makes this pass cheap enough to run every task and again on a schedule; a version bump re-opens it.
+**A status held at the same package version is not re-decided** — carry it forward. A dependency's version bump never turns a decided advisory into a hold; `/audit` re-opens it at the new version.
 
-The same three questions decide a **misconfiguration**, which carries no advisory and so no VEX status: it is a finding only when the precondition it depends on exists in this project. Permissive CORS needs an ambient credential to abuse; with bearer-only auth there is none, so it is hardening, not a block.
+The same three questions decide a **misconfiguration**: it is a finding only when the precondition it depends on exists in this project. Permissive CORS needs an ambient credential to abuse; with bearer-only auth there is none, so it is hardening, `not_affected` with the reason.
 
-## Checklist (skip rows that don't apply to this project)
+## Task review
 
-### A. Dependencies & supply chain
-- Run the project's audit on the whole tree — `vex.yaml`'s `audit_command:`, else `npm audit` / `pnpm audit` / `pip-audit` / `cargo audit` / `osv-scanner` (recognition aids, not a whitelist). An id already carried in `vex.yaml` at the same package version is **not re-decided** — read it and move on. The command covers what ships, not only the manifests — the image a component deploys as, where it deploys as one; `/audit` Step 0 sets it. No audit tool for this ecosystem, or one that errors rather than reports → record that in `vex.yaml` as the reason the tree is unassessed, rather than reporting it clean.
-- **Assess only what this task brought in**: an advisory on a dependency this task added or bumped. Give it a VEX status per § Triage and **block** on `affected`.
-- **A pre-existing backlog is not this task's to assess.** Ids the audit reports that `vex.yaml` has never seen and this task did not introduce are recorded `under_investigation` and left — one line each, no tracing. Say how many in the review output and name `/audit` as what works them. Assessing a tree's backlog inline is minutes of tracing per advisory against a task that did not cause any of them, and it is the one thing that makes running this pass every task too expensive to keep doing — which is how a security pass stops running at all. `/audit` exists for exactly this: it ranks the backlog by what each package parses or fetches and takes the top few packages per run, whole.
-- Same policy as pre-existing test failures, and for the same reason: unrelated debt is recorded, never blocking.
-- Every newly-added dependency: confirm the package **actually exists** on its registry and the name is not a typosquat or model hallucination (slopsquatting).
-- Flag unused / redundant dependencies — each is attack surface.
+On every review of a task's commits:
 
-### B. Committed secret files
-- No committed `.env`, key or credentials file — Claude Code's `/security-review` leaves secrets stored on disk to other checks.
-
-### C. Values a model chooses (projects that call a model)
-- A URL, id, path, command or tool argument the model picks is checked against an allowlist, or against what a tool actually returned this turn, before it is shown, stored or run. The model read untrusted text to choose it, so it is untrusted input — and Claude Code's `/security-review` treats content in a prompt as out of scope.
-- Model output that is stored and later placed in a prompt gets the same escaping or folding as user text, so a stored value cannot pose as an instruction or as a trusted label.
-
-### D. Insecure defaults & transport (web-facing only)
-- Hosting config sets the standard response headers: `Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`. The fix lands in the hosting config owned by `<PREFIX>-deploy`. (When a static host can't inject per-request nonces, an inline-script `unsafe-inline` allowance is a documented tradeoff — not a bug — where there is no reachable sink; skip deprecated `X-XSS-Protection`, CSP supersedes it.)
-- CORS is not `*` combined with credentials; cookies set `Secure` + `HttpOnly` + `SameSite`; TLS verification is not disabled (`verify=False`, `rejectUnauthorized: false`, `InsecureSkipVerify`); debug mode and verbose stack traces are off in production.
-
-### E. Dead / unused surface
-- Genuinely-unused endpoints, exports, and dependencies are attack surface — flag for removal, evidenced by a usage grep returning zero callers.
+1. `python3 .claude/skills/<PREFIX>-review/scripts/scan.py run --at task --base <base>` — `<base>` is the same base the code review's range starts from (`requesting-code-review.md` step 1: the task's base, or the last delivery-log entry for a burst); a wrong base reviews nothing and reports clean. It runs the slots whose `paths:` the task touched, on the task's changed files and commits. It prints one summary line, then each `NEW` and `HELD` finding.
+2. Decide each `NEW` finding per § Triage and write its statement; commit `vex.yaml` with the task. An `affected` one that holds is a source finding — it goes back to dev like any other.
+3. **The question no tool asks — values a model chooses** (projects that call a model): a URL, id, path, command or tool argument the model picks is checked against an allowlist, or against what a tool actually returned this turn, before it is shown, stored or run; model output stored and later placed in a prompt is escaped or folded like user text. The model read untrusted text to choose it, so it is untrusted input, and both Claude Code's `/security-review` and the scanners treat prompt content as out of scope.
+4. **A dependency this task added**: confirm the package exists on its registry and the name is not a look-alike or a model's invention. Scanners catch known malicious packages; a brand-new name is only caught here.
+5. Report the summary line as the review's `Security:` line.
 
 ## Before ship
-Claude Code's own `/security-review` runs before anything leaves the machine — the first prod deploy or push of a close-out. It reviews exactly what is not yet pushed (`origin/HEAD...HEAD`) and takes no range, so that is the one moment its scope is the change. `security-gate.sh` blocks a push or prod deploy it has not covered.
 
-1. **When.** The unpushed commits touch governed or deploy paths (`GOVERNED_ROOTS` / `DEPLOY_PATHS` in `governed-paths.conf`). Skip when they touch neither, or when it already passed this session and no commit since touches them. Reverts are not exempt.
-2. **Setup.** No remote → skip, and the close-out report says the changes shipped unreviewed. A remote without `origin/HEAD` → run `git remote set-head origin -a` first; the review cannot load without it.
-3. **Run.** Use the `security-review` skill, at the top level. It asks nothing. On the default branch its scope is exactly what this ship carries; on a long-lived feature branch it is the whole branch since the default branch.
-4. **Weigh.** Read each finding's cited lines before acting on it (`issuing-findings.md`).
-5. **Hold or ship.** A verified HIGH or MEDIUM finding holds the ship — no prod deploy, no push. File each as a roadmap item in `<PREFIX>-dev` step 1.5's format, then delete the review mark, `rm -f "$(git rev-parse --absolute-git-dir)/<PREFIX>-security-reviewed"`, so a later push re-runs the review instead of passing on this one. A LOW finding is filed and the ship goes ahead.
+Before anything leaves the machine — a push or a prod deploy:
+
+1. **Setup.** No remote → nothing to push to; the close-out report says the changes shipped unreviewed. A remote without `origin/HEAD` → `git remote set-head origin -a`.
+2. **Scan.** `python3 .claude/skills/<PREFIX>-review/scripts/scan.py run --at ship` — every ship slot on `origin/HEAD..HEAD`.
+3. **Review.** When the unpushed commits touch governed or deploy paths (`GOVERNED_ROOTS` / `DEPLOY_PATHS` in `governed-paths.conf`): use the `security-review` skill at the top level, with its instructions as written — never a condensed version of them. It reviews exactly `origin/HEAD...HEAD` and asks nothing. Then record its result, every finding including LOW, as JSON on stdin: `echo '[{"category":"…","file":"…","line":N,"severity":"HIGH|MEDIUM|LOW","cwe":"CWE-…"}]' | python3 .claude/skills/<PREFIX>-review/scripts/scan.py record <its scanners.yaml name> --findings -` (`[]` when it found nothing).
+4. **Decide** every `NEW` finding from both steps per § Triage. Commit `vex.yaml` on its own — a commit touching only state files does not re-run the scans.
+5. **Hold or ship.** `scan.py status` lists anything that holds. Each one becomes a roadmap item in `<PREFIX>-dev` step 1.5's format, worked before anything else, and nothing ships — return `held — security review` with the item ids. A slot that errored twice holds the same way and is reported as `security scan errored: <slot>`. Otherwise ship, and put `scan.py status --one-line` in the report.
 ````
 
 (Verification gates content lives in `<PREFIX>-debug/references/verification.md` — `<PREFIX>-review` references it instead of carrying its own copy.)
 
-`references/vex.yaml` — created empty at install, written by the security pass and by `/audit`:
+`references/vex.yaml` — created empty at install, written by the review, at ship, and by `/audit`:
 
 ````yaml
-# vex.yaml — one VEX statement per advisory this project has assessed.
+# vex.yaml — one VEX statement per security finding this project has decided, from any slot.
 # Vocabulary is OpenVEX/CSAF so the file exports; the shape is this workflow's
 # (single-quoted free text, absent entry = never assessed).
 #
-# The key is id + package + VERSION. A carried status is only honest at the version it was
+# A dependency advisory is keyed id + package + VERSION; any other finding is keyed by the
+# id scan.py printed (<slot>/<rule>/<hash>#<n>), which stays the same while the flagged line
+# does. For a dependency, a carried status is only honest at the version it was
 # decided against, so a bump re-opens the statement instead of inheriting the old answer —
 # the same rule custom-tests.yaml applies to a pass carried across an untouched diff.
 # A CI gate that reads this file to silence its scanner keeps the same key: it ignores an id
@@ -357,17 +349,16 @@ Claude Code's own `/security-review` runs before anything leaves the machine —
 #
 # Protocol, justifications and the compensating-control rule: <PREFIX>-review/references/security-review.md § Triage
 #
-# audit_command: the one command /audit and the per-task security pass run. Absent → /audit picks
-# the ecosystem's default and writes it here.
 
 statements:
-  - id: <GHSA/CVE/OSV id>
-    package: <name>@<installed version>
+  - id: <GHSA/CVE/OSV id, or the key scan.py printed>
+    package: <name>@<installed version>   # dependencies only
     status: affected | not_affected | fixed | under_investigation
     justification: <one of the five>     # REQUIRED on not_affected; inline_mitigations needs a file:line
     path: '<untrusted source> → <file:line> → <vulnerable API>'   # REQUIRED on affected
     sink: <repo path>                    # the file that path lands in — what joins this to the code
     action: '<what to do about it>'      # REQUIRED on affected
+    cwe: CWE-<n>                         # REQUIRED on affected
     addressed: <roadmap **Id:**>         # set once an affected one is filed
     commit: <sha7>                       # REQUIRED, every status — the code commit this status
                                          #   was decided against; on under_investigation, the one
@@ -385,31 +376,53 @@ statements:
 
 A statement is **never deleted** — an advisory that stops appearing in the audit output is `fixed` with the commit that removed it, because the record of what was decided and why is the whole point of the file. Deleting one returns the pass to re-deciding it from scratch the next time the id reappears.
 
-`references/scanners.yaml` — the whole-repository security scans this project runs on a cadence. Created at install, seeded from the known-scanners table below; `/audit --scan` runs the due ones and files their findings, and `graph.py scans-due` is the one place that decides what is due:
+`references/scanners.yaml` — the security slots. Created at install, filled by discovery (§ Default tools below); `scripts/scan.py` runs the entries a moment calls for, `/audit --scan` runs the cadence ones, and `graph.py scans-due` decides which cadence ones are due:
 
 ````yaml
-# scanners.yaml — whole-repository security scans, each re-run every_days after its last one.
-# Add a scanner by adding an entry; nothing else changes. /audit --scan writes last_run, filed and job.
+# scanners.yaml — one entry per tool filling a security slot. Swap a tool by editing its entry;
+# nothing else changes. Results are SARIF unless `format` says otherwise.
+# A slot that applies to this project with no tool installed keeps its entry with command: ''
+# — reported as empty on every close-out, never a hold.
 
 scanners:
-  - name: <scanner name>
-    every_days: 90
-    skill: <skill name>                  # either skill + args …
+  - name: <tool name>
+    slot: secrets | code | dependencies | infrastructure | image | live-site | change-review | deep-review
+    at: [task, ship]                     # any of task, ship, deploy, every
+    paths: '<ERE of files that make it run at task review>'   # blank → every change; '$NAME' → that governed-paths.conf variable
+    command: '<shell command>'           # placeholders: {out} {range} {files} {url}
+    format: sarif                        # sarif | osv-json | zap-json
+    sbom: '<command writing a CycloneDX SBOM to {out}>'       # dependencies only, optional
+    sends: none                          # none | names (package names) | code — code only when the user named the tool
+    timeout: 240                         # seconds per try; two tries stay under the push hook's 600
+    every_days: 90                       # `every` entries only, and …
+    skill: <skill name>                  # … a model-run slot: skill + args instead of a command
     args: '<the request passed to it>'
-    command: '<shell command>'           # … or a command; one that prints a job id runs long
     results: '<path glob of its findings, or a command that prints them for the recorded job>'
-    cost: '<one line shown before it starts>'   # blank when the scanner asks its own question
+    cost: '<one line shown before it starts>'
     finding_key: <field that stays the same across runs>   # blank → file + CWE
     job: <id of a long run still in flight>
     filed: <the results path last filed>
     last_run: YYYY-MM-DD <sha7>          # when the filed results were produced; the cadence clock
 ````
 
-**Known scanners** — install and upgrade seed one entry per row whose plugin `claude plugin list --json` shows installed, with `job:`, `filed:` and `last_run:` empty — a placeholder left in `job:` reads as a run in flight and the scanner is never due again. A scanner not listed here is added to `scanners.yaml` by hand; it needs no row.
+`{out}` is the file the tool writes; `{range}` is the commit range under review (`<base>..<head>` at task and ship, the whole history up to a commit for the baseline and cadence runs); `{files}` is the changed tracked files the entry's `paths:` match (`.` for a whole-tree run); `{url}` is the deployed url (`deploy` only). A tool that scans a whole tree is narrowed to the changed files by `scan.py`, so a command may name a directory.
 
-| Scanner | Installed when the list carries | Entry |
-|---|---|---|
-| claude-security | `claude-security@` | `skill: claude-security:claude-security` · `args: 'scan the whole repository at medium effort. I understand it may take a while and use a lot of tokens.'` (the second sentence is the plugin's own consent phrase — without it the scan asks a question of its own, which a 60-second timeout cancels) · `results: 'CLAUDE-SECURITY-*/CLAUDE-SECURITY-RESULTS.jsonl'` · `cost: 'a medium-effort scan of the whole repository — runs a long time and uses a lot of tokens'` · `finding_key: claudeSecurityPluginFindingId` |
+**Default tools** — what install and upgrade fill a slot with when it applies and nothing else on the machine already fills it. Recognition aids, not a whitelist: another tool fits a slot when it writes SARIF (or a format `findings.py` reads). Never pick a `sends: code` tool on your own — only one the user named.
+
+| Slot | Applies when | Default | Entry |
+|---|---|---|---|
+| secrets | always | gitleaks | `at: [task, ship]` · `command: 'gitleaks git --log-opts={range} --redact --report-format sarif --report-path {out} --exit-code 0 .'` · `sends: none` |
+| code | source in a language Semgrep reads | Semgrep CE | `at: [task, ship]` · `command: 'semgrep scan --config p/default --metrics=off --sarif -o {out} {files}'` (`--config auto` needs metrics on) · `sends: none` (it downloads the ruleset, sends nothing) |
+| dependencies | a manifest or lockfile exists | osv-scanner | `at: [task, ship]` · `paths: '$DEPENDENCY_MANIFESTS'` · `format: osv-json` · `command: 'osv-scanner scan source --recursive --format json --output-file {out} .'` — or, where an image ships, the image form `/audit` Step 0 picks · `sbom: 'osv-scanner scan source --recursive --format cyclonedx-1-5 --output-file {out} .'` · `sends: names` |
+| infrastructure | infra written in a form Trivy reads: Terraform, CloudFormation, Kubernetes, Helm, Dockerfile | Trivy | `at: [task, ship]` · `paths:` those files' ERE · `command: 'trivy config --quiet --format sarif -o {out} <infra dir>'`. Infra written only as code Trivy cannot read (a CDK app, say) → the entry stays `command: ''` with that reason in a comment — never a run that reads nothing |
+| image | the deploy config ships a container image | Trivy | `at: [ship]` · `command: 'trivy image --quiet --format sarif -o {out} <image the deploy builds>'` |
+| live-site | Docker is available and a prod env has a url | ZAP baseline (passive) | `at: [deploy]` · `format: zap-json` · `command: 'docker run --rm -v "$PWD/.claude/scans:/zap/wrk" zaproxy/zap-stable zap-baseline.py -t {url} -J live-site.json -I; mv .claude/scans/live-site.json {out}'` |
+| change-review | always | Claude Code's `security-review` | `at: [ship]` · `skill: security-review` |
+| deep-review | the plugin is installed (`claude plugin list --json` carries `claude-security@`) | claude-security | `at: [every]` · `every_days: 90` · `skill: claude-security:claude-security` · `args: 'scan the whole repository at medium effort. I understand it may take a while and use a lot of tokens.'` (the second sentence is the plugin's own consent phrase — without it the scan asks a question of its own, which a 60-second timeout cancels) · `results: 'CLAUDE-SECURITY-*/CLAUDE-SECURITY-RESULTS.jsonl'` · `cost: 'a medium-effort scan of the whole repository — runs a long time and uses a lot of tokens'` · `finding_key: claudeSecurityPluginFindingId` |
+
+**Installing a missing default** (install and upgrade, never asked — the user decided tools install themselves): the machine's package manager (`brew`); else `uv tool install` for a Python tool (Semgrep); else the tool's release binary from its own GitHub releases, its published checksum verified before it is put on `PATH`. An install that fails leaves the slot `command: ''` and says why — the slot reports `empty`, it never holds. `job:`, `filed:` and `last_run:` start empty — a placeholder left in `job:` reads as a run in flight and the scanner is never due again.
+
+After the entries are written, run `python3 .claude/skills/<PREFIX>-review/scripts/scan.py baseline` once: every tool on a temporary checkout of `origin/HEAD`, so what already exists becomes `scan-baseline.txt` — backlog for `/audit`, never a hold — while the unpushed work is still reviewed at its first push. Report each slot's state, time and finding count.
 
 ---
 
@@ -1386,7 +1399,7 @@ Read `references/deploy-config.yaml` before any deploy action.
 
 **Caller contract.** Caller passes `target`:
 - `target: non-prod` → deploy only to the **first** non-prod env **with a `deploy:` command** (declaration order). Serve-envs (`run:`) are never deployed — they are started at the command top level, not here. If a component has no non-prod ship-env, return silently for that component. **Early exit:** if no component in the yaml declares a non-prod ship-env at all, report `non-prod: no-op (no non-prod ship-env declared)` immediately — don't walk components one by one.
-- `target: prod` → deploy only to the env named `prod`. If `prod` is not declared (pre-launch component), return silently. Otherwise use the `<PREFIX>-review` skill § Before ship first — before the gate below asks anything; a hold returns `gate: held — security review` and deploys nothing.
+- `target: prod` → deploy only to the env named `prod`. If `prod` is not declared (pre-launch component), return silently. Otherwise use the `<PREFIX>-review` skill § Before ship first — before the gate below asks anything; a hold returns `gate: held — security review` with the held items' roadmap ids and deploys nothing.
 
 Never deploy across the boundary regardless of caller request. `<PREFIX>-dev` always passes `non-prod` (mid-pipeline, so `<PREFIX>-qa` tests a running stack). `target: prod` is passed only by the top-level `/code --prod` / `/fix --prod` command step **after** QA sign-off — never by a subagent, because the prod gate below needs `AskUserQuestion` and that only reaches the user at the top level. If `target: prod` is ever requested from a context where `AskUserQuestion` can't reach the user (i.e. invoked inside a subagent), refuse and return without deploying — prod requires the top-level command.
 
@@ -1422,6 +1435,8 @@ Never deploy across the boundary regardless of caller request. `<PREFIX>-dev` al
 
 **Report:** after any deploy, emit one line per component in the form `<component> → <env> · <url>` so `<PREFIX>-log` can include it in the delivery log entry.
 
+**Live site:** after a healthy prod deploy, when `<PREFIX>-review/references/scanners.yaml` has an entry `at: [deploy]`, run `python3 .claude/skills/<PREFIX>-review/scripts/scan.py run --at deploy --url <the prod url>`. Decide each `NEW` finding per `<PREFIX>-review` § Triage and file each `affected` one as a roadmap item — the deploy already happened, so nothing is undone and nothing waits. Add its summary line to the report.
+
 ## Build inputs
 
 A ship-env's build must produce what was verified, not whatever the package index serves on the day it runs. A floating range lets the resolver move a package **down** to fit a new release elsewhere — no commit, no warning, no failing test, so nothing keyed on git sees it: one rebuild of unchanged code dragged an agent runtime from 2.x to 1.x to fit a web-framework release, and every prod run crashed. Two rules, both carried in the project's own manifest and build file:
@@ -1433,7 +1448,7 @@ A ship-env's build must produce what was verified, not whatever the package inde
 
 `git push` is a deploy action whenever a CI ship-env fires on push. Callers (the `/code`/`/fix`/`/pilot` close-out step, `/tweak` exit, `/tidy`, `/wrap`, `/revert`) resolve pushability here — raw pushes must not bypass this skill's gates:
 
-0. Use the `<PREFIX>-review` skill § Before ship first. A hold means no push — return `push: held — security review`.
+0. Use the `<PREFIX>-review` skill § Before ship first. A hold means no push — return `push: held — security review` with the held items' roadmap ids, and the `scan.py status --one-line` summary either way.
 1. Read `references/deploy-config.yaml`. If any component declares a ship-env with `trigger: ci` whose deploy fires on a push to the current branch, pushing **is** shipping to that env.
 2. If that env is `prod` (or gated `user_confirm`): push only after the prod gate passed this session, or after an explicit `AskUserQuestion` confirm with the same context block. Unanswered → `gate: unanswered — parked`; never push on silence.
 3. Otherwise pushing is safe — push directly.

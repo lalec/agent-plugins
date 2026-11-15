@@ -13,7 +13,7 @@ disable-model-invocation: true
 
 Run `scripts/fanout.sh` from this skill's directory with the user's arguments, using Bash `run_in_background` — it waits for each session to be idle, which can take as long as that session's current turn.
 
-1. **Once for the machine:** updates dev-workflow and every plugin its manifest depends on, each from its own marketplace.
+1. **Once for the machine:** updates dev-workflow and every plugin its manifest depends on, each from its own marketplace, then installs any default security scanner the machine lacks (Homebrew, else `uv tool`), so sessions upgrading in parallel never race to install the same tool; one still missing is left to each session's upgrade, which also tries the tool's release binary.
 2. **Per session, in parallel, each only once it is idle**, typed into its own iTerm tab: `/compact`, `/reload-plugins`, `/dev-workflow:upgrade --yes`.
 3. **`--restart`** also runs `claude update` once, then per session `/compact`, `/exit`, and a relaunch in the same tab with that session's own launch flags plus `--resume <id> '/dev-workflow:upgrade --yes'`, so it runs the new Claude Code. The session id stays the same.
 

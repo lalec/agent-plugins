@@ -95,7 +95,7 @@ On no, print the copy command and the exact settings block so the user can paste
 
 **One file per session is also not optional, and the reason is worth knowing.** A first version wrote one shared path. On a machine running 12 concurrent sessions — each re-rendering every 60 s — that file flipped between 46% and 7% for the same window four seconds apart, and published a missing window under a timestamp zero seconds old. A mission read it, reversed its own correct decision to stop, ran into the limit, and had a subagent killed mid-write against production. The script now writes `~/.claude/usage/<session id>.json` and `--read` reconciles them; **every caller must use `--read`** and never open those files, or it is reading one arbitrary session again.
 
-Never write this without asking — it is the second of only two things in this install that touch anything outside the repo. Never run the step from a non-interactive session. It is machine-scoped, so a second project's install finds it already wired and skips.
+Never write this without asking — apart from the security tools, it is the only thing in this install that touches anything outside the repo, and the tools are the decided exception: the user chose that a missing default scanner installs itself (`tpl-lifecycle.md § tosk-review`, Default tools), so that step asks nothing. Never run this step from a non-interactive session. It is machine-scoped, so a second project's install finds it already wired and skips.
 
 **Step 6 — Let a long run compact itself at the right point (nothing to write)**
 

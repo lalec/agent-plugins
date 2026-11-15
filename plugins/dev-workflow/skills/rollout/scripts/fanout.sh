@@ -4,7 +4,8 @@
 # /compact, /reload-plugins and /exit are built-in commands no tool and no session message can run.
 #
 # Usage: fanout.sh [--restart] [--session <id>]... [--dry-run]
-#   first, once for the machine: update dev-workflow and every plugin its manifest depends on
+#   first, once for the machine: update dev-workflow and every plugin its manifest depends on, and
+#   install the default security scanners the machine lacks (brew, else uv tool)
 #   (default)  per session: /compact, /reload-plugins, /dev-workflow:upgrade --yes
 #   --restart  also claude update once, then per session: /compact, /exit, relaunch with the same
 #              flags plus --resume <id> '/dev-workflow:upgrade --yes'
@@ -164,10 +165,25 @@ update_plugins() { # dev-workflow and its manifest dependencies, each from its o
     done
 }
 
+install_tools() { # the security scanners the Default tools table names, once, before sessions upgrade in parallel
+  local tpl b
+  tpl=$(cd "$(dirname "$0")/../../.." && pwd)/shared/tpl-lifecycle.md
+  for b in $(sed -n '/^\*\*Default tools\*\*/,/^\*\*Installing a missing default\*\*/p' "$tpl" |
+             grep -oE "command: '[a-z][a-z0-9-]*" | sed "s/command: '//" | sort -u); do
+    [ "$b" = docker ] && continue   # a container runtime the user installs, never this script
+    command -v "$b" >/dev/null 2>&1 && continue
+    { command -v brew >/dev/null 2>&1 && brew install "$b" >/dev/null 2>&1; } ||
+      { command -v uv >/dev/null 2>&1 && uv tool install "$b" >/dev/null 2>&1; }
+    if command -v "$b" >/dev/null 2>&1; then echo "installed $b"
+    else echo "not installed: $b — each session's upgrade tries its release binary"; fi
+  done
+}
+
 SESSIONS=$(list_sessions)
 [ -n "$SESSIONS" ] || { echo "no other live session has a dev-workflow install"; exit 0; }
 if [ $DRY = 0 ]; then
   update_plugins
+  install_tools
   [ $RESTART = 1 ] && { claude update || echo "claude update failed — relaunching on the current version"; }
 fi
 

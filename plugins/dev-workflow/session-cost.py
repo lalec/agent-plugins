@@ -24,10 +24,11 @@ import os
 import sys
 from datetime import datetime
 
-# $ per 1M tokens (input, output, cache read), from the claude-api skill's model table (cached
-# 2026-11-03). The 5.5 models and Fable 5.2 price cache reads below the old 0.1x of input, so the
-# read price is per model; cache writes stay 1.25x (5 min) and 2x (1 h) of input. Haiku 5.5 is
-# priced at its up-to-100K-token rate. An unknown model is priced as old Opus and over-counts.
+# $ per 1M tokens (input, output, cache read), from the claude-api skill (model table cached
+# 2026-11-03; cache economics in shared/prompt-caching.md): reads are 0.1x of input except Fable 5.2
+# (0.025x) and Opus/Sonnet 5.5 (0.05x), so the read price is per model; writes are 1.25x (5 min) and
+# 2x (1 h) of input on every model. Haiku 5.5 is priced at its up-to-100K-token rate. An unknown
+# model is priced as old Opus and over-counts.
 PRICES = {
     "claude-fable-5-2": (8.0, 40.0, 0.20),
     "claude-opus-5-5": (4.0, 20.0, 0.20),

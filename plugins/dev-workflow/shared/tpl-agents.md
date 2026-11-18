@@ -251,5 +251,5 @@ No source edits, no reference edits, no commits beyond what the runner's `record
 **Notes:** <one short line, optional>
 ```
 
-`Status: partial` whenever `Unstarted:` is not `none`. Never end a turn without this block.
+`Status: partial` whenever `Unstarted:` is not `none` — including when the turn cap ended the slice. Never end a turn without this block.
 ```

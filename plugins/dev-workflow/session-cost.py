@@ -24,17 +24,24 @@ import os
 import sys
 from datetime import datetime
 
-# $ per 1M tokens (input, output). Sonnet 5 intro pricing runs through 2026-08-31.
+# $ per 1M tokens (input, output, cache read), from the claude-api skill's model table (cached
+# 2026-11-03). The 5.5 models and Fable 5.2 price cache reads below the old 0.1x of input, so the
+# read price is per model; cache writes stay 1.25x (5 min) and 2x (1 h) of input. Haiku 5.5 is
+# priced at its up-to-100K-token rate. An unknown model is priced as old Opus and over-counts.
 PRICES = {
-    "claude-opus-5": (5.0, 25.0),
-    "claude-opus-4-8": (5.0, 25.0),
-    "claude-opus-4-7": (5.0, 25.0),
-    "claude-sonnet-5": (2.0, 10.0),
-    "claude-sonnet-4-6": (3.0, 15.0),
-    "claude-haiku-4-5": (1.0, 5.0),
+    "claude-fable-5-2": (8.0, 40.0, 0.20),
+    "claude-opus-5-5": (4.0, 20.0, 0.20),
+    "claude-sonnet-5-5": (2.0, 10.0, 0.10),
+    "claude-haiku-5-5": (0.10, 0.50, 0.01),
+    "claude-opus-5": (5.0, 25.0, 0.50),
+    "claude-opus-4-8": (5.0, 25.0, 0.50),
+    "claude-opus-4-7": (5.0, 25.0, 0.50),
+    "claude-sonnet-5": (2.0, 10.0, 0.20),
+    "claude-sonnet-4-6": (3.0, 15.0, 0.30),
+    "claude-haiku-4-5": (1.0, 5.0, 0.10),
 }
-DEFAULT_PRICE = (5.0, 25.0)
-CACHE_READ, WRITE_5M, WRITE_1H = 0.1, 1.25, 2.0
+DEFAULT_PRICE = (5.0, 25.0, 0.50)
+WRITE_5M, WRITE_1H = 1.25, 2.0
 
 
 def load(path):
@@ -79,17 +86,9 @@ def load(path):
 def cost(rows):
     total = 0.0
     for r in rows:
-        pin, pout = PRICES.get(r["model"], DEFAULT_PRICE)
-        total += (
-            (
-                r["inp"]
-                + r["read"] * CACHE_READ
-                + r["w5"] * WRITE_5M
-                + r["w1h"] * WRITE_1H
-            )
-            * pin
-            / 1e6
-        )
+        pin, pout, pread = PRICES.get(r["model"], DEFAULT_PRICE)
+        total += (r["inp"] + r["w5"] * WRITE_5M + r["w1h"] * WRITE_1H) * pin / 1e6
+        total += r["read"] * pread / 1e6
         total += r["out"] * pout / 1e6
     return total
 

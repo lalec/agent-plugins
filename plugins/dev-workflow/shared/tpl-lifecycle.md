@@ -1867,9 +1867,12 @@ one retest — because the split ignored that every entry in those slices was th
 Give each child **~120 tool calls of work**: roughly 6 UX/E2E entries, or 40 Integration ones, or a
 mix that adds up. That figure and the agent's 60-turn cap are **one bound, not two** — measured
 children average ~2 tool calls per turn, so a slice sized to ~120 calls fits under the cap, and a
-slice that does not fit is the cap's job to end: the child returns `Status: partial` with an
-`Unstarted:` list, and the caller re-dispatches exactly that list as a new child. Split further only
-to fit that budget — never as a saving in itself.
+slice that does not fit is the cap's job to end. **What is left is read from the records, never from
+the handoff:** an entry of the slice whose `last:` block does not carry the run's pinned commit and a
+`ts` after the child's dispatch is unwalked, and the caller re-dispatches exactly those as a new
+child. The cap can end a child mid-call, before it writes any handoff — 5 of 58 measured children
+ended so, 4 of them with outcomes already recorded — so a missing handoff never means nothing was
+done, nor that all was. Split further only to fit that budget — never as a saving in itself.
 
 **One condition on that, and only at the wall.** Run `bash ~/.claude/usage-snapshot.sh --read` at the
 moment of splitting — that script owns the arithmetic; never read its files directly, because a shared

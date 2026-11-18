@@ -140,8 +140,8 @@ BACKTICK_RE = re.compile(r"`([^`]+)`")
 DEFERRAL_REASON_RE = re.compile(r"\s[—–-]\s")
 DEPLOYED_RE = re.compile(r"([A-Za-z0-9_-]+)\s*→\s*([A-Za-z0-9_-]+)\s*·\s*(\S+)")
 # `**Decisions:**` is ` · `-separated, so each term is parsed on its own rather than by one
-# global scan. A global `findall` demanding a kebab value silently dropped 12% of jobzeeker's
-# terms and 19% of portrais's — including `hold-continue-until-check-settles=**KEEP** (user)`,
+# global scan. A global `findall` demanding a kebab value silently dropped 12% of one project's
+# terms and 19% of another's — including `hold-continue-until-check-settles=**KEEP** (user)`,
 # an answer that left its gate reading `parked` for a fortnight. The name admits `/` because
 # `keep/adopt` is a real gate name; the value is whatever precedes the trailing provenance,
 # and the provenance is optional (`defer=none`).
@@ -538,7 +538,7 @@ def dependents(items: list[dict], root: Path, rid: str) -> list[dict]:
 
 # Every field the graph reads from a roadmap item, in the order a stub writes them. A closed
 # item keeps exactly these plus `**Body:**`; the rest of its text lives in git. Measured on
-# jobzeeker: 45% of the roadmap text agents pulled into context came from closed item bodies.
+# one project: 45% of the roadmap text agents pulled into context came from closed item bodies.
 STUB_FIELDS = ("Id", "Status", "Priority", "Milestone", "Parent", "Depends on", "Category")
 # The invariant `compact` checks before it writes: the graph's view of every item is unchanged.
 VIEW_KEYS = (
@@ -1179,7 +1179,7 @@ def open_gates(edges: list[dict]) -> list[dict]:
 
     The closing rule is unchanged — a later entry deciding the same gate closes it, with no
     separate closing action — but it is applied *per parking* rather than by keeping one
-    newest edge per name. Keeping only the newest hid real work: portrais parks `keep/adopt`
+    newest edge per name. Keeping only the newest hid real work: one project parks `keep/adopt`
     on every `/tune` run, and four unanswered parkings collapsed into one node while three
     disappeared. A name is closed by a **newer non-parked** decision on that name, so an
     unanswered parking survives however many times the name repeats.

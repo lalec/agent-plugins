@@ -171,3 +171,4 @@ Report a summary of what was upgraded.
 - `.claude/skills/<PREFIX>-review/scripts/scan.py` is byte-identical to the plugin's `shared/scan.py` and contains `graph.py is missing`
 - `<PREFIX>-test/references/custom-tests.md` contains `read from the records, never from`; `<PREFIX>-verify.md` does not contain `including when the turn cap ended the slice`
 - `pilot/SKILL.md` contains `A run never starts a loop itself` and stays under 20,000 characters; `whats-up/SKILL.md` contains `printed for you to type`; `pilot/references/close-out.md` lacks `paces itself on that number`; `pilot/references/allowance.md` lacks `the only form that comes back on its own`; `.claude/graph/graph.py` is byte-identical to the plugin's
+- `code/SKILL.md` contains `the skill cannot run that check itself`; `pilot/references/close-out.md` contains `§ Before ship first, as`; `<PREFIX>-deploy/SKILL.md` contains `the caller has already passed` and no `gate: held — security review`

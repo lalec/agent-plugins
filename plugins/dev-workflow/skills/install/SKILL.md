@@ -200,7 +200,7 @@ Create these files (skip if already present, offer to overwrite if stale):
 .claude/skills/<PREFIX>-deploy/references/deploy-config.yaml  ← populated, not a stub — see "Populate deploy-config.yaml" below
 .claude/skills/<PREFIX>-test/SKILL.md       ← also creates references/test-commands.md, sync-checklist.md, custom-tests.md, and custom-tests.yaml (tests: []) — see tpl-lifecycle.md § tosk-test
 .claude/skills/<PREFIX>-test/scripts/run-checks.py  ← copy ../../shared/run-checks.py VERBATIM — no substitution (it glob-discovers the test skill), so it stays byte-identical across projects; `git add` it, and no chmod (it runs as `python3 …`)
-.claude/skills/<PREFIX>-review/scripts/{scan,findings}.py  ← copy ../../shared/{scan,findings}.py VERBATIM — no substitution (they glob-discover the review skill); `git add` them, no chmod
+.claude/skills/<PREFIX>-review/scripts/{scan,findings}.py  ← copy ../../shared/{scan,findings}.py VERBATIM — no substitution (they glob-discover the review skill); `git add` them, no chmod; copy `.claude/graph/graph.py` before any `scan.py` call — scan.py reads its files with graph.py's parsers and stops without them
 .claude/skills/<PREFIX>-skill/SKILL.md
 .claude/skills/<PREFIX>-skill/references/skill-manifest.md  ← stub; populate with all lifecycle + domain skills installed in this run
 .claude/skills/<PREFIX>-docs/SKILL.md

@@ -1399,7 +1399,7 @@ Read `references/deploy-config.yaml` before any deploy action.
 
 **Caller contract.** Caller passes `target`:
 - `target: non-prod` → deploy only to the **first** non-prod env **with a `deploy:` command** (declaration order). Serve-envs (`run:`) are never deployed — they are started at the command top level, not here. If a component has no non-prod ship-env, return silently for that component. **Early exit:** if no component in the yaml declares a non-prod ship-env at all, report `non-prod: no-op (no non-prod ship-env declared)` immediately — don't walk components one by one.
-- `target: prod` → deploy only to the env named `prod`. If `prod` is not declared (pre-launch component), return silently. Otherwise use the `<PREFIX>-review` skill § Before ship first — before the gate below asks anything; a hold returns `gate: held — security review` with the held items' roadmap ids and deploys nothing.
+- `target: prod` → deploy only to the env named `prod`. If `prod` is not declared (pre-launch component), return silently. Otherwise the caller has already passed `<PREFIX>-review` § Before ship: the `security-gate.sh` hook refuses this call until it has, and the hook runs before this skill loads.
 
 Never deploy across the boundary regardless of caller request. `<PREFIX>-dev` always passes `non-prod` (mid-pipeline, so `<PREFIX>-qa` tests a running stack). `target: prod` is passed only by the top-level `/code --prod` / `/fix --prod` command step **after** QA sign-off — never by a subagent, because the prod gate below needs `AskUserQuestion` and that only reaches the user at the top level. If `target: prod` is ever requested from a context where `AskUserQuestion` can't reach the user (i.e. invoked inside a subagent), refuse and return without deploying — prod requires the top-level command.
 
@@ -1868,8 +1868,13 @@ Give each child **~120 tool calls of work**: roughly 6 UX/E2E entries, or 40 Int
 mix that adds up. That figure and the agent's 60-turn cap are **one bound, not two** — measured
 children average ~2 tool calls per turn, so a slice sized to ~120 calls fits under the cap, and a
 slice that does not fit is the cap's job to end: the child returns `Status: partial` with an
-`Unstarted:` list, and the caller re-dispatches exactly that list as a new child. Split further only
-to fit that budget — never as a saving in itself.
+`Unstarted:` list, and the caller re-dispatches exactly that list as a new child. **A child that
+returns no handoff block is read from the records instead:** an entry of its slice whose `last:`
+block does not carry the run's pinned commit and a `ts` after the child's dispatch is unwalked, and
+the caller re-dispatches exactly those. The cap can end a child mid-call, before it writes any
+handoff — 5 of 58 measured children ended so, 4 of them with outcomes already recorded — so a missing
+handoff never means nothing was done, nor that all was. Split further only to fit that budget —
+never as a saving in itself.
 
 **One condition on that, and only at the wall.** Run `bash ~/.claude/usage-snapshot.sh --read` at the
 moment of splitting — that script owns the arithmetic; never read its files directly, because a shared

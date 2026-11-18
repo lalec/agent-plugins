@@ -422,7 +422,7 @@ The same bare-shell constraint applies to any tool a hook shells out to (typeche
 
 Blocks a `git push`, and a `<PREFIX>-deploy` call with `target=prod`, until the security slots have run on everything about to ship and every finding has a decision — so a scan cannot be skipped by forgetting it. The hook runs `<PREFIX>-review/scripts/scan.py gate`, which reuses a ship run of each tool slot that already covers `origin/HEAD..HEAD`, runs the missing ones in parallel, and exits 2 while a slot errored twice, a new finding has no `vex.yaml` statement, a finding that holds is open, or the change review has not recorded a result for governed or deploy paths in the range. What is new and what holds is decided in `scan.py` and `<PREFIX>-review/references/security-review.md`, not here. The hook checks that every finding has a decision, never that the decision is right; the baseline file and the change-review record are written by the session and trusted as written. A project with no remote passes — there is nothing to push to. `CLOSEOUT_OVERRIDE=1 git push …` bypasses the push half only; a prod deploy has no override.
 
-Its `settings.json` Bash entry carries `"if": "Bash(git push*)"`, so the hook never starts for any other command, and `"onFailure": "block"`, so a crash or a timeout blocks the push instead of letting it through (Claude Code lets a failed hook's call proceed otherwise); `scan.py` keeps a slot's two tries under the 600-second timeout. The Skill entry has no `onFailure`, so a broken hook cannot block every skill.
+Its `settings.json` Bash entries carry `"if": "Bash(git push*)"` and `"if": "Bash(git -C * push*)"`, so the hook starts only for a command that may push — the second filter catches `git -C <dir> push`, which the first misses, and lets through some `git -C` commands that only mention a push, which the script's own match then passes. A push spelt another way (`env`, a full path to git, `sh -c`) is not covered: the gate stops a session that forgot the checks, not one avoiding them. Each carries `"onFailure": "block"`, so a crash or a timeout blocks the push instead of letting it through (Claude Code lets a failed hook's call proceed otherwise); `scan.py` keeps a slot's two tries under the 600-second timeout. The Skill entry has no `onFailure`, so a broken hook cannot block every skill. It cannot be narrowed to the deploy skill instead: tested on Claude Code 2.1.327, an `if` of `Skill(<name>)` never fires, and only `Skill(*)` or a bare `Skill` does, for every skill. Callers therefore run § Before ship before a prod deploy call, since this hook runs before the deploy skill loads.
 
 ```bash
 #!/bin/bash
@@ -432,7 +432,7 @@ CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
 SKILL=$(echo "$INPUT" | jq -r '.tool_input.skill // empty' 2>/dev/null)
 ARGS=$(echo "$INPUT" | jq -r '.tool_input.args // empty' 2>/dev/null)
 if [ -n "$CMD" ]; then
-  echo "$CMD" | grep -qE "git push" || exit 0
+  echo "$CMD" | grep -qE "git( +-C +[^ ]+)* +push" || exit 0
   echo "$CMD" | grep -qE "CLOSEOUT_OVERRIDE=1" && exit 0
 elif [ "$SKILL" = "<PREFIX>-deploy" ]; then
   echo "$ARGS" | grep -qiE "target[[:punct:][:space:]]*prod" || exit 0
@@ -539,7 +539,7 @@ exit 0
 
 ## § close-out-gate.sh
 
-Blocks `git push` while commits after the last delivery-log entry touch governed or deploy paths — the iterate lane's teeth: work and commit freely all day, but nothing leaves the machine without one batched close-out (`/tweak` exit, `/wrap`, or the pipeline's pm step, all of which commit a log entry). Emergency override: `CLOSEOUT_OVERRIDE=1 git push …`.
+Blocks `git push` while commits after the last delivery-log entry touch governed or deploy paths — the iterate lane's teeth: work and commit freely all day, but nothing leaves the machine without one batched close-out (`/tweak` exit, `/wrap`, or the pipeline's pm step, all of which commit a log entry). Emergency override: `CLOSEOUT_OVERRIDE=1 git push …`. It acts only on a push, so its `settings.json` entries carry the same two `if` filters as `security-gate.sh` and it never starts for any other command.
 
 ```bash
 #!/bin/bash
@@ -548,7 +548,7 @@ Blocks `git push` while commits after the last delivery-log entry touch governed
 INPUT=$(cat) || exit 0
 CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
 [ -z "$CMD" ] && exit 0
-echo "$CMD" | grep -qE "git push" || exit 0
+echo "$CMD" | grep -qE "git( +-C +[^ ]+)* +push" || exit 0
 echo "$CMD" | grep -qE "CLOSEOUT_OVERRIDE=1" && exit 0
 
 source "$(dirname "$0")/governed-paths.conf"
@@ -816,7 +816,7 @@ exit 0
 
 ## § settings.json
 
-Wire all 17 hook scripts — 21 entries, since `skill-guard.sh` sits under both `Edit` and `Write`, `pre-handoff-check.sh` under both `Skill` and `Task|Agent`, `security-gate.sh` under both `Bash` and `Skill`, and `pilot-continue.sh` under both `Stop` and `SessionStart` (`compact`). If the file already exists, merge the `hooks` key without removing unrelated settings. Timeout unit: **seconds**. The `Task|Agent` matcher is what makes `pre-handoff-check.sh` fire when qa is spawned as a subagent — without it the gate never runs in the pipeline. The `SubagentStop` matcher names the four pipeline agents so a research fork or an Explore child never gets blocked for lacking a handoff block. The secrets hooks are not in this file: they ship with the srun plugin, so they guard projects without dev-workflow too.
+Wire all 17 hook scripts — 23 entries, since `skill-guard.sh` sits under both `Edit` and `Write`, `pre-handoff-check.sh` under both `Skill` and `Task|Agent`, `security-gate.sh` twice under `Bash` (one per push filter) and once under `Skill`, `close-out-gate.sh` twice under `Bash`, and `pilot-continue.sh` under both `Stop` and `SessionStart` (`compact`). If the file already exists, merge the `hooks` key without removing unrelated settings. Timeout unit: **seconds**. The `Task|Agent` matcher is what makes `pre-handoff-check.sh` fire when qa is spawned as a subagent — without it the gate never runs in the pipeline. The `SubagentStop` matcher names the four pipeline agents so a research fork or an Explore child never gets blocked for lacking a handoff block. The secrets hooks are not in this file: they ship with the srun plugin, so they guard projects without dev-workflow too.
 
 ```json
 {
@@ -840,8 +840,10 @@ Wire all 17 hook scripts — 21 entries, since `skill-guard.sh` sits under both 
         "matcher": "Bash",
         "hooks": [
           { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/dependency-guard.sh", "timeout": 5 },
-          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/close-out-gate.sh", "timeout": 10 },
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/close-out-gate.sh", "if": "Bash(git push*)", "timeout": 10 },
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/close-out-gate.sh", "if": "Bash(git -C * push*)", "timeout": 10 },
           { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/security-gate.sh", "if": "Bash(git push*)", "timeout": 600, "onFailure": "block" },
+          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/security-gate.sh", "if": "Bash(git -C * push*)", "timeout": 600, "onFailure": "block" },
           { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/paid-meter.sh", "timeout": 30 }
         ]
       },

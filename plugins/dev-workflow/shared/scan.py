@@ -45,7 +45,13 @@ BASELINE = REVIEW / "scan-baseline.txt"
 
 @functools.lru_cache(None)
 def graph():
-    spec = importlib.util.spec_from_file_location("_graph", ROOT / ".claude" / "graph" / "graph.py")
+    """graph.py's parsers read scanners.yaml, vex.yaml and the path map. Without them no slot can
+    be read, so the gate blocks, naming the cause, rather than passing unscanned or crashing."""
+    path = ROOT / ".claude" / "graph" / "graph.py"
+    if not path.is_file():
+        sys.exit("scan.py: .claude/graph/graph.py is missing, so scanners.yaml cannot be read. "
+                 "Restore it (git checkout -- .claude/graph/graph.py) or re-run /dev-workflow:upgrade.")
+    spec = importlib.util.spec_from_file_location("_graph", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod

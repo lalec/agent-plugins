@@ -141,6 +141,37 @@ The plugin's path changes with each `/plugin update`; re-point the launcher afte
 
 Session transcripts stay readable — debugging across sessions keeps working.
 
+## Sandbox
+
+srun stops accidents. To limit where a value can go even when the agent is
+tricked — an unattended run that reads issues or web pages — run the session in
+Claude Code's sandbox. srun works inside it. Put this in your user settings, or
+in a file you pass with `claude --settings FILE` for those runs only:
+
+```json
+{
+  "sandbox": {
+    "enabled": true,
+    "allowUnsandboxedCommands": false,
+    "filesystem": { "allowWrite": ["<DARWIN_USER_CACHE_DIR>mds"] },
+    "network": { "allowedDomains": ["<each API host your commands call>"], "strictAllowlist": true }
+  }
+}
+```
+
+| Setting | Why |
+|---|---|
+| `allowWrite` `…mds` | The keychain writes a lock file in your cache folder; without it srun cannot read the keychain in the sandbox. Fill in the output of `getconf DARWIN_USER_CACHE_DIR` |
+| `strictAllowlist` | Without it, in auto mode the agent can name extra hosts for one command and get them approved |
+| `allowUnsandboxedCommands: false` | Without it, a bypass-mode session retries a blocked command outside the sandbox with no prompt |
+
+With these, a value srun hands out reaches only the listed hosts, and every
+program the agent runs is held to them. The sandbox does not stop the agent
+reading the keychain itself with `security` (only the guard's text check does),
+and the Read tool, hooks and MCP servers run outside it. The host list governs
+every Bash command — package installs and `git push` too. Never list `srun` in
+`sandbox.excludedCommands`: that runs `srun K -- <anything>` with full access.
+
 ## Limits
 
 - It serves your own machine. Claude cloud sessions and CI do not install the plugin, so a step there that needs a secret stops as `blocked`; deployed services read their secret manager themselves.

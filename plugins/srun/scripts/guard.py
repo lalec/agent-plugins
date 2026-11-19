@@ -52,9 +52,12 @@ _KNOWN = _READERS | set(_VALUE_READS) | _SHELLS
 _SECRET_DIRS = [os.path.expanduser(d) for d in ("~/.aws", "~/.ssh", "~/.config/gcloud")]
 # `<<WORD`, `<<-WORD`, `<<'WORD'` — not a `<<<` here-string or a `$((1<<N))` shift.
 _HEREDOC = re.compile(r"(?<![<$(])<<(?!<)-?[ \t]*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
-# Something before the `<<` that may run the body as code: a shell or an
-# interpreter, eval or source, or a substitution.
-_RUNS_BODY = re.compile(r"\b(sh|bash|zsh|eval|source|python3?|node|deno|bun|ruby|perl|php|osascript)\b|(^|[\s;&|(])\.\s|\$\(|`")
+# Anything on the heredoc's command line that may run or feed on the body: a
+# pipe, a shell or interpreter, eval/source/xargs, a read loop, a substitution.
+_RUNS_BODY = re.compile(
+    r"\||(^|[\s;&(/])(sh|bash|zsh|dash|ksh|eval|source|xargs|read|mapfile|readarray|"
+    r"python[0-9.]*|node|deno|bun|ruby|perl|php|osascript)(?=[\s;&)]|$)"
+    r"|(^|[\s;&(])\.\s|\$\(|`")
 
 
 def _deny(reason):
@@ -65,16 +68,20 @@ def _deny(reason):
 def _drop_heredoc_bodies(command):
     """A heredoc body is data — a file being written, a commit message — so its
     text must not read as commands. It is dropped only when that is certain:
-    nothing before the `<<` may run it (a shell, eval, source, a substitution),
-    its end marker is found, and an unquoted body holds no `$(` or backtick,
-    which the shell would run while expanding it."""
-    lines, out, i = command.split("\n"), [], 0
+    nothing on its command line (joined across `\\` continuations) may run or
+    feed on it, its end marker is found, and an unquoted body holds no `$(` or
+    backtick, which the shell would run while expanding it."""
+    lines, out, i, logical = command.split("\n"), [], 0, ""
     while i < len(lines):
         line = lines[i]
         out.append(line)
         i += 1
+        logical = logical + " " + line if logical else line
+        if line.endswith("\\"):
+            continue
+        whole, logical = logical, ""
         m = _HEREDOC.search(line)
-        if not m or _RUNS_BODY.search(line[:m.start()]):
+        if not m or _RUNS_BODY.search(_HEREDOC.sub(" ", whole)):
             continue
         end = next((j for j in range(i, len(lines)) if lines[j].strip() == m.group(2)), None)
         if end is None:

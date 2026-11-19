@@ -346,6 +346,10 @@ def test_index_update_only_when_bootstrapped():
     "cat > x.txt <<EOF\n$(cat .env)\nEOF",
     "cat > x.sh <<EOF\necho hi\nEOF\ncat .env",
     "cat > x.txt <<EOF\ncat .env",                    # no end marker
+    "cat <<'EOF' | sh\ncat .env\nEOF",
+    "cat <<'EOF' | /bin/bash -s\ncat .env\nEOF",
+    "bash \\\n  <<'EOF'\ncat .env\nEOF",
+    "python3 - <<'EOF'\nprint(open('.env').read())\nEOF",
 ])
 def test_guard_denies(cmd):
     with pytest.raises(SystemExit) as e:
@@ -368,6 +372,7 @@ def test_guard_denies(cmd):
     "cat > .gitignore <<'EOF'\n.env.local\n.env\nEOF",
     "cat > notes.md <<EOF\nnever run security find-generic-password -w\nEOF",
     "git commit -F - <<'EOF'\ndocs: never cat .env\nEOF",
+    "cat > deploy.sh <<'EOF'\ncat .env\nEOF",          # a file named .sh is data
 ])
 def test_guard_allows(cmd):
     assert guard._check(cmd) is None

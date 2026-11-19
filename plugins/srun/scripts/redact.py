@@ -46,6 +46,18 @@ KEYWORDS = [
 ]
 
 
+def _secret_like(value):
+    """A credential, not a code identifier: it holds a digit, and either
+    changes character class (lower/upper/digit) at least once per 5 chars or
+    is at least a quarter digits. Keeps `_resolve_1password` and
+    `token_budget_v2` readable; random keys pass 97-100% of the time."""
+    cls = ["d" if c.isdigit() else "u" if c.isupper() else "l"
+           for c in value if c.isalnum()]
+    digits = cls.count("d")
+    changes = sum(a != b for a, b in zip(cls, cls[1:]))
+    return digits > 0 and (changes * 5 >= len(value) or digits * 4 >= len(value))
+
+
 def _scrub(text):
     n = 0
     for pat in PATTERNS:
@@ -57,7 +69,12 @@ def _scrub(text):
         n += 1
         return m.group(1) + m.group(2) + REDACTED
 
-    for pat in KEYWORDS:
+    def _assignment(m):
+        # `token = x` is mostly code; only a credential-like value goes.
+        return _kw(m) if _secret_like(m.group(3)) else m.group(0)
+
+    text = KEYWORDS[0].sub(_assignment, text)
+    for pat in KEYWORDS[1:]:
         text = pat.sub(_kw, text)
     return text, n
 

@@ -8,6 +8,7 @@ another inside this process. Output names the NAME, store and id — never a val
 import sys
 
 from names import index_load, index_save, index_update, keychain_dump_names, list_names
+from envfile import cmd_import
 from prompt import read_hidden
 from manifest import (default_store, load_manifest, plan, resolve, set_default_store,
                       store_for)
@@ -176,5 +177,5 @@ def cmd_default(rest):
     return 0
 
 
-COMMANDS = {"add": cmd_add, "rm": cmd_rm, "ls": cmd_ls, "sync": cmd_sync,
+COMMANDS = {"add": cmd_add, "import": cmd_import, "rm": cmd_rm, "ls": cmd_ls, "sync": cmd_sync,
             "check": cmd_check, "migrate": cmd_migrate, "default": cmd_default}

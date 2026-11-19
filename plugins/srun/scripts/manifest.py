@@ -132,6 +132,22 @@ def resolve(name, cli_store, manifest):
                         "then run `srun setup`")
 
 
+def add_names(names):
+    """List NAMEs in the project's .srun.json, keeping its short form. Returns
+    the NAMEs that were not listed yet."""
+    path = find_manifest()
+    if not path:
+        raise SrunError(f"no {MANIFEST} in this project; run `srun setup` first")
+    data = _read(path)
+    entries = _entries(data.get("secrets"))
+    new = [n for n in names if n not in entries]
+    if new:
+        entries.update({n: {} for n in new})
+        data["secrets"] = entries
+        _write(path, _compact(data))
+    return new
+
+
 # ------------------------------------------------------------------ setup -- #
 def _compact(data):
     """The manifest in its short form: `backend` read as `store`; a store every

@@ -149,6 +149,10 @@ USAGE = """srun — run a command with named secrets, values never exposed
                                       name in .srun.json)
   srun add NAME [-s STORE]       store a value (hidden prompt; run it in your
                                       own terminal)
+  srun import FILE NAME... [-s STORE] [--remove]
+                                 move NAMEs out of a .env file into the store
+                                      (read back, listed in .srun.json); --remove
+                                      deletes their lines once all are stored
   srun rm  NAME [-s STORE]       remove a stored value
   srun ls  [-s STORE]            list stored NAMES (keychain: local index)
   srun sync                      rebuild the keychain-name index

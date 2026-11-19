@@ -86,12 +86,31 @@ process (read, store, read back, delete) and prints `moved`, `not stored`,
 GCP entries are skipped: moving needs create and delete rights there (and AWS
 deletes on a delay), so move them in that store, or pin `"id": "NAME"`.
 
+## Move a .env file into srun
+
+A `.env` file keeps secrets in plain text where any program — and the agent — can
+read them. Move the secrets, and leave public settings (URLs, project ids,
+`PUBLIC_*` browser config) where they are:
+
+```
+srun import app/.env API_KEY WEBHOOK_SECRET --remove
+srun API_KEY WEBHOOK_SECRET -- <start command>
+```
+
+`import` stores each value under its usual id, reads it back, lists the NAME in
+`.srun.json`, and with `--remove` deletes only those lines once all are stored.
+It never overwrites: an equal stored value is kept, a different one is refused.
+A loader such as python-dotenv never overrides a variable that is already set, so
+the app reads the value srun gives it and the file's other settings as before.
+Undo: `srun NAME -- sh -c 'printf "NAME=%s\n" "$NAME" >> app/.env'` puts a line back.
+
 ## Commands
 
 ```
 srun NAME [NAME...] [-s STORE] [--stdin NAME] -- cmd args...   run cmd with the values
 srun check [NAME...]     OK / MISS, store and id per name (default: every listed name)
 srun add NAME [-s STORE] store a value — the user types it, never the agent
+srun import FILE NAME... [--remove]   move secrets out of a .env file
 srun rm NAME | ls | sync
 srun migrate [NAME...]   move Keychain values from NAME to <namespace>/NAME
 srun default [STORE]     show or set your personal default store
@@ -112,12 +131,13 @@ The plugin's path changes with each `/plugin update`; re-point the launcher afte
 
 ## What the plugin wires
 
+`bin/srun` is on the Bash tool's `PATH` while the plugin is enabled, so `srun` works by name.
+
 | Hook | Does |
 |---|---|
-| SessionStart | puts `scripts/` on `PATH`, so `srun` works by name |
-| PreToolUse · Bash (`guard.py`) | denies printing a `.env` file or anything under `~/.aws`, `~/.ssh`, `~/.config/gcloud` (`grep -c` still counts), `security … -w`, `dump-keychain`, password-manager reads (`op read`, `op item get`, `dcli password`, `lpass show`), `env`/`printenv` dumps, and a value on the `add` command line — wherever the read sits: behind `sudo`, `env`, `time` or `VAR=x`, inside `$(…)`, backticks, `bash -lc '…'` or `op run --`, or on a later line of the same command |
+| PreToolUse · Bash (`guard.py`) | denies printing a `.env` file or anything under `~/.aws`, `~/.ssh`, `~/.config/gcloud` (`grep -c` still counts), `security … -w` or `-g`, `dump-keychain`, store reads (`op read`, `op item get`, `dcli password`, `lpass show`, `aws secretsmanager get-secret-value`, `gcloud secrets versions access`), `env`/`printenv` dumps, and a value on the `add` command line — wherever the read sits: behind `sudo`, `env`, `time` or `VAR=x`, inside `$(…)`, backticks, `bash -lc '…'` or `op run --`, or on a later line of the same command. A heredoc body is data, not commands, unless a shell or interpreter reads it |
 | PreToolUse · Read, Grep (`guard.py`) | denies the Read tool, and Grep in content mode, on those same files — never `.env.example`; Glob and Grep's file lists stay allowed |
-| PostToolUse (`redact.py`) | replaces credential-*shaped* strings (`sk-…`, `ghp_…`, `AKIA…`, JWTs, keys, `Bearer`/`Basic` header values) in any tool output |
+| PostToolUse (`redact.py`) | replaces credential-*shaped* strings (`sk-…`, `ghp_…`, `AKIA…`, JWTs, keys, `Bearer`/`Basic` header values, and a value after `token=`/`password:` that looks random rather than like a code name) in Bash, Read, Grep, WebFetch and MCP tool output |
 
 Session transcripts stay readable — debugging across sessions keeps working.
 
@@ -126,8 +146,9 @@ Session transcripts stay readable — debugging across sessions keeps working.
 - It serves your own machine. Claude cloud sessions and CI do not install the plugin, so a step there that needs a secret stops as `blocked`; deployed services read their secret manager themselves.
 - A project on a FAT or exFAT drive shows every file as writable by others and cannot be `chmod`ed, so srun refuses its `.srun.json`; keep the project on an APFS volume.
 - Grep over a whole folder in content mode, or `grep -r`, can still print a `.env` line; the guard catches a secret file only when it is named.
-- The guard reads a command's text, not what it does: a heredoc or `echo` whose text names `cat .env` or `op read` is denied too. Write such text with the Edit or Write tool.
-- Masking covers output, not intent: a child that sends a value over the network sends the real value.
+- The guard stops accidental reads, not a determined or prompt-injected agent: it reads a command's text, so another program (`base64 .env`, `python3 -c 'open(".env")'`, a copy) gets past it. An `echo` whose text names `cat .env` or `op read` is denied; write such text with the Edit or Write tool. The OS boundary is Claude Code's sandbox — see Sandbox below.
+- The namespace keeps projects apart; it is not an access boundary. The agent can edit `.srun.json`, so any session can name any value srun can reach.
+- Masking covers output, not intent: a child that sends a value over the network sends the real value. Only the sandbox's host allowlist limits where it can go.
 - Masking is best-effort: it knows the forms listed above. Inside a longer base64 string, one character at each edge of the value stays visible; other encodings (hex, hashes, a value split across lines) are not caught.
 - Any process you own can read a child's environment while it runs; `--stdin` avoids that for tools that accept it.
 - Python cannot guarantee a value is wiped from memory; the process is short-lived, core dumps are off, and tracebacks never print.

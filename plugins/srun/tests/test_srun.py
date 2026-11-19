@@ -333,6 +333,19 @@ def test_index_update_only_when_bootstrapped():
     # the file name itself comes from a substitution
     "cat $(find . -name .env)", "head $(echo .env)", "cat `realpath .env`",
     "srun add TOK $(cat ~/x)",
+    # srun's own stores, read directly
+    "security find-generic-password -s srun -a x -g",
+    "aws secretsmanager get-secret-value --secret-id app/K",
+    "gcloud secrets versions access latest --secret app_K",
+    # heredocs whose body may run, or that are not heredocs at all
+    "sh <<EOF\ncat .env\nEOF",
+    "bash -s <<'EOF'\nsecurity dump" + "-keychain\nEOF",
+    "cat <<<x\ncat .env",
+    "echo $((1<<N))\ncat .env",
+    "bash -c \"$(cat <<'EOF'\ncat .env\nEOF\n)\"",
+    "cat > x.txt <<EOF\n$(cat .env)\nEOF",
+    "cat > x.sh <<EOF\necho hi\nEOF\ncat .env",
+    "cat > x.txt <<EOF\ncat .env",                    # no end marker
 ])
 def test_guard_denies(cmd):
     with pytest.raises(SystemExit) as e:
@@ -350,6 +363,11 @@ def test_guard_denies(cmd):
     "grep -c '^API_KEY=' .env", "grep -q API_KEY .env.local",
     "cat ~/.claude/projects/x/y.jsonl",        # transcripts stay readable
     "ls -la .env", "source .env && npm test",
+    "aws s3 ls", "gcloud secrets list",
+    # a heredoc body is data: a file or a message being written
+    "cat > .gitignore <<'EOF'\n.env.local\n.env\nEOF",
+    "cat > notes.md <<EOF\nnever run security find-generic-password -w\nEOF",
+    "git commit -F - <<'EOF'\ndocs: never cat .env\nEOF",
 ])
 def test_guard_allows(cmd):
     assert guard._check(cmd) is None
@@ -418,6 +436,9 @@ def test_redactor_keeps_the_response_shape(monkeypatch):
     "cannot mint a Bearer token\npost-body-injection-true-positive-live",
     "the token budget-allocation-for-the-quarter",              # keyword, then prose
     "Basic internationalization support",                       # Basic, then prose
+    'RESOLVERS = {"1password": _resolve_1password}',             # code identifiers
+    "token = generate_token_v2(request)",
+    "password_field = form.password_confirmation_input",
 ])
 def test_redactor_leaves_normal_text(text):
     assert redact._scrub(text) == (text, 0)

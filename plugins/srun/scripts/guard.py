@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """PreToolUse guard — deny Bash commands and Read/Grep calls that would print
-secret values: secret files, keychain reads, and password-manager reads
-(`op read`, `dcli password`, `lpass show`, ...).
+secret values: secret files, keychain reads, and store reads (`op read`,
+`dcli password`, `lpass show`, `aws secretsmanager get-secret-value`, ...).
+Heredoc bodies are data and are not read as commands (see _drop_heredoc_bodies).
 
 Blocks the clear-cut leak vectors and teaches the srun form in the deny
 reason. Deliberately narrow: `srun NAME -- sh -c 'echo $NAME'` is allowed
@@ -35,22 +36,55 @@ _SHELL_OPS = {"|", "||", "&&", ";", "&"}
 _SHELLS = {"sh", "bash", "zsh"}
 # `-c`, `-lc`, `-ic`: the next argument is a command string the shell runs.
 _C_FLAG = re.compile(r"^-[a-zA-Z]*c[a-zA-Z]*$")
-# Password-manager verbs that print a stored value (`op item list`, `lpass
-# status` and the like print none and stay allowed).
-_MANAGER_READS = {
+# Store verbs that print a stored value: the password managers and srun's own
+# AWS/GCP stores (`op item list`, `lpass status`, `aws s3 ls` and the like print
+# none and stay allowed).
+_VALUE_READS = {
     "op": [("read",), ("inject",), ("item", "get"), ("document", "get"),
            ("get", "item"), ("get", "document"), ("get", "totp")],
     "dcli": [("password",), ("p",), ("read",), ("note",), ("n",), ("secret",),
              ("otp",), ("o",)],
     "lpass": [("show",), ("export",)],
+    "aws": [("secretsmanager", "get-secret-value")],
+    "gcloud": [("secrets", "versions", "access")],
 }
-_KNOWN = _READERS | set(_MANAGER_READS) | _SHELLS
+_KNOWN = _READERS | set(_VALUE_READS) | _SHELLS
 _SECRET_DIRS = [os.path.expanduser(d) for d in ("~/.aws", "~/.ssh", "~/.config/gcloud")]
+# `<<WORD`, `<<-WORD`, `<<'WORD'` — not a `<<<` here-string or a `$((1<<N))` shift.
+_HEREDOC = re.compile(r"(?<![<$(])<<(?!<)-?[ \t]*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+# Something before the `<<` that may run the body as code: a shell or an
+# interpreter, eval or source, or a substitution.
+_RUNS_BODY = re.compile(r"\b(sh|bash|zsh|eval|source|python3?|node|deno|bun|ruby|perl|php|osascript)\b|(^|[\s;&|(])\.\s|\$\(|`")
 
 
 def _deny(reason):
     sys.stderr.write("srun guard: " + reason + "\n")
     raise SystemExit(2)
+
+
+def _drop_heredoc_bodies(command):
+    """A heredoc body is data — a file being written, a commit message — so its
+    text must not read as commands. It is dropped only when that is certain:
+    nothing before the `<<` may run it (a shell, eval, source, a substitution),
+    its end marker is found, and an unquoted body holds no `$(` or backtick,
+    which the shell would run while expanding it."""
+    lines, out, i = command.split("\n"), [], 0
+    while i < len(lines):
+        line = lines[i]
+        out.append(line)
+        i += 1
+        m = _HEREDOC.search(line)
+        if not m or _RUNS_BODY.search(line[:m.start()]):
+            continue
+        end = next((j for j in range(i, len(lines)) if lines[j].strip() == m.group(2)), None)
+        if end is None:
+            continue
+        body = "\n".join(lines[i:end])
+        if not m.group(1) and ("$(" in body or "`" in body):
+            continue
+        out.append(lines[end])
+        i = end + 1
+    return "\n".join(out)
 
 
 def _tokens(command, inner=False):
@@ -109,7 +143,7 @@ def _commands(toks):
             flag = next((i for i, a in enumerate(seg[1:-1], 1) if _C_FLAG.match(a)), None)
             if flag:
                 yield from _parse(seg[flag + 1])
-        elif prog in _MANAGER_READS and "--" in seg:
+        elif prog in _VALUE_READS and "--" in seg:
             yield prog, seg[:seg.index("--")]
             yield from _commands(seg[seg.index("--") + 1:])
         else:
@@ -136,13 +170,13 @@ def _secret_read(cmds):
 
 
 def _manager_read(cmds):
-    """A password-manager command that prints a value, or None. srun runs
+    """A store command that prints a value, or None. srun runs
     these itself; the agent never needs them. A verb is matched anywhere among
     the non-flag words, so an option's value before it (`op --account x read`)
     does not hide it."""
     for prog, seg in cmds:
         words = [a for a in seg[1:] if not a.startswith("-")]
-        for v in _MANAGER_READS.get(prog, ()):
+        for v in _VALUE_READS.get(prog, ()):
             if any(tuple(words[i:i + len(v)]) == v for i in range(len(words))):
                 return " ".join((prog,) + v)
     return None
@@ -153,7 +187,8 @@ def _deny_read(path):
           "Use the value by NAME: `srun NAME -- cmd` (the user stores it "
           "once with `srun add NAME`); `srun check "
           "NAME` says whether it is set. `grep -c '^NAME=' FILE` counts "
-          "without printing.")
+          "without printing. For a non-secret setting, read it where the code "
+          "defines it, or keep it out of the secret file.")
 
 
 def _check_file_tool(tool, inp):
@@ -173,6 +208,7 @@ def _check_file_tool(tool, inp):
 
 
 def _check(command):
+    command = _drop_heredoc_bodies(command)
     low = command.lower()
     toks = _tokens(command)
 
@@ -182,8 +218,8 @@ def _check(command):
 
     if re.search(r"\bsecurity\b", low) and \
        re.search(r"find-(generic|internet)-password", low) and \
-       re.search(r"(^|\s)-w(\s|$)", command):
-        _deny("`security ... -w` prints a keychain password into the transcript. "
+       re.search(r"(^|\s)-[wg](\s|$)", command):
+        _deny("`security ... -w/-g` prints a keychain password into the transcript. "
               "Use `srun NAME -- cmd`; the value stays out of context.")
 
     cmds = _parse(command)

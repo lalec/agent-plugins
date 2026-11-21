@@ -92,7 +92,7 @@ All hooks wired in `.claude/settings.json`.
 | `post-commit.sh` | PostToolUse Bash | Reminds to run `<PREFIX>-log` after every commit |
 | `agent-mark.sh` | SubagentStop (pipeline agents) | Records every pipeline-agent stop to a session marker; blocks a stop **once** when the agent's last message lacks its `## Handoff` block |
 | `pilot-cleanup.sh` | SessionEnd | Removes `.claude/pilot/running` when its second line is this session's id |
-| `precompact-handover.sh` | PreCompact | Writes a file-derived fallback handover to `.claude/handovers/` the moment compaction starts, so `/proceed` always has a record |
+| `precompact-handover.sh` | PreCompact | Inside a `/pilot` run, holds an automatic compaction until the run's handover is newer than its last agent dispatch (a task boundary), letting it through from 80% context; otherwise writes a file-derived fallback handover to `.claude/handovers/`, so `/proceed` always has a record |
 | `scan-due.sh` | SessionStart | Names every whole-repository security scan past its cadence in `scanners.yaml`, with `/audit --scan` as the next step |
 | `pilot-continue.sh` | Stop, SessionStart (compact) | Blocks a turn from ending **once** when this session's `/pilot` run is open and nothing is in flight to wake it (no agent, workflow or scheduled wake-up), so the run continues in place; after a compaction, tells the open run to invoke `proceed` and re-read its loop |
 | `paid-meter.sh` | PreToolUse Bash | Blocks a paid test command (`PAID_COMMANDS`) once today's paid usage reaches its cap or cannot be read, and a paid full run from inside `<PREFIX>-dev`; every other command passes |

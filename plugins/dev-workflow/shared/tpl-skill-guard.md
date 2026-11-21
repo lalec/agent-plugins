@@ -18,7 +18,7 @@ Replace these placeholders before writing the files:
 
 **Hook conduct rules (apply to every script below):**
 - *Gates* (skill-guard, path-coverage, dependency-guard, package-edit-guard, pre-handoff, close-out-gate, paid-meter) exit 2 with an actionable message on violation, 0 otherwise. `agent-mark` and `pilot-continue` are the gates on lifecycle events: each blocks a stop through `decision: block` JSON (exit codes carry no meaning on `SubagentStop` or `Stop`), and only once in a row.
-- *Lifecycle recorders* (pilot-cleanup on `SessionEnd`, limit-mark on `StopFailure`, precompact-handover on `PreCompact`) write a file and exit 0; Claude Code ignores their output entirely, so the file is their whole effect.
+- *Lifecycle recorders* (pilot-cleanup on `SessionEnd`, limit-mark on `StopFailure`) write a file and exit 0; Claude Code ignores their output entirely, so the file is their whole effect. `precompact-handover` on `PreCompact` is a recorder outside a `/pilot` run and a gate inside one: exit 2 skips an automatic compaction until the run reaches a task boundary.
 - *Recorders* (ref-sync-check, skill-mark, post-commit, scan-due) must **always exit 0** — a recorder that exits non-zero makes successful commands surface as errors and burns a reasoning turn. A recorder with something to tell the model prints it as `hookSpecificOutput.additionalContext` JSON on stdout. Stderr from a hook that exits 0 goes to the debug log only, so a warning written there reaches neither the model nor the user.
 
 ---
@@ -339,7 +339,7 @@ exit 0
 
 ## § pre-handoff-check.sh
 
-Blocks invocation of `<PREFIX>-qa` if the working tree has uncommitted changes, or lint or typecheck fails for a part of the project the commits under review changed — and blocks **every** pipeline-agent dispatch while `.claude/pilot/stop` exists, so a stop dropped from a phone lands at the next subagent boundary, and every dev/qa/verify dispatch while today's paid usage is over its cap (`§ paid-meter.sh`), which stops paid calls no `PAID_COMMANDS` pattern recognises. Enforces commit-before-review and clean-code gates mechanically. **Must match both invocation paths:** the Skill tool (`tool_input.skill`) *and* an Agent/Task spawn (`tool_input.subagent_type`) — in the pipeline qa is spawned as a subagent, so a Skill-only match makes this gate dead code.
+Blocks invocation of `<PREFIX>-qa` if the working tree has uncommitted changes, or lint or typecheck fails for a part of the project the commits under review changed — and blocks **every** pipeline-agent dispatch while `.claude/pilot/stop` exists, so a stop dropped from a phone lands at the next subagent boundary, and every dev/qa/verify dispatch while today's paid usage is over its cap (`§ paid-meter.sh`), which stops paid calls no `PAID_COMMANDS` pattern recognises. Enforces commit-before-review and clean-code gates mechanically. **Must match both invocation paths:** the Skill tool (`tool_input.skill`) *and* an Agent/Task spawn (`tool_input.subagent_type`) — in the pipeline qa is spawned as a subagent, so a Skill-only match makes this gate dead code. It also stamps the time of every agent dispatch in `.claude/pilot/dispatched`, which `precompact-handover.sh` compares with the run's newest handover to tell a task boundary from a task in flight.
 
 ```bash
 #!/bin/bash
@@ -348,6 +348,12 @@ Blocks invocation of `<PREFIX>-qa` if the working tree has uncommitted changes, 
 INPUT=$(cat) || exit 0
 SKILL=$(echo "$INPUT" | jq -r '.tool_input.skill // empty' 2>/dev/null)
 AGENT_TYPE=$(echo "$INPUT" | jq -r '.tool_input.subagent_type // empty' 2>/dev/null)
+
+# Stamp every agent dispatch: precompact-handover.sh lets a /pilot run compact only once its own
+# handover is newer than this, so no compaction lands between a dispatch and the task's boundary.
+case "$(echo "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)" in
+  Task|Agent) [ -d "${CLAUDE_PROJECT_DIR:-.}/.claude/pilot" ] && date +%s > "${CLAUDE_PROJECT_DIR:-.}/.claude/pilot/dispatched" ;;
+esac
 
 # A stop file refuses every pipeline-agent dispatch: a /pilot stop dropped mid-task lands at the next
 # subagent boundary instead of the next task boundary. The run deletes the file when it honours it.
@@ -719,22 +725,37 @@ exit 0
 
 ## § precompact-handover.sh
 
-Fires on `PreCompact`. Writes a **fallback** handover from files alone — git log, status, branch, `.claude/pilot/last-run.json`, the `running` marker — so a compaction that lands mid-task, before the run reached a boundary, still leaves a record `/proceed` can read. It is the brute half's safety net, not a replacement for the run's own handover, which is written at 30% context and refreshed at every boundary after. Output is ignored on this event except `decision: block`, which this hook never returns: blocking compaction would exhaust the context instead.
+Fires on `PreCompact`. **Inside this session's `/pilot` run it decides when an automatic compaction may land: only at a task boundary.** A boundary is when the run's own newest handover is newer than the last agent dispatch, which `pre-handoff-check.sh` stamps in `.claude/pilot/dispatched`; the run writes that handover at every boundary from 30% context, so the compaction fires on the request right after it and the summary replaces a context whose state is already in a file. While a task is in flight the hook exits 2, which Claude Code honours: the compaction is skipped and asked again on the next request, with no limit on how often (measured: 21 refusals in a row, then the compaction ran on the first request after the boundary, and the same turn carried on with no input). Claude Code does **not** override the refusal at the hard limit — measured: a session refused at its limit stopped with `Prompt is too long` — so the hook lets the compaction through once this session's context (read from the status-line snapshot) is 80% or more, or cannot be read. Anything else — a manual `/compact`, a subagent's own compaction, a session with no run — is let through as before.
+
+Whenever it does not let a boundary compaction through, it writes a **fallback** handover from files alone — git log, status, branch, `.claude/pilot/last-run.json`, the `running` marker — one file per dispatch, overwritten on each refusal, so a compaction that still lands mid-task leaves a record `/proceed` can read. At a boundary it writes none: the run's handover is newer and better, and a fallback written after it would outrank it.
 
 ```bash
 #!/bin/bash
-# PreCompact hook — writes a file-derived fallback handover before Claude Code compacts.
+# PreCompact hook — inside this session's /pilot run an automatic compaction waits for a task boundary
+# (the run's handover newer than the last dispatch); otherwise writes a file-derived fallback handover.
 INPUT=$(cat) || exit 0
 ROOT="${CLAUDE_PROJECT_DIR:-.}"
 DIR="$ROOT/.claude/handovers"
+SID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+TRIGGER=$(echo "$INPUT" | jq -r '.trigger // "auto"' 2>/dev/null)
+AGENT=$(echo "$INPUT" | jq -r '.agent_id // empty' 2>/dev/null)
+STAMP="$ROOT/.claude/pilot/dispatched"
+OWN=0; [ -n "$SID" ] && [ "$(sed -n 2p "$ROOT/.claude/pilot/running" 2>/dev/null)" = "$SID" ] && OWN=1
+GATE=0; [ "$OWN" = 1 ] && [ "$TRIGGER" = auto ] && [ -z "$AGENT" ] && GATE=1
+if [ "$GATE" = 1 ]; then
+  RUN_HO=$(ls -t "$DIR"/*.md 2>/dev/null | grep -v '_precompact\.md$' | head -1)
+  # Boundary: the run's own handover is newer than the last dispatch — compact now, no fallback.
+  [ -n "$RUN_HO" ] && { [ ! -f "$STAMP" ] || [ "$RUN_HO" -nt "$STAMP" ]; } && exit 0
+fi
 mkdir -p "$DIR" 2>/dev/null || exit 0
+# One fallback per dispatch while gated (overwritten on each refusal); one per compaction otherwise.
 TS=$(date +%Y-%m-%dT%H%M)
-TRIGGER=$(echo "$INPUT" | jq -r '.what_triggered_compaction // "auto"' 2>/dev/null)
+[ "$GATE" = 1 ] && [ -f "$STAMP" ] && D=$(cat "$STAMP"); TS=$(date -r "$D" +%Y-%m-%dT%H%M 2>/dev/null || date -d "@$D" +%Y-%m-%dT%H%M 2>/dev/null || echo "$TS")
 OUT="$DIR/${TS}_precompact.md"
 {
   echo "# Handover — fallback written by precompact-handover.sh ($TRIGGER compaction)"
   echo
-  echo "This file was written by a hook from files alone, at the moment the context was compacted. If a newer run-written handover exists beside it, prefer that one. Files win over both."
+  echo "This file was written by a hook from files alone, while a task was in flight or at a compaction the run did not time. If a newer run-written handover exists beside it, prefer that one. Files win over both."
   echo
   echo "## Branch"; git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null
   echo; echo "## Commits (last 10)"; git -C "$ROOT" log --oneline -10 2>/dev/null
@@ -744,9 +765,13 @@ OUT="$DIR/${TS}_precompact.md"
   if [ -f "$ROOT/.claude/pilot/last-run.json" ]; then echo; echo "## last-run.json"; cat "$ROOT/.claude/pilot/last-run.json"; fi
   echo; echo "## How to resume"; echo "1. /proceed — then compare this file with git and the delivery log; files win."
 } > "$OUT" 2>/dev/null
-exit 0
+[ "$GATE" = 1 ] || exit 0
+# Near the limit, or context unknown: let it through — Claude Code does not override a refusal at its limit.
+CTX=$(CLAUDE_CODE_SESSION_ID="$SID" bash ~/.claude/usage-snapshot.sh --read 2>/dev/null | sed -n 's/^context: \([0-9]*\)% used.*/\1/p')
+[ -z "$CTX" ] || [ "$CTX" -ge 80 ] && exit 0
+echo "A task is in flight — compaction waits for the next task boundary (the run's next handover)." >&2
+exit 2
 ```
-
 ---
 
 ## § paid-meter.sh
@@ -816,10 +841,11 @@ exit 0
 
 ## § settings.json
 
-Wire all 17 hook scripts — 23 entries, since `skill-guard.sh` sits under both `Edit` and `Write`, `pre-handoff-check.sh` under both `Skill` and `Task|Agent`, `security-gate.sh` twice under `Bash` (one per push filter) and once under `Skill`, `close-out-gate.sh` twice under `Bash`, and `pilot-continue.sh` under both `Stop` and `SessionStart` (`compact`). If the file already exists, merge the `hooks` key without removing unrelated settings. Timeout unit: **seconds**. The `Task|Agent` matcher is what makes `pre-handoff-check.sh` fire when qa is spawned as a subagent — without it the gate never runs in the pipeline. The `SubagentStop` matcher names the four pipeline agents so a research fork or an Explore child never gets blocked for lacking a handoff block. The secrets hooks are not in this file: they ship with the srun plugin, so they guard projects without dev-workflow too.
+Set `autoCompactWindow` to 450,000 tokens — how full a session may get before Claude Code compacts it; inside a `/pilot` run, `precompact-handover.sh` then holds the compaction to the next task boundary — and wire all 17 hook scripts — 23 entries, since `skill-guard.sh` sits under both `Edit` and `Write`, `pre-handoff-check.sh` under both `Skill` and `Task|Agent`, `security-gate.sh` twice under `Bash` (one per push filter) and once under `Skill`, `close-out-gate.sh` twice under `Bash`, and `pilot-continue.sh` under both `Stop` and `SessionStart` (`compact`). If the file already exists, merge the `hooks` key without removing unrelated settings. Timeout unit: **seconds**. The `Task|Agent` matcher is what makes `pre-handoff-check.sh` fire when qa is spawned as a subagent — without it the gate never runs in the pipeline. The `SubagentStop` matcher names the four pipeline agents so a research fork or an Explore child never gets blocked for lacking a handoff block. The secrets hooks are not in this file: they ship with the srun plugin, so they guard projects without dev-workflow too.
 
 ```json
 {
+  "autoCompactWindow": 450000,
   "hooks": {
     "PreToolUse": [
       {

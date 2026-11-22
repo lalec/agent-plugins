@@ -85,4 +85,4 @@ Read `references/apply.md` now and apply the confirmed steps in its order — th
 
 Read `references/verify.md` now and run every check that the applied steps touched. Report each as passed, failed with what was seen, or not runnable here with why; the next real delivery proves the rest. The report's steps for the user name only what no workflow command does on its own — a gate the workflow's own push or deploy satisfies is not one.
 
-**An open run continues.** If `.claude/pilot/running` names this session (`$CLAUDE_CODE_SESSION_ID`), follow `.claude/skills/pilot/SKILL.md § After a compaction` now. The run instructions in this session's context are the pre-upgrade ones.
+**An open run continues.** If `.claude/pilot/running` names this session (`$CLAUDE_CODE_SESSION_ID`), follow `.claude/skills/pilot/SKILL.md § After a compaction` now. The run instructions in this session's context are the pre-upgrade ones; the hooks are already the new ones — tested on Claude Code 2.1.330, a hook added to `.claude/settings.json` mid-session fires on the next tool call.

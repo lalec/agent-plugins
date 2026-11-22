@@ -88,7 +88,7 @@ When this plugin updates with new templates or workflow improvements, run:
 /dev-workflow:upgrade
 ```
 
-The upgrade is idempotent. It captures your existing prefix and skills, presents a gap-diff checklist of every fix that the latest templates would apply, waits for your confirmation, then applies only the confirmed fixes. `--yes` applies every gap without asking and lists anything that needs your judgement for afterwards.
+The upgrade is idempotent. It captures your existing prefix and skills, presents a gap-diff checklist of every fix that the latest templates would apply, waits for your confirmation, then applies only the confirmed fixes. Before a fix removes something the install used to write, it names any script of yours that reads it, so your own deploy gate or CI step never stops working unannounced. `--yes` applies every gap without asking and lists anything that needs your judgement for afterwards.
 
 When several projects are open in their own sessions, run this once from any session instead:
 

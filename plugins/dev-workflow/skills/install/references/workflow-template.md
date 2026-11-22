@@ -84,7 +84,7 @@ All hooks wired in `.claude/settings.json`.
 | `path-coverage-check.sh` | PreToolUse Write | Blocks new files in governed roots with no matching owner |
 | `dependency-guard.sh` | PreToolUse Bash | Requires `<PREFIX>-skill` before adding packages |
 | `package-edit-guard.sh` | PreToolUse Edit | Requires `<PREFIX>-skill` before editing package files directly |
-| `pre-handoff-check.sh` | PreToolUse Skill + Task/Agent | Blocks `<PREFIX>-qa` (skill call or subagent spawn) if uncommitted changes, or lint fails for a component the commits changed; blocks every pipeline-agent dispatch while `.claude/pilot/stop` exists, and dev/qa/verify dispatch while today's paid usage is over its cap |
+| `pre-handoff-check.sh` | PreToolUse Skill + Task/Agent | Blocks `<PREFIX>-qa` (skill call or subagent spawn) if uncommitted changes, or lint fails for a component the task changed (its `Changed paths:`, else every unpushed commit); blocks every pipeline-agent dispatch while `.claude/pilot/stop` exists, and dev/qa/verify dispatch while today's paid usage is over its cap |
 | `close-out-gate.sh` | PreToolUse Bash | Blocks `git push` while governed commits lack a delivery-log entry (`CLOSEOUT_OVERRIDE=1` escape) |
 | `security-gate.sh` | PreToolUse Bash + Skill | Runs every security slot no ship run covers, in parallel, and blocks `git push` and a prod deploy while a new finding is undecided or holds, a slot errored, or governed or deploy changes lack a recorded `/security-review` (`CLOSEOUT_OVERRIDE=1` escape for a push only) |
 | `ref-sync-check.sh` | PostToolUse Bash | Warns on reference-worthy drift (structural / `REF_WATCH`), deploy-config drift, and em dashes added to user-facing copy |

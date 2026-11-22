@@ -81,7 +81,7 @@ Then use the `srun:setup` skill. It gives `.srun.json` a `namespace` from the re
 
 Claude Code publishes the account's live allowance — percent of the 5-hour window used, percent of the week, and when each resets — to exactly **one** place: the status-line command's stdin. No hook receives it and no endpoint serves it, so a run cannot know how much is left unless something copies the figures out. Without this, `/pilot` reports `allowance: unknown` forever and its per-task stop never fires; the mission then starts work it cannot finish and dies mid-task, which is what happened on a real 10-item run (6h43m idle after the limit had already lifted).
 
-Check first: read `~/.claude/settings.json`. If its `statusLine.command` already contains `usage-snapshot.sh`, this is done — say so and skip.
+Check first: read `~/.claude/settings.json`. If its `statusLine.command` already contains `usage-snapshot.sh`, the wiring is done — re-copy `../../shared/usage-snapshot.sh` over `~/.claude/usage-snapshot.sh` only if the two differ, say which, and skip the rest.
 
 Otherwise ask once, with `AskUserQuestion`: "Let runs read your remaining Claude allowance? — copies the figures your status line already receives to a file `/pilot` reads before starting work. Your status-line script is not edited; one settings line wraps it, and deleting that line undoes it." Options: `Yes — wire it (Recommended)` / `No — print it and I'll do it myself`.
 

@@ -266,7 +266,7 @@ Path→skill ownership is defined in `.claude/hooks/governed-paths.conf` — edi
 
 ## Shared state
 
-This machine, its local servers and the test accounts are shared with other sessions and with the user. Outside the repo's own files — records in test accounts and data stores, running processes, files elsewhere on disk — every session and agent changes or deletes only what it created, and stops only the processes it started, by the PID it noted when it started them. Never stop a process by a name pattern such as `pkill -f`: it also matches other sessions' processes. An instruction not to call a service or touch a resource holds for the whole run, and the session that receives it passes it to every agent it dispatches. When the work needs something it did not create — a record, a port, disk space — it reports that as blocked and names it, never clears it itself.
+This machine, its local servers and the test accounts are shared with other sessions and with the user. Outside the repo's own files — records in test accounts and data stores, running processes, files elsewhere on disk — every session and agent changes or deletes only what it created, and stops only the processes it started — or, at `/code` Step 1.7, the project's own serve-env — by PID. Never stop a process by a name pattern such as `pkill -f`: it also matches other sessions' processes. An instruction not to call a service or touch a resource holds for the whole run, and the session that receives it passes it to every agent it dispatches. When the work needs something it did not create — a record, a port, disk space — it reports that as blocked and names it, never clears it itself.
 ```
 
 `## Secrets` is not templated here: the `srun:setup` skill writes it from the srun plugin's own text.

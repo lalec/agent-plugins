@@ -4,6 +4,8 @@
 #   write (status line):  statusLine.command = bash ~/.claude/usage-snapshot.sh <your original command>
 #   read  (a run):        bash ~/.claude/usage-snapshot.sh --read
 #
+# Also tees the session's own cost.total_cost_usd, printed as `spend:` beside the total across sessions,
+# so a run can tell its own share of a window's rise from what other sessions spent meanwhile.
 # Also tees the session's own context_window.used_percentage, printed as `context: N% used` — the
 # figure /pilot's context ladder reads at every task boundary. Context is per session, so it is never
 # aggregated across siblings. Each window line also carries `resets_at=<epoch>`, the key /pilot's
@@ -138,6 +140,19 @@ for kind, label in (("five_hour", "5-hour"), ("seven_day", "7-day")):
         f" · {len(agree)} session(s) on this window"
         + (" · borrowed: this session reports no such window" if borrowed else "")
     )
+# Spend: the windows are the whole account's, so their rise across a task is every session's work, not
+# the task's. Each session's own running cost (the status line's cost.total_cost_usd) splits it: a run
+# takes this session's rise over the total's rise between two reads as its share. Only sessions on this
+# session's own boundary are summed, the same join that keeps a second account out of the figures above.
+key = "seven_day" if isinstance(own.get("seven_day"), dict) else "five_hour"
+mark = (own.get(key) or {}).get("resets_at")
+peers = [r for r in files.values() if isinstance(r.get("cost_usd"), (int, float))
+         and (mark is None or (r.get(key) or {}).get("resets_at") in (None, mark))]
+if isinstance(own.get("cost_usd"), (int, float)):
+    lines.append(f"spend: ${own['cost_usd']:.2f} this session · ${sum(r['cost_usd'] for r in peers):.2f} "
+                 f"across {len(peers)} session(s)")
+else:
+    lines.append("spend: unknown")
 # Context is per session, so no sibling aggregation: this session's own last figure, or unknown.
 ctx = own.get("context") if isinstance(own.get("context"), dict) else None
 if ctx and isinstance(ctx.get("used_percentage"), (int, float)):
@@ -161,6 +176,7 @@ if command -v jq >/dev/null 2>&1; then
     | select((($r.five_hour // $r.seven_day) != null) or (.context_window.used_percentage != null))
     | {sid: $sid, written_at: (now | floor)}
       + (if .context_window.used_percentage != null then {context: {used_percentage: .context_window.used_percentage}} else {} end)
+      + (if (.cost.total_cost_usd | type) == "number" then {cost_usd: .cost.total_cost_usd} else {} end)
       + (if $r.five_hour then {five_hour: {used_percentage: $r.five_hour.used_percentage, resets_at: $r.five_hour.resets_at}} else {} end)
       + (if $r.seven_day then {seven_day: {used_percentage: $r.seven_day.used_percentage, resets_at: $r.seven_day.resets_at}} else {} end)
     ' 2>/dev/null)

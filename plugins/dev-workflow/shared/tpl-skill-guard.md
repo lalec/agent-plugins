@@ -19,6 +19,7 @@ Replace these placeholders before writing the files:
 **Hook conduct rules (apply to every script below):**
 - *Gates* (skill-guard, path-coverage, dependency-guard, package-edit-guard, pre-handoff, close-out-gate, paid-meter) exit 2 with an actionable message on violation, 0 otherwise. `agent-mark` and `pilot-continue` are the gates on lifecycle events: each blocks a stop through `decision: block` JSON (exit codes carry no meaning on `SubagentStop` or `Stop`), and only once in a row.
 - *Lifecycle recorders* (pilot-cleanup on `SessionEnd`, limit-mark on `StopFailure`) write a file and exit 0; Claude Code ignores their output entirely, so the file is their whole effect. `precompact-handover` on `PreCompact` is a recorder outside a `/pilot` run and a gate inside one: exit 2 skips an automatic compaction until the run reaches a task boundary.
+- *Messages* a hook prints are plain text inside double quotes: name a command in single quotes ('ruff check'), never in unescaped backticks — the shell runs a backticked word as a command, so the message breaks the hook exactly when it fires. This holds for every line install writes into a hook, project-specific messages included.
 - *Recorders* (ref-sync-check, skill-mark, post-commit, scan-due) must **always exit 0** — a recorder that exits non-zero makes successful commands surface as errors and burns a reasoning turn. A recorder with something to tell the model prints it as `hookSpecificOutput.additionalContext` JSON on stdout. Stderr from a hook that exits 0 goes to the debug log only, so a warning written there reaches neither the model nor the user.
 
 ---
@@ -339,7 +340,7 @@ exit 0
 
 ## § pre-handoff-check.sh
 
-Blocks invocation of `<PREFIX>-qa` if the working tree has uncommitted changes, or lint or typecheck fails for a part of the project the commits under review changed — and blocks **every** pipeline-agent dispatch while `.claude/pilot/stop` exists, so a stop dropped from a phone lands at the next subagent boundary, and every dev/qa/verify dispatch while today's paid usage is over its cap (`§ paid-meter.sh`), which stops paid calls no `PAID_COMMANDS` pattern recognises. Enforces commit-before-review and clean-code gates mechanically. **Must match both invocation paths:** the Skill tool (`tool_input.skill`) *and* an Agent/Task spawn (`tool_input.subagent_type`) — in the pipeline qa is spawned as a subagent, so a Skill-only match makes this gate dead code. It also stamps the time of every agent dispatch in `.claude/pilot/dispatched`, which `precompact-handover.sh` compares with the run's newest handover to tell a task boundary from a task in flight.
+Blocks invocation of `<PREFIX>-qa` if the working tree has uncommitted changes, or lint or typecheck fails for a part of the project the task changed — the paths on the dispatch's `Changed paths:` line, else every unpushed commit — and blocks **every** pipeline-agent dispatch while `.claude/pilot/stop` exists, so a stop dropped from a phone lands at the next subagent boundary, and every dev/qa/verify dispatch while today's paid usage is over its cap (`§ paid-meter.sh`), which stops paid calls no `PAID_COMMANDS` pattern recognises. Enforces commit-before-review and clean-code gates mechanically. **Must match both invocation paths:** the Skill tool (`tool_input.skill`) *and* an Agent/Task spawn (`tool_input.subagent_type`) — in the pipeline qa is spawned as a subagent, so a Skill-only match makes this gate dead code. It also stamps the time of every agent dispatch in `.claude/pilot/dispatched`, which `precompact-handover.sh` compares with the run's newest handover to tell a task boundary from a task in flight.
 
 ```bash
 #!/bin/bash
@@ -381,10 +382,15 @@ if [ -n "$DIRTY" ]; then
   exit 2
 fi
 
-# Files the commits under review change: against the upstream, else origin's default branch.
-# Empty when neither resolves or nothing differs — then every check runs.
-BASE=$(git rev-parse -q --verify '@{upstream}' 2>/dev/null || git rev-parse -q --verify origin/HEAD 2>/dev/null)
-CHANGED=$([ -n "$BASE" ] && git diff --name-only "$BASE"...HEAD 2>/dev/null)
+# Files the task changed: the qa dispatch's `Changed paths:` line (the dev handoff's list), so another
+# session's unpushed commit never fails this task's checks. Without that line: every commit not yet on the
+# upstream, else on origin's default branch. Empty when nothing resolves — then every check runs.
+PROMPT=$(echo "$INPUT" | jq -r '.tool_input.prompt // empty' 2>/dev/null)
+CHANGED=$(echo "$PROMPT" | sed -n 's/^[[:space:]]*Changed paths:[[:space:]]*//p' | head -1 | tr -d '`' | tr ', ' '\n\n' | grep -v '^$')
+if [ -z "$CHANGED" ]; then
+  BASE=$(git rev-parse -q --verify '@{upstream}' 2>/dev/null || git rev-parse -q --verify origin/HEAD 2>/dev/null)
+  CHANGED=$([ -n "$BASE" ] && git diff --name-only "$BASE"...HEAD 2>/dev/null)
+fi
 # touches <dir/> — the commits change a file under it ('' = anywhere), or CHANGED is unknown
 touches() { [ -z "$CHANGED" ] || printf '%s\n' "$CHANGED" | grep -q "^$1"; }
 

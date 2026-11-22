@@ -1450,7 +1450,7 @@ A ship-env's build must produce what was verified, not whatever the package inde
 
 0. Use the `<PREFIX>-review` skill § Before ship first. A hold means no push — return `push: held — security review` with the held items' roadmap ids, and the `scan.py status --one-line` summary either way.
 1. Read `references/deploy-config.yaml`. If any component declares a ship-env with `trigger: ci` whose deploy fires on a push to the current branch, pushing **is** shipping to that env.
-2. If that env is `prod` (or gated `user_confirm`): push only after the prod gate passed this session, or after an explicit `AskUserQuestion` confirm with the same context block. Unanswered → `gate: unanswered — parked`; never push on silence.
+2. If that env is `prod` (or gated `user_confirm`): push only after the prod gate passed this session, or after an explicit `AskUserQuestion` confirm with the same context block. Unanswered → `gate: unanswered — parked`; never push on silence. A `/pilot` close-out never asks here: without a passed prod gate it returns `push: held — pushing deploys prod`.
 3. Otherwise pushing is safe — push directly.
 4. **After any CI-coupled push:** watch the CI run to completion (`gh run watch` or the platform equivalent) and verify the deployed env's url/health before reporting "deployed". A push with CI still running is "deploying", not "deployed" — never end a shipping turn without the health check.
 

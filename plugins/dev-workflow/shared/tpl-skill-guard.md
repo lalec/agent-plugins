@@ -426,21 +426,27 @@ The same bare-shell constraint applies to any tool a hook shells out to (typeche
 
 ## § push-match.sh
 
-Not a hook: a helper the two push gates source, so what counts as a push of this project is decided in one place. `project_push "$CMD"` succeeds only when the command runs `git push` itself — `git` at the start of a command, after `;`, `&&`, `||`, `|`, `(`, an environment assignment or a `srun … --` prefix — so a push quoted inside a message, a `grep` or an `echo` never starts a scan. A push run in another repository (`git -C <dir> push`, `cd <dir> && git push`, where `<dir>` is not inside this project) is that repository's, so a scratch clone or a sibling repo pushes without this project's gates. Install copies it without `chmod +x`; nothing runs it directly.
+Not a hook: a helper the two push gates source, so what counts as a push of this project is decided in one place. `project_push "$CMD"` succeeds only when the command runs `git push` itself — `git` at the start of a command, after `;`, `&&`, `||`, `|`, `(`, an environment assignment or a `srun … --` prefix — so a push quoted inside a message, a `grep` or an `echo` never starts a scan. A push run in another repository — `git -C <dir> push`, or a push after `cd <dir>`, where `<dir>` does not share this project's git directory — is that repository's, so a scratch clone or a sibling repo pushes without this project's gates, while a linked worktree of this project is still gated. A gate whose helper is missing blocks a push and names the file, rather than letting every push through. Install copies it without `chmod +x`; nothing runs it directly.
 
 ```bash
 # push-match.sh — sourced by security-gate.sh and close-out-gate.sh; not wired as a hook.
 # project_push CMD: succeeds when CMD runs `git push` for this project's repository.
+PUSH_RE='(^|[;&|(])[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^ ]* +)*(srun [^;&|]*-- +)?git( +-C +[^ ]+)* +push( |;|$)'
 project_push() {
-  local cmd=$1 dir top here
-  echo "$cmd" | grep -qE '(^|[;&|(]|srun [^;&|]*-- )[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^ ]* +)*git( +-C +[^ ]+)* +push( |$)' || return 1
-  dir=$(echo "$cmd" | sed -nE 's/.*git +-C +([^ ]+) +push.*/\1/p' | head -1)
-  [ -z "$dir" ] && dir=$(echo "$cmd" | sed -nE 's/^[[:space:]]*cd +([^ ;&]+) *&&.*/\1/p' | head -1)
+  local cmd pre cdir cflag dir common here
+  cmd=$(printf '%s' "$1" | tr '\n' ';')
+  echo "$cmd" | grep -qE "$PUSH_RE" || return 1
+  # Where the push runs: its `-C <dir>`, taken from the last `cd <dir>` before it.
+  pre=$(echo "$cmd" | sed -E "s/$PUSH_RE.*//")
+  cdir=$(echo "$pre" | grep -oE '(^|[;&|(])[[:space:]]*cd +[^ ;&|)]+' | tail -1 | sed -E 's/.*cd +//')
+  cflag=$(echo "$cmd" | grep -oE "$PUSH_RE" | head -1 | grep -oE -- '-C +[^ ]+' | tail -1 | sed -E 's/-C +//')
+  cdir=${cdir//[\"\']/}; cflag=${cflag//[\"\']/}; cdir=${cdir/#\~/$HOME}; cflag=${cflag/#\~/$HOME}
+  case "$cflag" in /*) dir=$cflag ;; "") dir=$cdir ;; *) dir=${cdir:-.}/$cflag ;; esac
   [ -z "$dir" ] && return 0
-  dir=${dir//[\"\']/}; dir=${dir/#\~/$HOME}
-  top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || return 0   # unresolvable: gate it
-  here=$(git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse --show-toplevel 2>/dev/null)
-  [ "$top" = "$here" ]
+  # Same repository = same git common dir, so a linked worktree of this project is still this project.
+  common=$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 0   # unresolvable: gate it
+  here=$(git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+  [ "$common" = "$here" ]
 }
 ```
 
@@ -460,7 +466,11 @@ CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
 SKILL=$(echo "$INPUT" | jq -r '.tool_input.skill // empty' 2>/dev/null)
 ARGS=$(echo "$INPUT" | jq -r '.tool_input.args // empty' 2>/dev/null)
 if [ -n "$CMD" ]; then
-  . "$(dirname "$0")/push-match.sh"
+  if ! . "$(dirname "$0")/push-match.sh" 2>/dev/null; then
+    echo "$CMD" | grep -qE "git( +-C +[^ ]+)* +push" || exit 0
+    echo "Push gate: .claude/hooks/push-match.sh is missing, so no push can be checked — restore it (git checkout -- .claude/hooks/push-match.sh) or re-run /dev-workflow:upgrade." >&2
+    exit 2
+  fi
   project_push "$CMD" || exit 0
   echo "$CMD" | grep -qE "CLOSEOUT_OVERRIDE=1" && exit 0
 elif [ "$SKILL" = "<PREFIX>-deploy" ]; then
@@ -577,7 +587,11 @@ Blocks `git push` while commits after the last delivery-log entry touch governed
 INPUT=$(cat) || exit 0
 CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
 [ -z "$CMD" ] && exit 0
-. "$(dirname "$0")/push-match.sh"
+if ! . "$(dirname "$0")/push-match.sh" 2>/dev/null; then
+  echo "$CMD" | grep -qE "git( +-C +[^ ]+)* +push" || exit 0
+  echo "Push gate: .claude/hooks/push-match.sh is missing, so no push can be checked — restore it (git checkout -- .claude/hooks/push-match.sh) or re-run /dev-workflow:upgrade." >&2
+  exit 2
+fi
 project_push "$CMD" || exit 0
 echo "$CMD" | grep -qE "CLOSEOUT_OVERRIDE=1" && exit 0
 

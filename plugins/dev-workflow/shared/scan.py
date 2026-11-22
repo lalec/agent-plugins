@@ -5,7 +5,7 @@
     scan.py gate                     # push hook: run missing ship slots, exit 2 on a hold
     scan.py baseline                 # install/upgrade: existing findings become backlog
     scan.py record <entry> --findings FILE|-   # a model-run slot's result (change review)
-    scan.py status [--one-line | --json]
+    scan.py status [--one-line]
     scan.py backlog [--count]
 
 Tools find; this file only runs them, reads their output and counts. Whether a finding is
@@ -339,9 +339,6 @@ def cmd_record(a):
 
 def cmd_status(a):
     v = verdict(latest(git("rev-parse", "HEAD")))
-    if a.json:  # for a project's own CI or deploy gate: read this, not state.json or the wording
-        print(json.dumps({k: v[k] for k in ("ran", "empty", "errored", "decided", "undecided", "held")}, indent=1))
-        return
     print(summary(v))
     if not a.one_line:
         for f in v["undecided"]:
@@ -376,7 +373,6 @@ def main():
     rc.add_argument("--findings", required=True)
     s = sub.add_parser("status")
     s.add_argument("--one-line", action="store_true")
-    s.add_argument("--json", action="store_true")
     b = sub.add_parser("backlog")
     b.add_argument("--count", action="store_true")
     a = p.parse_args()

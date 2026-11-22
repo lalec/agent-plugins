@@ -263,6 +263,10 @@ Path→skill ownership is defined in `.claude/hooks/governed-paths.conf` — edi
 ## Roadmap
 
 `docs/roadmap.md` is the source of truth for open items.
+
+## Shared state
+
+This machine, its local servers and the test accounts are shared with other sessions and with the user. Every session and agent changes or deletes only what it created, and stops only the processes it started. An instruction not to call a service or touch a resource holds for the whole run, and the session that receives it passes it to every agent it dispatches. When the work needs something it did not create — a record, a port, disk space — it reports that as blocked and names it, never clears it itself.
 ```
 
 `## Secrets` is not templated here: the `srun:setup` skill writes it from the srun plugin's own text.

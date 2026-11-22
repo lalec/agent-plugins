@@ -1834,7 +1834,7 @@ eaten by the split itself.
 on *every* turn it then takes, and that cost multiplies by the number of children — it is the only
 part of a fan-out that does. State the operative rules inline in the dispatch prompt instead, in a
 few hundred words: the running-stack rule, the freshness rule, `pass` means exercised-and-held, the
-substituted-path rule, the evidence-trace line format, and the two `run-checks.py` invocations with
+substituted-path rule, the project CLAUDE.md's `## Shared state` paragraph (a child reads no CLAUDE.md), the evidence-trace line format, and the two `run-checks.py` invocations with
 their JSON shapes — a child that has to discover the runner will take a turn per verification, which
 is the cost the split was meant to divide. Give it the resolved entries with their
 `type`, `assert` and target already looked up, so it starts working rather than orienting. Reading

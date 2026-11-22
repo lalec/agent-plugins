@@ -395,6 +395,7 @@ Upsert the following sections in `CLAUDE.md` (add if missing, replace if present
 - `## Agents` — the pipeline line plus the routing paragraph (pipeline-shaped work → `/code`/`/fix`, iterative rounds → `/tweak`) from the template
 - `## Skills` — "Path→skill ownership is defined in `.claude/hooks/governed-paths.conf` — edit that file to add or change path ownership. Both `skill-guard.sh` and `path-coverage-check.sh` source it automatically."
 - `## Roadmap` — single line: `docs/roadmap.md` is the source of truth for open items.
+- `## Shared state` — the template's paragraph verbatim. `<PREFIX>-verify` reads no CLAUDE.md, so the test skill's splitting brief carries the paragraph to each child
 - `## Linting` — only add if lint commands were discovered in Phase 1; omit entirely if none found (no `<fill in>` stub)
 
 ---

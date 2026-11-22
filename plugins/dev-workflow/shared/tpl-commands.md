@@ -330,11 +330,11 @@ Commit: `test: capture verifications for <task-slug>` (the tree is clean post-de
 Run only if verifications with type `UX` or `E2E` were captured. For each affected component (from the dev `Files changed:` paths), resolve its **first non-prod env** in `.claude/skills/<PREFIX>-deploy/references/deploy-config.yaml`:
 - Env has `deploy:` (ship-env) → nothing to do; <PREFIX>-dev already deployed it.
 - Env has `run:` (serve-env) → start or restart it here at the top level (subagents can't hold a server), applying the env's `stack:` block if declared — env-var overrides that wire the frontend to the local backend, the `seed:` command, the `auth:` strategy (see the deploy-config schema). Then poll the url until HTTP 2xx (up to ~60s). If still unreachable, surface the output and ask the user how to proceed before spawning <PREFIX>-qa.
-  **Freshness:** a server started before dev's commits is running stale code — restart it so QA tests the new code; a green check against a stale server is non-evidence.
+  **Freshness:** a server started before dev's commits is running stale code — restart it so QA tests the new code when this run started it. One this run did not start is never stopped (`CLAUDE.md § Shared state`): a dev server that reloads on change already serves the new code, and one that does not leaves the stack blocked, reported with its PID. A green check against a stale server is non-evidence.
 - Env has `invoke:` (invoke-env) → skip it. A run-to-completion job holds no process and answers at no address, so there is nothing to start and nothing to probe — probing it reports a component down that was never up. Continue to the component's **next** non-prod env, and fall through to the row below only when none is left.
 - No non-prod env → continue; <PREFIX>-test reports those verifications blocked and Step 2 handles it.
 
-**Loopback only**: start it bound to `localhost` per the deploy-config schema's loopback rule, and once it answers confirm the listener is not on every interface — `lsof -nP -iTCP:<port> -sTCP:LISTEN` shows `127.0.0.1` or `[::1]`, never `*`; a `*` listener is stopped at once and restarted on loopback, or reported if it cannot be. Note the process group and port of every server you start or restart: the pm step stops them.
+**Loopback only**: start it bound to `localhost` per the deploy-config schema's loopback rule, and once it answers confirm the listener is not on every interface — `lsof -nP -iTCP:<port> -sTCP:LISTEN` shows `127.0.0.1` or `[::1]`, never `*`; a `*` listener is stopped at once and restarted on loopback, or reported if it cannot be. Note the PID, process group and port of every server you start or restart: the pm step stops exactly those, by PID.
 
 ## Step 2 — Review & Test (<PREFIX>-qa)
 

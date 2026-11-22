@@ -439,7 +439,9 @@ Not a hook: a helper the two push gates source, so what counts as a push of this
 ```bash
 # push-match.sh — sourced by security-gate.sh and close-out-gate.sh; not wired as a hook.
 # project_push CMD: succeeds when CMD runs `git push` for this project's repository.
-PUSH_RE='(^|[;&|(])[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^ ]* +)*(srun [^;&|]*-- +)?git( +-C +[^ ]+)* +push( |;|$)'
+# `git` where a command starts: after a separator or a word that runs the next one, past any VAR=value
+# prefixes and a `srun NAME --`; then `push` as a whole word. Inside quotes neither holds, so a mention is not a push.
+PUSH_RE="(^|[;&|({]|(^|[[:space:]])(then|do|else|time|nohup|exec|command|sudo))[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^[:space:]]*)[[:space:]]+)*(srun [^;&|]*--[[:space:]]+)?git([[:space:]]+-C[[:space:]]+[^[:space:]]+)*[[:space:]]+push([^A-Za-z0-9_-]|\$)"
 project_push() {
   local cmd pre cdir cflag dir common here
   cmd=$(printf '%s' "$1" | tr '\n' ';')
@@ -447,7 +449,7 @@ project_push() {
   # Where the push runs: its `-C <dir>`, taken from the last `cd <dir>` before it.
   pre=$(echo "$cmd" | sed -E "s/$PUSH_RE.*//")
   cdir=$(echo "$pre" | grep -oE '(^|[;&|(])[[:space:]]*cd +[^ ;&|)]+' | tail -1 | sed -E 's/.*cd +//')
-  cflag=$(echo "$cmd" | grep -oE "$PUSH_RE" | head -1 | grep -oE -- '-C +[^ ]+' | tail -1 | sed -E 's/-C +//')
+  cflag=$(echo "$cmd" | grep -oE "$PUSH_RE" | head -1 | grep -oE -- '-C[[:space:]]+[^[:space:]]+' | tail -1 | sed -E 's/-C[[:space:]]+//')
   cdir=${cdir//[\"\']/}; cflag=${cflag//[\"\']/}; cdir=${cdir/#\~/$HOME}; cflag=${cflag/#\~/$HOME}
   case "$cflag" in /*) dir=$cflag ;; "") dir=$cdir ;; *) dir=${cdir:-.}/$cflag ;; esac
   [ -z "$dir" ] && return 0

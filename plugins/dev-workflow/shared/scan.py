@@ -5,7 +5,7 @@
     scan.py gate                     # push hook: run missing ship slots, exit 2 on a hold
     scan.py baseline                 # install/upgrade: existing findings become backlog
     scan.py record <entry> --findings FILE|-   # a model-run slot's result (change review)
-    scan.py status [--one-line]
+    scan.py status [--one-line | --json]
     scan.py backlog [--count]
 
 Tools find; this file only runs them, reads their output and counts. Whether a finding is
@@ -38,7 +38,12 @@ def git(*args, cwd=None) -> str:
 
 
 ROOT = Path(git("rev-parse", "--show-toplevel", cwd=Path.cwd()) or Path.cwd())
-REVIEW = next(iter(sorted(ROOT.glob(".claude/skills/*-review/references"))), ROOT)
+# This file lives in <PREFIX>-review/scripts/; its own skill's references hold the slots. Found from
+# this path, never by folder name, so a project skill whose name also ends in -review is never read.
+REVIEW = HERE.parent / "references"
+if not (REVIEW / "scanners.yaml").is_file():
+    sys.exit(f"scan.py: no scanners.yaml beside this script ({REVIEW}), so no slot can run. "
+             "scan.py belongs in .claude/skills/<PREFIX>-review/scripts/ — re-run /dev-workflow:upgrade.")
 SCANS = ROOT / ".claude" / "scans"
 BASELINE = REVIEW / "scan-baseline.txt"
 
@@ -84,8 +89,11 @@ def ancestor(a: str, b: str) -> bool:
                                              capture_output=True).returncode == 0
 
 
-def changed(base: str, head: str = "HEAD") -> list[str]:
-    return [f for f in git("diff", "--name-only", "--diff-filter=AMR", f"{base}..{head}").splitlines() if f]
+def changed(base: str, head: str = "HEAD", deleted: bool = False) -> list[str]:
+    """Files a tool can scan; with `deleted`, every file the range touched, since removing a
+    governed file needs a review and makes a stored result stale just as editing one does."""
+    filt = "AMRD" if deleted else "AMR"
+    return [f for f in git("diff", "--name-only", f"--diff-filter={filt}", f"{base}..{head}").splitlines() if f]
 
 
 def in_scope(e: dict, files: list[str]) -> list[str]:
@@ -104,7 +112,8 @@ def launch(e: dict, outdir: Path, rng: str, files: list[str], url: str):
     cmd = (e["command"].replace("{out}", shlex.quote(str(out))).replace("{range}", shlex.quote(rng))
            .replace("{files}", " ".join(map(shlex.quote, files)) or ".").replace("{url}", shlex.quote(url)))
     log = open(outdir / f"{e['name']}.log", "w")
-    return subprocess.Popen(cmd, shell=True, cwd=ROOT, stdout=log, stderr=log), out
+    # The command is a scanners.yaml template (committed repo config) with every value shlex-quoted.
+    return subprocess.Popen(cmd, shell=True, cwd=ROOT, stdout=log, stderr=log), out  # nosemgrep: python.lang.security.audit.subprocess-shell-true.subprocess-shell-true
 
 
 def run_entries(sel: list[dict], at: str, base: str, url: str, whole: bool) -> dict:
@@ -161,7 +170,7 @@ def run_entries(sel: list[dict], at: str, base: str, url: str, whole: bool) -> d
     for e in sel:  # the SBOM rides along with a ship run of the slot that declares one
         if at == "ship" and e.get("sbom") and state.get(e["name"], {}).get("state") == "ran":
             sbom = outdir / "sbom.cdx.json"
-            r = subprocess.run(e["sbom"].replace("{out}", shlex.quote(str(sbom))), shell=True, cwd=ROOT,
+            r = subprocess.run(e["sbom"].replace("{out}", shlex.quote(str(sbom))), shell=True, cwd=ROOT,  # nosemgrep: python.lang.security.audit.subprocess-shell-true.subprocess-shell-true
                                capture_output=True, timeout=int(e.get("timeout") or TIMEOUT))
             state[e["name"]]["sbom"] = str(sbom.relative_to(ROOT)) if r.returncode == 0 and sbom.exists() else "failed"
     if not whole:
@@ -232,7 +241,7 @@ def latest(head: str, matters=lambda f: not exempt(f)) -> dict:
     for p in sorted(SCANS.glob("*/state.json"), key=lambda p: p.stat().st_mtime):
         for name, r in json.loads(read(p) or "{}").items():
             h = r.get("head", "")
-            if h == head or (ancestor(h, head) and not any(matters(f) for f in changed(h, head))):
+            if h == head or (ancestor(h, head) and not any(matters(f) for f in changed(h, head, deleted=True))):
                 best[name] = r
     return best
 
@@ -274,7 +283,7 @@ def cmd_gate(a):
     if missing:
         state.update(run_entries(missing, "ship", origin, "", whole=False))
     reasons = []
-    risky = any(risky_file(f) for f in changed(origin, head))
+    risky = any(risky_file(f) for f in changed(origin, head, deleted=True))
     for e in ship:
         if e.get("skill") and risky and e["name"] not in state:
             reasons.append(f"{e['name']} has not reviewed this range — use the `{e['skill']}` skill, then `scan.py record {e['name']}`")
@@ -330,6 +339,9 @@ def cmd_record(a):
 
 def cmd_status(a):
     v = verdict(latest(git("rev-parse", "HEAD")))
+    if a.json:  # for a project's own CI or deploy gate: read this, not state.json or the wording
+        print(json.dumps({k: v[k] for k in ("ran", "empty", "errored", "decided", "undecided", "held")}, indent=1))
+        return
     print(summary(v))
     if not a.one_line:
         for f in v["undecided"]:
@@ -364,6 +376,7 @@ def main():
     rc.add_argument("--findings", required=True)
     s = sub.add_parser("status")
     s.add_argument("--one-line", action="store_true")
+    s.add_argument("--json", action="store_true")
     b = sub.add_parser("backlog")
     b.add_argument("--count", action="store_true")
     a = p.parse_args()

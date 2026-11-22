@@ -172,6 +172,48 @@ and the Read tool, hooks and MCP servers run outside it. The host list governs
 every Bash command — package installs and `git push` too. Never list `srun` in
 `sandbox.excludedCommands`: that runs `srun K -- <anything>` with full access.
 
+### Keys the agent never holds
+
+For a key sent to an API in a request header, go one step further: let srun
+start the session, and let the sandbox swap the key in on the way out. Commands
+the agent runs see only a placeholder, and the real key reaches only the hosts
+you name.
+
+```
+srun API_KEY -- claude --settings unattended.json
+```
+
+```json
+{
+  "sandbox": {
+    "enabled": true,
+    "allowUnsandboxedCommands": false,
+    "network": {
+      "allowedDomains": ["<api host>"], "strictAllowlist": true, "tlsTerminate": {}
+    },
+    "credentials": {
+      "envVars": [{ "name": "API_KEY", "mode": "mask", "injectHosts": ["<api host>"] }]
+    }
+  }
+}
+```
+
+Leave out the keychain `allowWrite`: nothing in the sandbox needs the keychain
+now, so the agent cannot read it either. Masking needs `--settings` or user
+settings; a project's own settings cannot turn it on. `tlsTerminate` is
+experimental.
+
+| Works | Does not work |
+|---|---|
+| Key in a header (`Authorization: Bearer`) or the request body | Key in the URL query string, or in Basic auth (`curl -u KEY:`) |
+| curl, Python `requests`, Python with OpenSSL (venv, Homebrew) | macOS system Python (`/usr/bin/python3`) — it rejects the sandbox's certificate |
+| Node with `NODE_USE_ENV_PROXY=1` | Node without it — `fetch` skips the proxy and cannot resolve the host |
+| | A secret used locally, such as a signing key for an HMAC — the code computes with the placeholder |
+
+Use `srun NAME -- cmd` inside the session for what the right column lists.
+Sandboxed commands cannot see the session's own environment, but MCP servers
+and hooks start outside the sandbox and inherit the real values.
+
 ## Limits
 
 - It serves your own machine. Claude cloud sessions and CI do not install the plugin, so a step there that needs a secret stops as `blocked`; deployed services read their secret manager themselves.

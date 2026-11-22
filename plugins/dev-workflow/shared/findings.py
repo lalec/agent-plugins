@@ -52,6 +52,11 @@ def read_sarif(data: dict, slot: str, root: Path) -> list[dict]:
             loc = ((r.get("locations") or [{}])[0]).get("physicalLocation", {})
             file = _rel(loc.get("artifactLocation", {}).get("uri", ""), root)
             line = int(loc.get("region", {}).get("startLine") or 0)
+            # A suppression comment counts only in the workflow's own tools under .claude/, which
+            # ship nowhere and carry their reason beside it. In product code it is not a decision:
+            # an agent could write one to quiet the gate, so the finding still needs a vex.yaml statement.
+            if r.get("suppressions") and file.startswith(".claude/"):
+                continue
             sev = score_to_severity((r.get("properties") or {}).get("security-severity")
                                     or (rule.get("properties") or {}).get("security-severity"))
             if sev == "unrated":

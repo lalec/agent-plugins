@@ -340,7 +340,7 @@ exit 0
 
 ## § pre-handoff-check.sh
 
-Blocks invocation of `<PREFIX>-qa` if the working tree has uncommitted changes, or lint or typecheck fails for a part of the project the task changed — the paths on the dispatch's `Changed paths:` line, else every unpushed commit — and blocks **every** pipeline-agent dispatch while `.claude/pilot/stop` exists, so a stop dropped from a phone lands at the next subagent boundary, and every dev/qa/verify dispatch while today's paid usage is over its cap (`§ paid-meter.sh`), which stops paid calls no `PAID_COMMANDS` pattern recognises. Enforces commit-before-review and clean-code gates mechanically. **Must match both invocation paths:** the Skill tool (`tool_input.skill`) *and* an Agent/Task spawn (`tool_input.subagent_type`) — in the pipeline qa is spawned as a subagent, so a Skill-only match makes this gate dead code. It also stamps the time of every agent dispatch in `.claude/pilot/dispatched`, which `precompact-handover.sh` compares with the run's newest handover to tell a task boundary from a task in flight.
+Blocks invocation of `<PREFIX>-qa` if the working tree has uncommitted changes, or lint or typecheck fails for a part of the project the task changed — the paths on the dispatch's `Changed paths:` line that git also reports changed in the unpushed range (the list is trusted as written, so a file dev left off it is not checked), else every unpushed commit — and blocks **every** pipeline-agent dispatch while `.claude/pilot/stop` exists, so a stop dropped from a phone lands at the next subagent boundary, and every dev/qa/verify dispatch while today's paid usage is over its cap (`§ paid-meter.sh`), which stops paid calls no `PAID_COMMANDS` pattern recognises. Enforces commit-before-review and clean-code gates mechanically. **Must match both invocation paths:** the Skill tool (`tool_input.skill`) *and* an Agent/Task spawn (`tool_input.subagent_type`) — in the pipeline qa is spawned as a subagent, so a Skill-only match makes this gate dead code. It also stamps the time of every agent dispatch in `.claude/pilot/dispatched`, which `precompact-handover.sh` compares with the run's newest handover to tell a task boundary from a task in flight.
 
 ```bash
 #!/bin/bash
@@ -382,15 +382,17 @@ if [ -n "$DIRTY" ]; then
   exit 2
 fi
 
-# Files the task changed: the qa dispatch's `Changed paths:` line (the dev handoff's list), so another
-# session's unpushed commit never fails this task's checks. Without that line: every commit not yet on the
-# upstream, else on origin's default branch. Empty when nothing resolves — then every check runs.
-PROMPT=$(echo "$INPUT" | jq -r '.tool_input.prompt // empty' 2>/dev/null)
-CHANGED=$(echo "$PROMPT" | sed -n 's/^[[:space:]]*Changed paths:[[:space:]]*//p' | head -1 | tr -d '`' | tr ', ' '\n\n' | grep -v '^$')
-if [ -z "$CHANGED" ]; then
-  BASE=$(git rev-parse -q --verify '@{upstream}' 2>/dev/null || git rev-parse -q --verify origin/HEAD 2>/dev/null)
-  CHANGED=$([ -n "$BASE" ] && git diff --name-only "$BASE"...HEAD 2>/dev/null)
-fi
+# Files the task changed: the qa dispatch's `Changed paths:` line (the dev handoff's list, trusted as written),
+# kept only where git agrees the file changed in the unpushed range — so another session's commit never fails
+# this task's checks. No line, or nothing on it git agrees with: the whole range, against the upstream, else
+# origin's default branch. Empty when nothing resolves — then every check runs.
+BASE=$(git rev-parse -q --verify '@{upstream}' 2>/dev/null || git rev-parse -q --verify origin/HEAD 2>/dev/null)
+CHANGED=$([ -n "$BASE" ] && git diff --name-only "$BASE"...HEAD 2>/dev/null)
+TOP=$(git rev-parse --show-toplevel 2>/dev/null)
+LISTED=$(echo "$INPUT" | jq -r '.tool_input.prompt // empty' 2>/dev/null | sed -n 's/^[[:space:]]*Changed paths:[[:space:]]*//p' | head -1 \
+  | tr -d '\140' | tr ', ' '\n\n' | sed -e "s#^$TOP/##" -e 's#^\./##' | grep -v '^$')
+OWN=$([ -n "$CHANGED" ] && [ -n "$LISTED" ] && printf '%s\n' "$CHANGED" | grep -Fx -f <(printf '%s\n' "$LISTED"))
+[ -n "$OWN" ] && CHANGED=$OWN
 # touches <dir/> — the commits change a file under it ('' = anywhere), or CHANGED is unknown
 touches() { [ -z "$CHANGED" ] || printf '%s\n' "$CHANGED" | grep -q "^$1"; }
 

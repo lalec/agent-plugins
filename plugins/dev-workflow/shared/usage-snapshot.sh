@@ -2,7 +2,7 @@
 # The Claude allowance figures, published where a run can read them.
 #
 #   write (status line):  statusLine.command = bash ~/.claude/usage-snapshot.sh <your original command>
-#   read  (a run):        bash ~/.claude/usage-snapshot.sh --read
+#   read  (a run):        bash ~/.claude/usage-snapshot.sh --read [--mark NAME]
 #
 # Also tees the session's own cost.total_cost_usd, printed as `spend:` beside the total across sessions,
 # so a run can tell its own share of a window's rise from what other sessions spent meanwhile.
@@ -65,8 +65,9 @@ if [ "$1" = "--read" ]; then
   if ! command -v python3 >/dev/null 2>&1; then
     echo "allowance: unknown — no python3 to aggregate the snapshots"; exit 0
   fi
-  DIR="$DIR" MAX_AGE_SECS="$MAX_AGE_SECS" SID="${CLAUDE_CODE_SESSION_ID:-}" python3 - <<'PY'
-import glob, json, os, time
+  MARK=""; [ "$2" = "--mark" ] && MARK="$3"
+  DIR="$DIR" MAX_AGE_SECS="$MAX_AGE_SECS" SID="${CLAUDE_CODE_SESSION_ID:-}" MARK="$MARK" python3 - <<'PY'
+import glob, json, os, re, time
 
 d = os.environ["DIR"]
 max_age = int(os.environ["MAX_AGE_SECS"])
@@ -141,18 +142,53 @@ for kind, label in (("five_hour", "5-hour"), ("seven_day", "7-day")):
         + (" · borrowed: this session reports no such window" if borrowed else "")
     )
 # Spend: the windows are the whole account's, so their rise across a task is every session's work, not
-# the task's. Each session's own running cost (the status line's cost.total_cost_usd) splits it: a run
-# takes this session's rise over the total's rise between two reads as its share. Only sessions on this
-# session's own boundary are summed, the same join that keeps a second account out of the figures above.
+# the task's. Each session's own running cost (the status line's cost.total_cost_usd, subagents included)
+# splits it. Only sessions on this session's own boundary are summed — the join that keeps a second
+# account out of the figures above.
 key = "seven_day" if isinstance(own.get("seven_day"), dict) else "five_hour"
-mark = (own.get(key) or {}).get("resets_at")
-peers = [r for r in files.values() if isinstance(r.get("cost_usd"), (int, float))
-         and (mark is None or (r.get(key) or {}).get("resets_at") in (None, mark))]
-if isinstance(own.get("cost_usd"), (int, float)):
-    lines.append(f"spend: ${own['cost_usd']:.2f} this session · ${sum(r['cost_usd'] for r in peers):.2f} "
-                 f"across {len(peers)} session(s)")
+mark_at = (own.get(key) or {}).get("resets_at")
+costs = {r.get("sid"): r["cost_usd"] for r in files.values() if isinstance(r.get("cost_usd"), (int, float))
+         and (mark_at is None or (r.get(key) or {}).get("resets_at") in (None, mark_at))}
+if sid in costs:
+    lines.append(f"spend: ${costs[sid]:.2f} this session · ${sum(costs.values()):.2f} across {len(costs)} session(s)")
 else:
     lines.append("spend: unknown")
+# --mark NAME: this session's share of the spend since its last read with the same NAME, then the mark
+# moves here. Kept on disk, so a compaction between two reads loses nothing. Only sessions present in
+# both reads count: one that appears with spend already on it, or disappears, would otherwise swing the
+# share toward 0 or past 1, and a share near 0 never stops a budget.
+mark = os.environ.get("MARK") or ""
+if mark and re.fullmatch(r"[A-Za-z0-9_-]+", mark) and sid and re.fullmatch(r"[A-Za-z0-9_-]+", sid):
+    mdir = os.path.join(d, "marks")
+    os.makedirs(mdir, exist_ok=True)
+    for p in glob.glob(os.path.join(mdir, "*.json")):
+        try:
+            if now - os.path.getmtime(p) > max_age:
+                os.remove(p)
+        except OSError:
+            pass
+    path = os.path.join(mdir, f"{sid}-{mark}.json")
+    try:
+        with open(path) as fh:
+            prev = json.load(fh)
+    except Exception:
+        prev = None
+    if prev is None:
+        lines.append(f"share: unknown — first read with --mark {mark}")
+    elif sid not in costs or sid not in prev or costs[sid] < prev[sid]:
+        lines.append("share: unknown — this session's own spend is missing or fell")
+    else:
+        both = [k for k in costs if k in prev and costs[k] >= prev[k]]
+        mine, total = costs[sid] - prev[sid], sum(costs[k] - prev[k] for k in both)
+        if total <= 0:
+            lines.append("share: unknown — no spend since the last mark")
+        else:
+            lines.append(f"share: {min(1.0, mine / total) * 100:.0f}% of the spend since the last mark — "
+                         f"${mine:.2f} of ${total:.2f} across {len(both)} session(s) in both reads")
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(costs, fh)
+    os.replace(tmp, path)
 # Context is per session, so no sibling aggregation: this session's own last figure, or unknown.
 ctx = own.get("context") if isinstance(own.get("context"), dict) else None
 if ctx and isinstance(ctx.get("used_percentage"), (int, float)):

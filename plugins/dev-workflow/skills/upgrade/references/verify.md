@@ -180,3 +180,4 @@ Report a summary of what was upgraded.
 - On an install where the `/audit` apply step ran, the `/audit` probe reports nothing: `audit.md` contains `5 at a time` and `--max-packages 5`, and `code/references/close-out.md` contains `filed: /pilot --items`
 - `code/SKILL.md` contains `save what the run has in hand` and no `did not fire once`; `blueprint/SKILL.md` contains `handovers/blueprints/`; `pilot/references/close-out.md` contains `push held — pushing deploys prod` and no `otherwise ask now`; `pilot/SKILL.md` stays under 20,000 characters
 - `pre-handoff-check.sh` contains `cd "${TOP:-${CLAUDE_PROJECT_DIR:-.}}"` above its first `if touches` check
+- `precompact-handover.sh` contains `Inside a run, name the file for the dispatch it covers`, and `.claude/handovers/` holds no `1970-01-01T*` file

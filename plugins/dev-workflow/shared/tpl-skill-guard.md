@@ -802,7 +802,10 @@ fi
 mkdir -p "$DIR" 2>/dev/null || exit 0
 # One fallback per dispatch while gated (overwritten on each refusal); one per compaction otherwise.
 TS=$(date +%Y-%m-%dT%H%M)
-[ "$GATE" = 1 ] && [ -f "$STAMP" ] && D=$(cat "$STAMP"); TS=$(date -r "$D" +%Y-%m-%dT%H%M 2>/dev/null || date -d "@$D" +%Y-%m-%dT%H%M 2>/dev/null || echo "$TS")
+# Inside a run, name the file for the dispatch it covers; otherwise for now.
+if [ "$GATE" = 1 ] && [ -f "$STAMP" ]; then
+  D=$(cat "$STAMP"); TS=$(date -r "$D" +%Y-%m-%dT%H%M 2>/dev/null || date -d "@$D" +%Y-%m-%dT%H%M 2>/dev/null || echo "$TS")
+fi
 OUT="$DIR/${TS}_precompact.md"
 {
   echo "# Handover — fallback written by precompact-handover.sh ($TRIGGER compaction)"

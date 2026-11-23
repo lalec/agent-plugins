@@ -20,6 +20,7 @@ Replace these placeholders before writing the files:
 - *Gates* (skill-guard, path-coverage, dependency-guard, package-edit-guard, pre-handoff, close-out-gate, paid-meter) exit 2 with an actionable message on violation, 0 otherwise. `agent-mark` and `pilot-continue` are the gates on lifecycle events: each blocks a stop through `decision: block` JSON (exit codes carry no meaning on `SubagentStop` or `Stop`), and only once in a row.
 - *Lifecycle recorders* (pilot-cleanup on `SessionEnd`, limit-mark on `StopFailure`) write a file and exit 0; Claude Code ignores their output entirely, so the file is their whole effect. `precompact-handover` on `PreCompact` is a recorder outside a `/pilot` run and a gate inside one: exit 2 skips an automatic compaction until the run reaches a task boundary.
 - *Messages* a hook prints are plain text inside double quotes: name a command in single quotes ('ruff check'), never in unescaped backticks — the shell runs a backticked word as a command, so the message breaks the hook exactly when it fires. This holds for every line install writes into a hook, project-specific messages included.
+- *Folder*: a hook starts in the session shell's current folder, wherever the session last `cd`-ed — not the repo root. A hook that runs a command by a relative path changes to the repo root first. Measured: a session left in a subfolder failed a passing build at the QA gate twice.
 - *Recorders* (ref-sync-check, skill-mark, post-commit, scan-due) must **always exit 0** — a recorder that exits non-zero makes successful commands surface as errors and burns a reasoning turn. A recorder with something to tell the model prints it as `hookSpecificOutput.additionalContext` JSON on stdout. Stderr from a hook that exits 0 goes to the debug log only, so a warning written there reaches neither the model nor the user.
 
 ---
@@ -395,6 +396,9 @@ OWN=$([ -n "$CHANGED" ] && [ -n "$LISTED" ] && printf '%s\n' "$CHANGED" | grep -
 [ -n "$OWN" ] && CHANGED=$OWN
 # touches <dir/> — the commits change a file under it ('' = anywhere), or CHANGED is unknown
 touches() { [ -z "$CHANGED" ] || printf '%s\n' "$CHANGED" | grep -q "^$1"; }
+
+# The checks below name paths from the repo root; the hook starts wherever the session's shell is.
+cd "${TOP:-${CLAUDE_PROJECT_DIR:-.}}" || exit 0
 
 # Run lint check
 if touches '<LINT_SCOPE>' && ! <LINT_CMD> > /dev/null 2>&1; then

@@ -590,7 +590,7 @@ Cap at `max_tasks`. For each task derive: a one-line description, an **acceptanc
      - label: "Ship (Recommended)" — description: "If every task signs off clean, deploy/push to prod at close-out without asking again. On projects where push fires prod CI, shipping = prod deploy."
      - label: "Hold at UAT" — description: "End committed but not pushed/deployed; ship later with /code --prod or by asking"
 
-3. **Budget** (include only when the task list routes to a lane whose `spend` is `metered:<unit>` **and** no `--grant` already covered that unit):
+3. **Budget** (include only when a task that can spend the unit routes to a lane whose `spend` is `metered:<unit>` **and** no `--grant` already covered that unit). A task whose item produces only files — a report, copy, a plan — cannot spend it; when no task can, skip this question, dispatch those tasks without a ledger check, and report any spend one reports as an Open row. Measured: a run asked for a paid-post grant for two tasks that each wrote one file:
    - question: "Grant a budget for <unit>? <M> task(s) route to metered lanes."
    - header: "Budget"
    - options: two or three concrete grants sized to the task count (e.g. "20", "50"), plus "None — skip those tasks". The automatic "Other" accepts an exact number.

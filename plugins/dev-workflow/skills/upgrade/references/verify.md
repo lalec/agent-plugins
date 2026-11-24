@@ -181,3 +181,4 @@ Report a summary of what was upgraded.
 - `code/SKILL.md` contains `save what the run has in hand` and no `did not fire once`; `blueprint/SKILL.md` contains `handovers/blueprints/`; `pilot/references/close-out.md` contains `push held — pushing deploys prod` and no `otherwise ask now`; `pilot/SKILL.md` stays under 20,000 characters
 - `pre-handoff-check.sh` contains `cd "${TOP:-${CLAUDE_PROJECT_DIR:-.}}"` above its first `if touches` check
 - `precompact-handover.sh` contains `Inside a run, name the file for the dispatch it covers`, and `.claude/handovers/` holds no `1970-01-01T*` file
+- `pilot/references/plan.md` contains `cannot spend it`; `CLAUDE.md § Secrets` contains `grep -q '^KEY='` (when srun is installed)

@@ -179,6 +179,6 @@ Report a summary of what was upgraded.
 - `~/.claude/usage-snapshot.sh` is byte-identical to the plugin's and `--read --mark task` prints `spend:` and `share:` lines (`unknown` until the status line has rendered once with the new copy, and `share: unknown — first read` on a first mark); `pilot/references/loop.md` contains `--mark task`, `Six more stops` and `Disk nearly full`
 - On an install where the `/audit` apply step ran, the `/audit` probe reports nothing: `audit.md` contains `5 at a time` and `--max-packages 5`, and `code/references/close-out.md` contains `filed: /pilot --items`
 - `code/SKILL.md` contains `save what the run has in hand` and no `did not fire once`; `blueprint/SKILL.md` contains `handovers/blueprints/`; `pilot/references/close-out.md` contains `push held — pushing deploys prod` and no `otherwise ask now`; `pilot/SKILL.md` stays under 20,000 characters
-- `pre-handoff-check.sh` contains `cd "${TOP:-${CLAUDE_PROJECT_DIR:-.}}"` above its first `if touches` check
+- `pre-handoff-check.sh` contains `cd "${TOP:-${CLAUDE_PROJECT_DIR:-.}}"` above its first `if touches` check (a hook with no such check needs neither)
 - `precompact-handover.sh` contains `Inside a run, name the file for the dispatch it covers`, and `.claude/handovers/` holds no `1970-01-01T*` file
 - `pilot/references/plan.md` contains `cannot spend it`; `CLAUDE.md § Secrets` contains `grep -q '^KEY='` (when srun is installed)

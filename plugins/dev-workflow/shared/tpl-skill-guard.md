@@ -385,7 +385,8 @@ fi
 
 # Files the task changed: the qa dispatch's `Changed paths:` line (the dev handoff's list, trusted as written),
 # kept only where git agrees the file changed in the unpushed range — so another session's commit never fails
-# this task's checks. No line, or nothing on it git agrees with: the whole range, against the upstream, else
+# this task's checks. The list can only narrow git's own list, never add to it; a file the task changed but did not
+# list skips these checks and is still read by the QA review. No line, or nothing on it git agrees with: the whole range, against the upstream, else
 # origin's default branch. Empty when nothing resolves — then every check runs.
 BASE=$(git rev-parse -q --verify '@{upstream}' 2>/dev/null || git rev-parse -q --verify origin/HEAD 2>/dev/null)
 CHANGED=$([ -n "$BASE" ] && git diff --name-only "$BASE"...HEAD 2>/dev/null)
@@ -452,7 +453,8 @@ project_push() {
   cmd=$(printf '%s' "$1" | tr '\n' ';' | sed -E "s/\"[^\"]*push[^\"]*\"/Q/g; s/'[^']*push[^']*'/Q/g")
   echo "$cmd" | grep -qE "$PUSH_RE" || return 1
   # Where the push runs: its `-C <dir>`, taken from the last `cd <dir>` before it.
-  pre=$(echo "$cmd" | sed -E "s/$PUSH_RE.*//")
+  # A `cd` inside a subshell that closed before the push does not move the push: drop closed `( … )` groups.
+  pre=$(echo "$cmd" | sed -E "s/$PUSH_RE.*//" | sed -E -e ':a' -e 's/\([^()]*\)//' -e 'ta')
   cdir=$(echo "$pre" | grep -oE '(^|[;&|(])[[:space:]]*cd +[^ ;&|)]+' | tail -1 | sed -E 's/.*cd +//')
   cflag=$(echo "$cmd" | grep -oE "$PUSH_RE" | head -1 | grep -oE -- '-C[[:space:]]+[^[:space:]]+' | tail -1 | sed -E 's/-C[[:space:]]+//')
   cdir=${cdir//[\"\']/}; cflag=${cflag//[\"\']/}; cdir=${cdir/#\~/$HOME}; cflag=${cflag/#\~/$HOME}
@@ -471,7 +473,7 @@ project_push() {
 
 Blocks a `git push`, and a `<PREFIX>-deploy` call with `target=prod`, until the security slots have run on everything about to ship and every finding has a decision — so a scan cannot be skipped by forgetting it. The hook runs `<PREFIX>-review/scripts/scan.py gate`, which reuses a ship run of each tool slot that already covers `origin/HEAD..HEAD`, runs the missing ones in parallel, and exits 2 while a slot errored twice, a new finding has no `vex.yaml` statement, a finding that holds is open, or the change review has not recorded a result for governed or deploy paths in the range. What is new and what holds is decided in `scan.py` and `<PREFIX>-review/references/security-review.md`, not here. The hook checks that every finding has a decision, never that the decision is right; the baseline file and the change-review record are written by the session and trusted as written. A project with no remote passes — there is nothing to push to. `CLOSEOUT_OVERRIDE=1 git push …` bypasses the push half only; a prod deploy has no override.
 
-Its `settings.json` Bash entries carry `"if": "Bash(git push*)"`, `"if": "Bash(git -C * push*)"` and `"if": "Bash(srun *)"`, so the hook starts only for a command that may push — the second catches `git -C <dir> push` and the third `srun NAME -- git push`, both of which the first misses (tested on Claude Code 2.1.330: `Bash(srun *)` fires on `srun …`, `cd … && srun …` and `X=1 srun …`, and not on a quoted mention). The filters let through commands that only mention a push or run another `srun` command; `push-match.sh` then passes those. A push spelt another way (`env`, a full path to git, `sh -c`) is not covered: the gate stops a session that forgot the checks, not one avoiding them. Each carries `"onFailure": "block"`, so a crash or a timeout blocks the push instead of letting it through (Claude Code lets a failed hook's call proceed otherwise); `scan.py` keeps a slot's two tries under the 600-second timeout. The Skill entry has no `onFailure`, so a broken hook cannot block every skill. It cannot be narrowed to the deploy skill instead: tested on Claude Code 2.1.327, an `if` of `Skill(<name>)` never fires, and only `Skill(*)` or a bare `Skill` does, for every skill. Callers therefore run § Before ship before a prod deploy call, since this hook runs before the deploy skill loads.
+Its `settings.json` Bash entries carry `"if": "Bash(git push*)"`, `"if": "Bash(git -C * push*)"` and `"if": "Bash(srun *)"`, so the hook starts only for a command that may push — the second catches `git -C <dir> push` and the third `srun NAME -- git push`, both of which the first misses (tested on Claude Code 2.1.330: `Bash(srun *)` fires on `srun …`, `cd … && srun …` and `X=1 srun …`, and not on a quoted mention). The filters let through commands that only mention a push or run another `srun` command; `push-match.sh` then passes those. A push spelt another way (`env`, a full path to git, `sh -c`) is not covered: the gate stops a session that forgot the checks, not one avoiding them. Dropping the filters would not change that, and it would run both gates on every Bash call — measured at about 85 ms each. Each carries `"onFailure": "block"`, so a crash or a timeout blocks the push instead of letting it through (Claude Code lets a failed hook's call proceed otherwise); `scan.py` keeps a slot's two tries under the 600-second timeout. The Skill entry has no `onFailure`, so a broken hook cannot block every skill. It cannot be narrowed to the deploy skill instead: tested on Claude Code 2.1.327, an `if` of `Skill(<name>)` never fires, and only `Skill(*)` or a bare `Skill` does, for every skill. Callers therefore run § Before ship before a prod deploy call, since this hook runs before the deploy skill loads.
 
 ```bash
 #!/bin/bash

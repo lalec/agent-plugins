@@ -444,11 +444,12 @@ Not a hook: a helper the two push gates source, so what counts as a push of this
 # push-match.sh — sourced by security-gate.sh and close-out-gate.sh; not wired as a hook.
 # project_push CMD: succeeds when CMD runs `git push` for this project's repository.
 # `git` where a command starts: after a separator or a word that runs the next one, past any VAR=value
-# prefixes and a `srun NAME --`; then `push` as a whole word. Inside quotes neither holds, so a mention is not a push.
+# prefixes and a `srun NAME --`; then `push` as a whole word. A quoted string that contains `push` is masked first, so
+# a mention inside quotes is not a push even after a `(` or `;` (measured: a quoted "(git -C … push" was blocked).
 PUSH_RE="(^|[;&|({]|(^|[[:space:]])(then|do|else|time|nohup|exec|command|sudo))[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^[:space:]]*)[[:space:]]+)*(srun [^;&|]*--[[:space:]]+)?git([[:space:]]+-C[[:space:]]+[^[:space:]]+)*[[:space:]]+push([^A-Za-z0-9_-]|\$)"
 project_push() {
   local cmd pre cdir cflag dir common here
-  cmd=$(printf '%s' "$1" | tr '\n' ';')
+  cmd=$(printf '%s' "$1" | tr '\n' ';' | sed -E "s/\"[^\"]*push[^\"]*\"/Q/g; s/'[^']*push[^']*'/Q/g")
   echo "$cmd" | grep -qE "$PUSH_RE" || return 1
   # Where the push runs: its `-C <dir>`, taken from the last `cd <dir>` before it.
   pre=$(echo "$cmd" | sed -E "s/$PUSH_RE.*//")

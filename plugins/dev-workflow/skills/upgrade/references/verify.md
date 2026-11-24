@@ -182,3 +182,4 @@ Report a summary of what was upgraded.
 - `pre-handoff-check.sh` contains `cd "${TOP:-${CLAUDE_PROJECT_DIR:-.}}"` above its first `if touches` check (a hook with no such check needs neither)
 - `precompact-handover.sh` contains `Inside a run, name the file for the dispatch it covers`, and `.claude/handovers/` holds no `1970-01-01T*` file
 - `pilot/references/plan.md` contains `cannot spend it`; `CLAUDE.md § Secrets` contains `grep -q '^KEY='` (when srun is installed)
+- `skill-manifest.md` names no `srun/` or `secretrun/` folder that is absent under `.claude/`

@@ -1,0 +1,14 @@
+#!/bin/bash
+# Regression cases for push-match.sh. Run before changing it: bash tests/push-match-cases.sh [<push-match.sh>]
+# With no argument it tests the template in shared/tpl-skill-guard.md § push-match.sh. Exit 1 on any failure.
+# A case marked gate must run the push gate; pass must not. Fail closed: when unsure, the expectation is gate.
+HERE=$(cd "$(dirname "$0")/.." && pwd)
+PM=${1:-$(mktemp)}
+[ -n "$1" ] || awk '/^## § push-match.sh/{f=1} f&&/^```bash/{g=1;next} g&&/^```/{exit} g' "$HERE/shared/tpl-skill-guard.md" > "$PM"
+ T=$(mktemp -d); git -C $T init -q proj; git -C $T init -q other; git -C $T/proj commit -q --allow-empty -m i; git -C $T/proj worktree add -q $T/wt 2>/dev/null
+cd $T/proj; source "$PM"; n=0; f=0
+t(){ n=$((n+1)); project_push "$2" && r=gate || r=pass; [ "$r" = "$1" ] || { f=$((f+1)); echo "FAIL want $1 got $r: $2"; }; }
+for c in 'git push' 'git push origin main' 'git -C . push' "git -C $T/proj push" "git -C $T/wt push" 'cd . && git push' 'ls; git push' 'ls | git push' 'true || git push' '(git push)' '{ git push; }' 'if x; then git push; fi' 'for a in b; do git push; done' 'if x; then :; else git push; fi' 'time git push' 'nohup git push' 'exec git push' 'command git push' 'sudo git push' 'FOO=1 git push' 'FOO="a b" BAR=c git push' 'srun TOKEN -- git push' 'srun A B -- git -C . push' $'ls\ngit push' 'git commit -m "fix" && git push && echo "done"' "git commit -m 'fix' && git push origin main && echo 'ok'" 'git add -A && git commit -m "x" && git push' 'git commit -m "it'"'"'s" && git push' 'git commit -m "say \"hi\"" && git push' 'git commit -m "unclosed && git push' "(cd /nonexistent-xyz && git push)" "cd $T/wt && git push" 'git push --force-with-lease' 'git push;' "cd $T/other && echo \"(\" && cd $T/proj && echo \")\" && git push" "(cd $T/other && echo \"x\"); git push" "cd \"$T/proj\" && git push" "cd $T/other && echo \\( && cd $T/proj && echo \\) && git push" "cd $T/other && echo \`pwd\` && cd $T/proj && git push" "cd \$OLDPWD && git push" "(cd $T/other && ls); git push" "(cd $T/other && git push)"; do t gate "$c"; done
+for c in 'echo "git push is blocked"' "grep -n '(git -C . push' f" 'git pushx' 'git push-hook' 'echo git push' 'git status' "git -C $T/other push" "cd $T/other && git push" 'git commit -m "x" && echo "push later"' 'gitk push' 'man git-push' "echo 'a;git push'" 'git log --grep=push' "cd $T/other && git status && git push" "cd $T/other; git push origin main"; do t pass "$c"; done
+echo "$((n-f))/$n passed"
+[ "$f" = 0 ]

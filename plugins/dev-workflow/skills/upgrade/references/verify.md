@@ -185,4 +185,4 @@ Report a summary of what was upgraded.
 - `skill-manifest.md` names no `srun/` or `secretrun/` folder that is absent under `.claude/`
 - `<PREFIX>-review/scripts/watch.py` exists and `watch.py open --line` prints an `advisories:` line; `scan-due.sh` contains `watch.py`; `security-review.md` contains `A published fix comes before tracing`; `audit.md`'s `whats-up-store:` reads `watch.py open --json`
 - `whats-up/SKILL.md` contains `grep -n -A5 '^whats-up-store:'`
-- `push-match.sh` contains `counts only as the whole text before the push`; sourced, `project_push 'git commit -m "x" && git push && echo "y"'` exits 0 and `project_push 'echo "git push"'` exits 1
+- `push-match.sh` contains `counts only as the whole` (grep -F); sourced, `project_push 'git commit -m "x" && git push && echo "y"'` exits 0 and `project_push 'echo "git push"'` exits 1

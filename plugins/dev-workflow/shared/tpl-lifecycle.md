@@ -2435,7 +2435,9 @@ part of the value, a term with no `=`, or a provenance outside `user|timeout|age
 **A VEX statement is edited in place, so it needs no reconcile.** `vex.yaml` holds one record
 per advisory and the pass overwrites its `status`, unlike the delivery log, which is append-only and
 therefore needs `open-gates` to close a parking with a later decision. So the current status *is* the
-answer: `open-advisories` filters, it does not reconcile. `under_investigation` is counted rather
+answer: `open-advisories` filters, it does not reconcile — and it answers which advisories touch a
+file, never how many are open: a statement outlives the upgrade that closed it, so the open count is
+`watch.py`'s, taken over what the latest check still finds. `under_investigation` is counted rather
 than listed, because an advisory nobody has judged is a reason to run the pass, not a row of work —
 and the count is taken from `ASSESSED`, never `AFFECTS`, since an untraced advisory has no `sink:`
 to emit an `AFFECTS` edge from.

@@ -21,6 +21,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -49,16 +50,21 @@ def age_h(rec: dict | None) -> float | None:
     return (time.time() - rec["ts"]) / 3600 if rec and rec.get("ts") else None
 
 
+def manifests_moved(rec: dict | None) -> bool:
+    """A dependency manifest changed since the commit the record read (or that commit is gone)."""
+    head, pat = (rec or {}).get("head", ""), S.conf("DEPENDENCY_MANIFESTS")
+    if not S.ancestor(head, S.git("rev-parse", "HEAD")):
+        return True
+    return bool(pat) and any(re.search(pat, f) for f in S.changed(head, deleted=True))
+
+
 def current(rec: dict | None, hours: float) -> bool:
     """Young enough, and no dependency manifest changed since the commit it read — so the count
     drops on the task that lands an upgrade, not a day later."""
     h = age_h(rec)
-    if h is None or h >= hours:
-        return False
-    head, pat = rec.get("head", ""), S.conf("DEPENDENCY_MANIFESTS")
-    if not S.ancestor(head, S.git("rev-parse", "HEAD")):
-        return False
-    return not pat or not any(re.search(pat, f) for f in S.changed(head, deleted=True))
+    if h is None or h >= hours or rec.get("state") != "ran":
+        return False  # a failed check is retried on the next trigger, not trusted for a day
+    return not manifests_moved(rec)
 
 
 def refresh(a):
@@ -99,6 +105,9 @@ def refresh(a):
                         cur["severity"] = f["severity"]
                     cur["files"] = sorted(set(cur["files"]) | {f["file"]})
             rec["findings"] = list(seen.values())
+        for old in (S.SCANS / "watch").glob("*"):  # keep only this check's tool output
+            if old.is_dir() and old.name != rec["head"][:7]:
+                shutil.rmtree(old, ignore_errors=True)
         tmp = OUT.with_suffix(".tmp")
         tmp.write_text(json.dumps(rec, indent=1))
         tmp.replace(OUT)
@@ -109,7 +118,7 @@ def refresh(a):
 def count() -> dict:
     rec, dec = record(), S.decisions()
     out = {"state": (rec or {}).get("state", "never"), "age_h": age_h(rec), "unjudged": 0, "filed": 0,
-           "left": 0, "unfiled": 0, "critical": {}, "backlog": 0}
+           "left": 0, "unfiled": 0, "critical": {}, "backlog": 0, "moved": bool(rec) and manifests_moved(rec)}
     for f in (rec or {}).get("findings", []):
         keys = [f["key"]] + [f"{i}@{f['package']}" for i in f.get("aliases", [])]
         found = [dec[k] for k in keys if k in dec]
@@ -136,7 +145,8 @@ def count() -> dict:
 def line(c: dict) -> str:
     if c["state"] == "never":
         return f"advisories: unknown — never checked · backlog {c['backlog']} · Next: /audit"
-    age = f"checked {c['age_h']:.0f}h ago" + (" — stale" if c["age_h"] > STALE_H else "")
+    age = f"checked {c['age_h']:.0f}h ago" + (" — stale" if c["age_h"] > STALE_H else "") + (
+        " — a dependency file changed since; rechecking" if c.get("moved") else "")
     if c["state"] == "errored":
         return f"advisories: unknown — the last check failed ({age}; see .claude/scans/watch/) · backlog {c['backlog']}"
     if c["state"] == "empty":

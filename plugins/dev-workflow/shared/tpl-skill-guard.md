@@ -451,9 +451,9 @@ Not a hook: a helper the two push gates source, so what counts as a push of this
 # next string's opening one and hid the real push between them (measured: `git commit -m "x" && git push && echo "y"`
 # passed both gates). An unclosed quote masks nothing — the command is left as written, so it is gated, not hidden.
 PUSH_RE="(^|[;&|({]|(^|[[:space:]])(then|do|else|time|nohup|exec|command|sudo))[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^[:space:]]*)[[:space:]]+)*(srun [^;&|]*--[[:space:]]+)?git([[:space:]]+-C[[:space:]]+[^[:space:]]+)*[[:space:]]+push([^A-Za-z0-9_-]|\$)"
-# mask_quoted_push [all]: blank each quoted span that contains `push` (with `all`, every quoted span) to Q.
+# mask_quoted_push: blank each quoted span that contains `push` to Q.
 mask_quoted_push() {
-  awk -v SQ="'" -v ALL="${1:-}" '{
+  awk -v SQ="'" '{
     out = ""; span = ""; q = ""
     for (i = 1; i <= length($0); i++) {
       c = substr($0, i, 1)
@@ -462,23 +462,22 @@ mask_quoted_push() {
       } else {
         span = span c
         if (q == "\"" && c == "\\") { i++; span = span substr($0, i, 1); continue }
-        if (c == q) { out = out ((ALL != "" || span ~ /push/) ? "Q" : span); q = ""; span = "" }
+        if (c == q) { out = out (span ~ /push/ ? "Q" : span); q = ""; span = "" }
       }
     }
     print (q == "" ? out : $0)
   }'
 }
 project_push() {
-  local cmd bare pre cdir cflag dir common here
+  local cmd pre cdir cflag dir common here
   cmd=$(printf '%s' "$1" | tr '\n' ';' | mask_quoted_push)
-  # Where the push runs is read from the shell's structure, so no quoted text may add or close a `(`:
-  # an `echo "("` once paired with a later `echo ")"` and dropped the real `cd` between them. A quoted
-  # cd target reads as Q, which resolves to no repository — so it is gated, never passed.
-  bare=$(printf '%s' "$1" | tr '\n' ';' | mask_quoted_push all)
   echo "$cmd" | grep -qE "$PUSH_RE" || return 1
   # Where the push runs: its `-C <dir>`, taken from the last `cd <dir>` before it.
-  # A `cd` inside a subshell that closed before the push does not move the push: drop closed `( … )` groups.
-  pre=$(echo "$bare" | sed -E "s/$PUSH_RE.*//" | sed -E -e ':a' -e 's/\([^()]*\)//' -e 'ta')
+  pre=$(echo "$cmd" | sed -E "s/$PUSH_RE.*//")
+  # A `cd` is trusted only in plain text. Beside a subshell, a quote, a backtick, an expansion or an escape
+  # it may not move the push, and every attempt to parse that shape left a way through (a closed subshell,
+  # a quoted paren, an escaped one) — so it gates. A push to another repository from such a line is gated too.
+  echo "$pre" | grep -qE '(^|[^A-Za-z0-9_-])cd([[:space:]]|$)' && echo "$pre" | grep -q '[]()"'"'"'`$\\[]' && return 0
   cdir=$(echo "$pre" | grep -oE '(^|[;&|(])[[:space:]]*cd +[^ ;&|)]+' | tail -1 | sed -E 's/.*cd +//')
   cflag=$(echo "$cmd" | grep -oE "$PUSH_RE" | head -1 | grep -oE -- '-C[[:space:]]+[^[:space:]]+' | tail -1 | sed -E 's/-C[[:space:]]+//')
   cdir=${cdir//[\"\']/}; cflag=${cflag//[\"\']/}; cdir=${cdir/#\~/$HOME}; cflag=${cflag/#\~/$HOME}

@@ -189,6 +189,6 @@ Each step is idempotent — re-running the upgrade is safe.
 
 - **Find every project store with one search**: in `whats-up/SKILL.md § Step 1`, re-apply the `grep -n -A5 '^whats-up-store:'` sentence and the `n/a` rule from `../../shared/tpl-commands.md § /whats-up`.
 
-- **Read quotes in a push command the way the shell does**: replace `.claude/hooks/push-match.sh` from `../../shared/tpl-skill-guard.md § push-match.sh` (substitute nothing — it carries no placeholder) and `git add` it. Then source it and confirm `project_push 'git commit -m "x" && git push && echo "y"'` succeeds (gated) and `project_push 'echo "git push"'` fails (not gated); either result reversed → restore the file from git and report it.
+- **Read quotes in a push command the way the shell does**: replace `.claude/hooks/push-match.sh` with the code block of `../../shared/tpl-skill-guard.md § push-match.sh`, byte for byte (it carries no placeholder, so it is never tailored — a project rule about pushes belongs in the gate that sources it), and `git add` it. Then source it and confirm `project_push 'git commit -m "x" && git push && echo "y"'` succeeds (gated) and `project_push 'echo "git push"'` fails (not gated); either result reversed → restore the file from git and report it.
 
 Update `<PREFIX>-skill` skill-manifest.md last: add the `<PREFIX>-deploy` lifecycle skill (with its `deploy-config.yaml` reference). Remove any `## Deployment` / `deploy-config.yaml` mention from the legacy domain owner's entry.

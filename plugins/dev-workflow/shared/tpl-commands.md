@@ -1147,7 +1147,7 @@ Read-only, in parallel. **A store that is absent or errors gets a `not done` Sta
 | Repo | the `/tidy` **Step 1** sweep — run it, do not restate it here | none |
 | Project health | every store the project declares (below). None declared → the row is `n/a` | the declaring command's own fallback |
 
-**A seventh store, discovered, not hardcoded.** Six stores are universal because every install has them. A project that runs something unattended — a scheduled job, a background loop, an external pipeline — has a seventh question nobody else can ask for it: *is it broken, or is it running right now?* Scan `.claude/skills/*/SKILL.md` and `.claude/commands/*.md` frontmatter for a `whats-up-store:` key, exactly as `/pilot` discovers its lanes:
+**A seventh store, discovered, not hardcoded.** Six stores are universal because every install has them. A project that runs something unattended — a scheduled job, a background loop, an external pipeline — has a seventh question nobody else can ask for it: *is it broken, or is it running right now?* Find them with one command, beside the other reads — `grep -n -A5 '^whats-up-store:' .claude/skills/*/SKILL.md .claude/commands/*.md 2>/dev/null` — never by recalling which commands have one: a run that skipped the search reported "no store declared" while two were installed, and the security count went unread. Each block has this shape:
 
 ```yaml
 whats-up-store:
@@ -1159,7 +1159,7 @@ whats-up-store:
 
 `live:` is optional and exists for a store that can be in three states rather than two — a loop or a scheduled task that is stale when it stopped firing and *busy* while a run is in flight. When the `live:` line matches, the store reports `busy` regardless of `when-bad`; when it does not, `when-bad` decides as before. A store with only two states declares no `live:` line.
 
-The store's **name is the command's filename**, so there is no separate name field to drift. A malformed or unparseable block is **skipped with a warning in Status**, never guessed at. **Declared stores are project-owned: this command knows how to find and read them, never what they mean** — so the template stays uniform across projects and the variation lives where the project already keeps it.
+The store's **name is the command's filename**, so there is no separate name field to drift. Every block the search returns gets its own Status row — `n/a` is right only when the search printed nothing. A malformed or unparseable block is **skipped with a warning in Status**, never guessed at. **Declared stores are project-owned: this command knows how to find and read them, never what they mean** — so the template stays uniform across projects and the variation lives where the project already keeps it.
 
 `--with-fail` is what makes the unproven-work store complete: a recorded `fail` is deliberately excluded from every other caller, because the close-out puts it in `Open` and no lane's Step 0 re-raises it. That is exactly the row a fresh session loses, so this is the one caller that asks for it.
 

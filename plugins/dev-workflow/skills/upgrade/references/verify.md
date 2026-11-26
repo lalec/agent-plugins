@@ -184,3 +184,4 @@ Report a summary of what was upgraded.
 - `pilot/references/plan.md` contains `cannot spend it`; `CLAUDE.md § Secrets` contains `grep -q '^KEY='` (when srun is installed)
 - `skill-manifest.md` names no `srun/` or `secretrun/` folder that is absent under `.claude/`
 - `<PREFIX>-review/scripts/watch.py` exists and `watch.py open --line` prints an `advisories:` line; `scan-due.sh` contains `watch.py`; `security-review.md` contains `A published fix comes before tracing`; `audit.md`'s `whats-up-store:` reads `watch.py open --json`
+- `whats-up/SKILL.md` contains `grep -n -A5 '^whats-up-store:'`

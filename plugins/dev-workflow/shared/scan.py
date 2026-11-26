@@ -34,6 +34,7 @@ sys.path.insert(0, str(HERE))
 import findings as F  # noqa: E402
 
 TIMEOUT = 240  # per entry; two tries stay under the hook's 600 s
+BASE_TIMEOUT = 100  # the base scan's one try: head's two plus this still fit, and a base that times out holds
 
 
 def git(*args, cwd=None) -> str:
@@ -122,7 +123,7 @@ def launch(e: dict, outdir: Path, rng: str, files: list[str], url: str):
     return subprocess.Popen(cmd, shell=True, cwd=ROOT, stdout=log, stderr=log), out  # nosemgrep: python.lang.security.audit.subprocess-shell-true.subprocess-shell-true
 
 
-def run_entries(sel: list[dict], at: str, base: str, url: str, whole: bool) -> dict:
+def run_entries(sel: list[dict], at: str, base: str, url: str, whole: bool, tries: int = 2) -> dict:
     head = git("rev-parse", "HEAD")
     outdir = SCANS / head[:7]
     outdir.mkdir(parents=True, exist_ok=True)
@@ -145,7 +146,7 @@ def run_entries(sel: list[dict], at: str, base: str, url: str, whole: bool) -> d
             state[e["name"]] = {**rec, "state": "ran", "seconds": 0, "skipped": True}  # nothing in its scope changed
         else:
             todo.append((e, rec, scope))
-    for attempt in (1, 2):  # one retry: a network blip is not a hold
+    for attempt in range(1, tries + 1):  # one retry by default: a network blip is not a hold
         procs = [(e, rec, scope, time.time(), *launch(e, outdir, rng, scope, url)) for e, rec, scope in todo]
         todo = []
         while procs:  # poll, so each slot's own time and timeout are its own
@@ -169,7 +170,7 @@ def run_entries(sel: list[dict], at: str, base: str, url: str, whole: bool) -> d
                 except Exception as err:  # timeout, missing or unreadable output
                     state[e["name"]] = {**rec, "state": "errored", "seconds": secs,
                                         "error": f"{type(err).__name__}: see .claude/scans/{head[:7]}/{e['name']}.log"}
-                    if attempt == 1:
+                    if attempt < tries:
                         todo.append((e, rec, scope))
         if not todo:
             break
@@ -207,14 +208,14 @@ def baseline_keys() -> set[str]:
     return {ln.split()[1] for ln in read(BASELINE).splitlines() if len(ln.split()) > 1}
 
 
-def at_commit(sha: str, sel: list[dict]) -> dict:
+def at_commit(sha: str, sel: list[dict], tries: int = 2) -> dict:
     """Run `sel` on the whole tree at `sha`, on a temporary checkout; HEAD's tree is never touched."""
     global ROOT
     keep, tmp = ROOT, str(Path(tempfile.mkdtemp(prefix="scan-at-")).resolve())  # resolved: tools report /private/var, not /var
     git("worktree", "add", "--detach", tmp, sha)
     try:
         ROOT = Path(tmp)
-        return run_entries(sel, "every", sha, "", whole=True)
+        return run_entries(sel, "every", sha, "", whole=True, tries=tries)
     finally:
         ROOT = keep
         git("worktree", "remove", "--force", tmp)
@@ -231,8 +232,9 @@ def deps_before(base: str, fresh: bool = False) -> frozenset | None:
     cache = SCANS / base[:7] / "deps-before.json"
     if cache.is_file() and not fresh:
         return frozenset(json.loads(cache.read_text()))
-    sel = [e for e in entries() if e.get("slot") == "dependencies" and e.get("command")]
-    state = at_commit(base, sel) if sel else {}
+    sel = [{**e, "timeout": min(int(e.get("timeout") or TIMEOUT), BASE_TIMEOUT)}
+           for e in entries() if e.get("slot") == "dependencies" and e.get("command")]
+    state = at_commit(base, sel, tries=1) if sel else {}
     if not state or any(r["state"] != "ran" for r in state.values()):
         return None
     keys = sorted({f["key"] for r in state.values() for f in r["findings"]})
@@ -306,8 +308,10 @@ def verdict(state: dict) -> dict:
                 continue
             if f["key"] in old:
                 continue  # existed before the slots ran: /audit's backlog, never a hold
-            if f.get("dep") and not introduced(f, r):
-                continue  # published against a package this change left alone: the watch's, not this push's
+            holds = s is None or s.get("status") == "under_investigation" or (
+                s.get("status") == "affected" and f["severity"] != "low")
+            if holds and f.get("dep") and not introduced(f, r):
+                continue  # already there before this change: the watch's and /audit's, not this push's
             if s is None or s.get("status") == "under_investigation":
                 v["undecided"].append(f)  # seen is not decided
                 continue

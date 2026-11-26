@@ -71,6 +71,7 @@ def refresh(a):
     if a.if_older is not None and current(record(), a.if_older):
         return
     S.SCANS.mkdir(parents=True, exist_ok=True)
+    (S.SCANS / ".gitignore").write_text("*\n")  # watch.json and the lock sit here, outside watch/'s own ignore
     if a.background:  # detach: the caller is a task or a session start, and must not wait
         subprocess.Popen([sys.executable, __file__, "refresh"], cwd=S.ROOT, stdin=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)

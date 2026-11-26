@@ -82,7 +82,8 @@ def _fix(vuln: dict, name: str, ver: str) -> str | None:
     no fixed version is published."""
     fixed = [e["fixed"] for a in vuln.get("affected") or []
              if (a.get("package") or {}).get("name", "").lower() == name.lower()
-             for r in a.get("ranges") or [] for e in r.get("events") or [] if "fixed" in e]
+             for r in a.get("ranges") or [] if r.get("type") in ("ECOSYSTEM", "SEMVER")
+             for e in r.get("events") or [] if "fixed" in e]  # a GIT range's fix is a commit, not a version
     above = [f for f in fixed if _vkey(f) > _vkey(ver)]
     return min(above, key=_vkey) if above else None
 

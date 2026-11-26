@@ -7,10 +7,12 @@ never makes a task wait on the network.
     watch.py refresh [--if-older HOURS] [--background]   # run the dependency slot on the whole tree
     watch.py open [--line | --json]                      # the one count of open security work
 
-Open is: an advisory the latest check still finds that no statement has judged (unjudged), or
-one judged exploitable whose fix has not landed (filed), plus the other slots' backlog above low.
-An advisory the latest check no longer finds is closed, whatever its old statement says — an
-upgrade closes it without anyone editing vex.yaml.
+Counted over what the latest check still finds: unjudged (no statement, or one that names no filed
+roadmap item, or `fixed` yet still found), filed (an open roadmap item owns it — an upgrade not yet
+landed), left (exploitable with no published fix: visible, never a target of zero), and unfiled
+(exploitable with no item yet); plus the other slots' backlog above low. An advisory the latest check
+no longer finds is closed, whatever its old statement says — an upgrade closes it without anyone
+editing vex.yaml.
 
 Writes only the gitignored .claude/scans/watch.json. Sends what the dependency slot sends —
 package names and versions, to the advisory database — with no code change behind it.
@@ -18,6 +20,7 @@ package names and versions, to the advisory database — with no code change beh
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -46,11 +49,21 @@ def age_h(rec: dict | None) -> float | None:
     return (time.time() - rec["ts"]) / 3600 if rec and rec.get("ts") else None
 
 
+def current(rec: dict | None, hours: float) -> bool:
+    """Young enough, and no dependency manifest changed since the commit it read — so the count
+    drops on the task that lands an upgrade, not a day later."""
+    h = age_h(rec)
+    if h is None or h >= hours:
+        return False
+    head, pat = rec.get("head", ""), S.conf("DEPENDENCY_MANIFESTS")
+    if not S.ancestor(head, S.git("rev-parse", "HEAD")):
+        return False
+    return not pat or not any(re.search(pat, f) for f in S.changed(head, deleted=True))
+
+
 def refresh(a):
-    if a.if_older is not None:
-        h = age_h(record())
-        if h is not None and h < a.if_older:
-            return
+    if a.if_older is not None and current(record(), a.if_older):
+        return
     S.SCANS.mkdir(parents=True, exist_ok=True)
     if a.background:  # detach: the caller is a task or a session start, and must not wait
         subprocess.Popen([sys.executable, __file__, "refresh"], cwd=S.ROOT, stdin=subprocess.DEVNULL,
@@ -96,20 +109,25 @@ def refresh(a):
 def count() -> dict:
     rec, dec = record(), S.decisions()
     out = {"state": (rec or {}).get("state", "never"), "age_h": age_h(rec), "unjudged": 0, "filed": 0,
-           "critical": {}, "backlog": 0}
+           "left": 0, "unfiled": 0, "critical": {}, "backlog": 0}
     for f in (rec or {}).get("findings", []):
         keys = [f["key"]] + [f"{i}@{f['package']}" for i in f.get("aliases", [])]
         found = [dec[k] for k in keys if k in dec]
-        s = next((c for c in found if c.get("status") != "under_investigation"), found[0] if found else None)
-        status = (s or {}).get("status")
+        s = next((c for c in found if c.get("status") != "under_investigation"), found[0] if found else None) or {}
+        status, item = s.get("status"), S.filed_item(s.get("addressed", ""))
         if status == "not_affected":
             continue
-        if status in ("affected", "fixed") or (s or {}).get("addressed"):
-            out["filed"] += 1  # judged, or an upgrade filed for it: open until the check stops finding it
+        if status == "affected" and not f.get("fixed"):
+            out["left" if item else "unfiled"] += 1  # exploitable, no upstream fix: a mitigation's, not zero's
+            continue
+        if status == "affected" and not item:
+            out["unfiled"] += 1
+        elif item and status != "fixed":
+            out["filed"] += 1  # an open item owns it: open until the check stops finding it
         else:
-            out["unjudged"] += 1
+            out["unjudged"] += 1  # no statement, an item nobody filed, or `fixed` yet still found
         if f["severity"] == "critical":
-            out["critical"][f["package"]] = f.get("fixed") or "no fix"
+            out["critical"][f["package"]] = f.get("fixed") or "no fix — judge it"
     rows = [ln.split(None, 4) for ln in S.read(S.BASELINE).splitlines() if ln and not ln.startswith("#")]
     out["backlog"] = sum(1 for r in rows if len(r) > 2 and r[0] != "dependencies" and r[1] not in dec and r[2] != "low")
     return out
@@ -123,11 +141,13 @@ def line(c: dict) -> str:
         return f"advisories: unknown — the last check failed ({age}; see .claude/scans/watch/) · backlog {c['backlog']}"
     if c["state"] == "empty":
         return f"advisories: not watched — no dependency slot tool · backlog {c['backlog']}"
-    crit = ", ".join(f"{p} → {v}" for p, v in sorted(c["critical"].items()))
-    head = f"{c['unjudged']} unjudged · {c['filed']} filed" if c["unjudged"] or c["filed"] else "0 open"
-    nxt = " · Next: /audit" if c["unjudged"] or c["backlog"] else ""
-    return (f"advisories: {head}" + (f" · {len(c['critical'])} critical ({crit})" if crit else "")
-            + f" · backlog {c['backlog']} · {age}{nxt}")
+    parts = [f"{c[k]} {k}" for k in ("unjudged", "unfiled", "filed") if c[k]] or ["0 open"]
+    if c["critical"]:
+        parts.append(f"{len(c['critical'])} critical (" + ", ".join(f"{p} → {v}" for p, v in sorted(c["critical"].items())) + ")")
+    if c["left"]:
+        parts.append(f"{c['left']} left with no upstream fix")
+    nxt = " · Next: /audit" if c["unjudged"] or c["unfiled"] or c["backlog"] else ""
+    return "advisories: " + " · ".join(parts) + f" · backlog {c['backlog']} · {age}{nxt}"
 
 
 def main():

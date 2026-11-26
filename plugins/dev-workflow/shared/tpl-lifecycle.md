@@ -154,7 +154,8 @@ SITUATION?
 - `references/vex.yaml` — the VEX status held for every finding this project has decided, so a settled one is never re-decided. Project state: written by the review, at ship, and by `/audit`
 - `references/scanners.yaml` — the security slots: which tool fills each, when it runs (task, ship, deploy, or every N days), and what it sends off the machine. Project state: install and upgrade fill it; `/audit --scan` writes the cadence fields
 - `references/scan-baseline.txt` — findings that existed before the slots ran: `/audit`'s backlog, never a hold. Written only by `scan.py baseline`
-- `scripts/scan.py` + `scripts/findings.py` — run the slots in parallel, read their output, decide what is new and what holds; `security-gate.sh` calls `scan.py gate`
+- `scripts/scan.py` + `scripts/findings.py` — run the slots in parallel, read their output, decide what is new and what holds; `security-gate.sh` calls `scan.py gate`. A push holds only on what the change introduced: an advisory against a package the range did not add or move was published on its own clock and is the watch's
+- `scripts/watch.py` — the advisory watch: re-checks the whole dependency tree when its record is over 24 hours old, detached, from every task scan and session start, and is the one count of open security work every report prints (`watch.py open --line`)
 - `<PREFIX>-design/references/ux-patterns.md` — how this app already does a thing: a UI change that stands up a second pattern beside an existing one, a waiting, choosing or optional-depth state that misses its baseline without a recorded divergence, or a visual value absent from `design-tokens.md`, is a finding (single source of truth — owned by `<PREFIX>-design`)
 - `<PREFIX>-design/references/voice.md` — how this app writes: a user-readable string that breaks a rule or shows a word listed in § Vocabulary is a finding (single source of truth — owned by `<PREFIX>-design`)
 - `<PREFIX>-debug/references/verification.md` — completion verification gates (single source of truth — owned by `<PREFIX>-debug`)
@@ -296,6 +297,8 @@ The five justifications **are** the triage questions, in cost order. First "no" 
 | Can an attacker control input on that path? | `vulnerable_code_cannot_be_controlled_by_adversary` |
 | Is a control in front of it that cannot be turned off? | `inline_mitigations_already_exist` |
 
+**A published fix comes before tracing.** When the watch names a fixed version for a package, the decision is the upgrade, not the trace: within the installed major version, one upgrade item per manifest covering every such package there; only in a new major version, one item per package, since a major upgrade changes behaviour and needs its own tests. Record each advisory it closes `under_investigation` with `addressed:` the item's id — that counts as filed, not unjudged — and nobody edits the statement again: the upgrade closes it, because the next check no longer finds it. Trace with the five questions only what has no fix, or a fix another package's pin blocks.
+
 Anything surviving all five is `affected`. A path you cannot write down is not a finding — record the status and keep moving. "Low severity" and "we'll get to it" are not justifications. Where the tool has its own way to silence a finding (an ignore file, an inline comment, its baseline), add it beside a `not_affected` statement with the same reason, so the tool stops reporting it too.
 
 **What holds is decided in `scan.py`, not here:** an undecided new finding; an `affected` one the tool rates above low or does not rate; a `fixed` one still reported; a slot that errored twice. A slot with no tool installed is `empty` — reported on every close-out, never a hold. A finding listed in `scan-baseline.txt` existed before the slots ran: it is `/audit`'s backlog and never holds.
@@ -422,7 +425,7 @@ scanners:
 
 **Installing a missing default** (install and upgrade, never asked — the user decided tools install themselves): the machine's package manager (`brew`); else `uv tool install` for a Python tool (Semgrep); else the tool's release binary from its own GitHub releases, its published checksum verified before it is put on `PATH`. An install that fails leaves the slot `command: ''` and says why — the slot reports `empty`, it never holds. `job:`, `filed:` and `last_run:` start empty — a placeholder left in `job:` reads as a run in flight and the scanner is never due again.
 
-After the entries are written, run `python3 .claude/skills/<PREFIX>-review/scripts/scan.py baseline` once: every tool on a temporary checkout of `origin/HEAD`, so what already exists becomes `scan-baseline.txt` — backlog for `/audit`, never a hold — while the unpushed work is still reviewed at its first push. Report each slot's state, time and finding count.
+After the entries are written, run `python3 .claude/skills/<PREFIX>-review/scripts/scan.py baseline` once: every tool on a temporary checkout of `origin/HEAD`, so what already exists becomes `scan-baseline.txt` — backlog for `/audit`, never a hold — while the unpushed work is still reviewed at its first push. Report each slot's state, time and finding count. Then run `python3 .claude/skills/<PREFIX>-review/scripts/watch.py refresh` once and end the install report with its `open --line` — a new project's first pass of the loop that takes it to zero: `/audit` files the fixes, `/pilot` runs them. Nothing waits on it; the line is the status.
 
 ---
 
@@ -2432,7 +2435,9 @@ part of the value, a term with no `=`, or a provenance outside `user|timeout|age
 **A VEX statement is edited in place, so it needs no reconcile.** `vex.yaml` holds one record
 per advisory and the pass overwrites its `status`, unlike the delivery log, which is append-only and
 therefore needs `open-gates` to close a parking with a later decision. So the current status *is* the
-answer: `open-advisories` filters, it does not reconcile. `under_investigation` is counted rather
+answer: `open-advisories` filters, it does not reconcile — and it answers which advisories touch a
+file, never how many are open: a statement outlives the upgrade that closed it, so the open count is
+`watch.py`'s, taken over what the latest check still finds. `under_investigation` is counted rather
 than listed, because an advisory nobody has judged is a reason to run the pass, not a row of work —
 and the count is taken from `ASSESSED`, never `AFFECTS`, since an untraced advisory has no `sink:`
 to emit an `AFFECTS` edge from.

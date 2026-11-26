@@ -7,6 +7,10 @@
     scan.py record <entry> --findings FILE|-   # a model-run slot's result (change review)
     scan.py status [--one-line]
     scan.py backlog [--count]
+    scan.py version-only --base SHA  # exit 1 when a manifest edit is more than a version change
+
+Advisories published against packages a change did not touch are watch.py's (it re-checks the whole
+tree on a clock); a push holds only on what the change itself introduced.
 
 Tools find; this file only runs them, reads their output and counts. Whether a finding is
 real is the model's call, recorded as a vex.yaml statement. Writes nothing tracked except
@@ -30,6 +34,7 @@ sys.path.insert(0, str(HERE))
 import findings as F  # noqa: E402
 
 TIMEOUT = 240  # per entry; two tries stay under the hook's 600 s
+BASE_TIMEOUT = 100  # the base scan's one try: head's two plus this still fit, and a base that times out holds
 
 
 def git(*args, cwd=None) -> str:
@@ -74,7 +79,8 @@ def entries() -> list[dict]:
 
 
 def conf(name: str) -> str:
-    m = re.search(rf"^{name}='(.*)'$", read(ROOT / ".claude/hooks/governed-paths.conf"), re.M)
+    # Read as bash reads it: a trailing `# comment` after the closing quote is not part of the value.
+    m = re.search(rf"^{name}='([^']*)'\s*(#.*)?$", read(ROOT / ".claude/hooks/governed-paths.conf"), re.M)
     return m.group(1) if m else ""
 
 
@@ -109,6 +115,7 @@ def in_scope(e: dict, files: list[str]) -> list[str]:
 
 def launch(e: dict, outdir: Path, rng: str, files: list[str], url: str):
     out = outdir / f"{e['name']}.out"
+    out.unlink(missing_ok=True)  # a tool that fails without writing must never leave the last run's output to be read as this one's
     cmd = (e["command"].replace("{out}", shlex.quote(str(out))).replace("{range}", shlex.quote(rng))
            .replace("{files}", " ".join(map(shlex.quote, files)) or ".").replace("{url}", shlex.quote(url)))
     log = open(outdir / f"{e['name']}.log", "w")
@@ -116,7 +123,7 @@ def launch(e: dict, outdir: Path, rng: str, files: list[str], url: str):
     return subprocess.Popen(cmd, shell=True, cwd=ROOT, stdout=log, stderr=log), out  # nosemgrep: python.lang.security.audit.subprocess-shell-true.subprocess-shell-true
 
 
-def run_entries(sel: list[dict], at: str, base: str, url: str, whole: bool) -> dict:
+def run_entries(sel: list[dict], at: str, base: str, url: str, whole: bool, tries: int = 2) -> dict:
     head = git("rev-parse", "HEAD")
     outdir = SCANS / head[:7]
     outdir.mkdir(parents=True, exist_ok=True)
@@ -136,10 +143,10 @@ def run_entries(sel: list[dict], at: str, base: str, url: str, whole: bool) -> d
         if not e.get("command"):
             state[e["name"]] = {**rec, "state": "empty"}
         elif not whole and not scope:
-            state[e["name"]] = {**rec, "state": "ran", "seconds": 0}  # nothing in its scope changed
+            state[e["name"]] = {**rec, "state": "ran", "seconds": 0, "skipped": True}  # nothing in its scope changed
         else:
             todo.append((e, rec, scope))
-    for attempt in (1, 2):  # one retry: a network blip is not a hold
+    for attempt in range(1, tries + 1):  # one retry by default: a network blip is not a hold
         procs = [(e, rec, scope, time.time(), *launch(e, outdir, rng, scope, url)) for e, rec, scope in todo]
         todo = []
         while procs:  # poll, so each slot's own time and timeout are its own
@@ -163,7 +170,7 @@ def run_entries(sel: list[dict], at: str, base: str, url: str, whole: bool) -> d
                 except Exception as err:  # timeout, missing or unreadable output
                     state[e["name"]] = {**rec, "state": "errored", "seconds": secs,
                                         "error": f"{type(err).__name__}: see .claude/scans/{head[:7]}/{e['name']}.log"}
-                    if attempt == 1:
+                    if attempt < tries:
                         todo.append((e, rec, scope))
         if not todo:
             break
@@ -201,24 +208,116 @@ def baseline_keys() -> set[str]:
     return {ln.split()[1] for ln in read(BASELINE).splitlines() if len(ln.split()) > 1}
 
 
+def at_commit(sha: str, sel: list[dict], tries: int = 2) -> dict:
+    """Run `sel` on the whole tree at `sha`, on a temporary checkout; HEAD's tree is never touched."""
+    global ROOT
+    keep, tmp = ROOT, str(Path(tempfile.mkdtemp(prefix="scan-at-")).resolve())  # resolved: tools report /private/var, not /var
+    git("worktree", "add", "--detach", tmp, sha)
+    try:
+        ROOT = Path(tmp)
+        return run_entries(sel, "every", sha, "", whole=True, tries=tries)
+    finally:
+        ROOT = keep
+        git("worktree", "remove", "--force", tmp)
+
+
+@functools.lru_cache(None)
+def deps_before(base: str, fresh: bool = False) -> frozenset | None:
+    """Advisory keys the dependency slot finds at `base`, cached per commit; None when it cannot say.
+    The cache only ever answers "present": an advisory published since it was written is missing from
+    it, so a miss re-scans (`fresh`) before anything holds."""
+    if not base or subprocess.run(["git", "rev-parse", "-q", "--verify", f"{base}^{{commit}}"], cwd=ROOT,
+                                  capture_output=True).returncode:
+        return None
+    cache = SCANS / base[:7] / "deps-before.json"
+    if cache.is_file() and not fresh:
+        return frozenset(json.loads(cache.read_text()))
+    sel = [{**e, "timeout": min(int(e.get("timeout") or TIMEOUT), BASE_TIMEOUT)}
+           for e in entries() if e.get("slot") == "dependencies" and e.get("command")]
+    state = at_commit(base, sel, tries=1) if sel else {}
+    if not state or any(r["state"] != "ran" for r in state.values()):
+        return None
+    keys = sorted({f["key"] for r in state.values() for f in r["findings"]})
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps(keys))
+    return frozenset(keys)
+
+
+def introduced(f: dict, r: dict) -> bool:
+    """Whether this change brought the advisory in: the dependency slot does not find it at the range's
+    base. One already there was published on its own clock — the watch counts it and /audit owns it,
+    never this push. Asked of a review (task, ship) only; base unreadable or its scan failed → introduced."""
+    if r.get("at") not in ("task", "ship"):
+        return True
+    before = deps_before(r.get("base", ""))
+    if before is not None and f["key"] in before:
+        return False
+    before = deps_before(r.get("base", ""), fresh=True)
+    return before is None or f["key"] not in before
+
+
+@functools.lru_cache(None)
+def roadmap_status() -> dict:
+    """Roadmap id → its status word, one item per heading block."""
+    out = {}
+    for block in re.split(r"\n(?=#{2,4} )", read(ROOT / "docs" / "roadmap.md")):
+        i = re.search(r"\*\*Id:\*\*\s*`?([\w.-]+)", block)
+        st = re.search(r"\*\*Status:\*\*\s*`?([\w-]+)", block)
+        if i:
+            out[i.group(1)] = (st.group(1) if st else "").lower()
+    return out
+
+
+def filed_item(ids: str) -> bool:
+    """`addressed:` names roadmap items still to do (open, in progress, parked or blocked). A name nobody
+    filed, or an item marked done while the advisory is still found, never stands in for a decision."""
+    want = [i for i in re.split(r"[,\s]+", str(ids)) if i]
+    live = ("open", "in-progress", "parked", "blocked")
+    return bool(want) and all(roadmap_status().get(i) in live for i in want)
+
+
+def version_only(base: str) -> list[str]:
+    """Lines a range added to a non-lock dependency manifest that are not an existing line with only
+    its version changed — a package added, or anything else edited. Lockfiles are regenerated by their
+    tool, so they are not read. Empty means the range only moved versions."""
+    pat = conf("DEPENDENCY_MANIFESTS")
+    files = [f for f in changed(base) if pat and re.search(pat, f) and not re.search(r"lock|\.sum$", Path(f).name, re.I)]
+    # A version is a number not glued to a name, so h2 → h11 or psycopg2 → psycopg3 is a different package.
+    norm = lambda ln: re.sub(r"(?<![A-Za-z0-9_-])\d[\w.+-]*", "V", ln).strip()
+    bad = []
+    for f in files:
+        diff = git("diff", "-U0", f"{base}..HEAD", "--", f).splitlines()
+        gone = {norm(ln[1:]) for ln in diff if ln.startswith("-") and not ln.startswith("---")}
+        bad += [f"{f}: {ln[1:].strip()}" for ln in diff if ln.startswith("+") and not ln.startswith("+++")
+                and ln[1:].strip() and norm(ln[1:]) not in gone]
+    return bad
+
+
 def verdict(state: dict) -> dict:
     dec, old = decisions(), baseline_keys()
-    v = {"undecided": [], "held": [], "errored": [], "empty": [], "ran": [], "decided": 0}
+    v = {"undecided": [], "held": [], "errored": [], "empty": [], "ran": [], "skipped": [], "decided": 0}
     for name, r in state.items():
-        v[r["state"] if r["state"] in ("errored", "empty") else "ran"].append(name)
+        v[r["state"] if r["state"] in ("errored", "empty") else "skipped" if r.get("skipped") else "ran"].append(name)
         for f in r.get("findings", []):
-            if f["key"] in old:
-                continue  # existed before the slots ran: /audit's backlog, never a hold
             # An advisory's aliases (GHSA, CVE, PYSEC) are one flaw: a statement under any of them counts.
             ids = (f.get("dep") or {}).get("aliases") or []
             found = [dec[k] for k in [f["key"]] + [f"{i}@{f['dep']['package']}" for i in ids] if k in dec]
             s = next((c for c in found if c.get("status") != "under_investigation"), found[0] if found else None)
+            if s and s.get("status") == "fixed":
+                v["held"].append(f)  # `fixed` yet still found is not fixed — backlog or not, it came back
+                continue
+            if f["key"] in old:
+                continue  # existed before the slots ran: /audit's backlog, never a hold
+            holds = s is None or s.get("status") == "under_investigation" or (
+                s.get("status") == "affected" and f["severity"] != "low")
+            if holds and f.get("dep") and not introduced(f, r):
+                continue  # already there before this change: the watch's and /audit's, not this push's
             if s is None or s.get("status") == "under_investigation":
                 v["undecided"].append(f)  # seen is not decided
                 continue
             v["decided"] += 1
-            if s.get("status") == "affected" and f["severity"] != "low" or s.get("status") == "fixed":
-                v["held"].append(f)  # `fixed` yet still found is not fixed
+            if s.get("status") == "affected" and f["severity"] != "low":
+                v["held"].append(f)
     return v
 
 
@@ -228,6 +327,7 @@ def line(f: dict) -> str:
 
 def summary(v: dict) -> str:
     s = f"security: {len(v['ran'])} ran"
+    s += f" ({len(v['skipped'])} with nothing in scope: {', '.join(v['skipped'])})" if v.get("skipped") else ""
     s += f" · empty: {', '.join(v['empty'])}" if v["empty"] else ""
     s += f" · errored: {', '.join(v['errored'])}" if v["errored"] else ""
     return s + f" · new {len(v['undecided']) + v['decided']}: {v['decided']} decided, {len(v['undecided'])} undecided, {len(v['held'])} held"
@@ -262,6 +362,13 @@ def cmd_run(a):
         print("NEW", line(f))
     for f in v["held"]:
         print("HELD", line(f))
+    watch = HERE / "watch.py"
+    if watch.is_file() and a.at in ("task", "ship"):
+        # Advisories are published on their own clock: refresh the whole-tree check beside the work
+        # (detached, never waited on), and print the open count the last check left.
+        subprocess.run([sys.executable, str(watch), "refresh", "--if-older", "--background"], cwd=ROOT)
+        print(subprocess.run([sys.executable, str(watch), "open", "--line"], cwd=ROOT,
+                             capture_output=True, text=True).stdout.strip())
 
 
 def cmd_gate(a):
@@ -304,15 +411,7 @@ def cmd_baseline(a):
     unpushed work instead of baselining it."""
     origin = git("rev-parse", "origin/HEAD") or git("rev-parse", "HEAD")
     sel = [e for e in entries() if {"task", "ship"} & set(e["at"]) and e.get("command")]
-    global ROOT
-    keep, tmp = ROOT, tempfile.mkdtemp(prefix="scan-baseline-")
-    git("worktree", "add", "--detach", tmp, origin)
-    try:
-        ROOT = Path(tmp)
-        state = run_entries(sel, "every", origin, "", whole=True)
-    finally:
-        ROOT = keep
-        git("worktree", "remove", "--force", tmp)
+    state = at_commit(origin, sel)
     rows = sorted({f"{f['slot']} {f['key']} {f['severity']} {f['rule']} {f['file']}"
                    for r in state.values() for f in r["findings"]})
     BASELINE.write_text("# scan-baseline.txt — findings that existed before the slots ran; backlog for /audit, never a hold.\n"
@@ -359,6 +458,14 @@ def cmd_backlog(a):
             print(" ".join(r))
 
 
+def cmd_version_only(a):
+    bad = version_only(a.base)
+    for b in bad:
+        print("NOT A VERSION CHANGE", b)
+    print(f"manifests: {'version changes only' if not bad else f'{len(bad)} other line(s)'}")
+    sys.exit(1 if bad else 0)
+
+
 def main():
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -375,9 +482,11 @@ def main():
     s.add_argument("--one-line", action="store_true")
     b = sub.add_parser("backlog")
     b.add_argument("--count", action="store_true")
+    vo = sub.add_parser("version-only")
+    vo.add_argument("--base", required=True)
     a = p.parse_args()
     {"run": cmd_run, "gate": cmd_gate, "baseline": cmd_baseline, "record": cmd_record,
-     "status": cmd_status, "backlog": cmd_backlog}[a.cmd](a)
+     "status": cmd_status, "backlog": cmd_backlog, "version-only": cmd_version_only}[a.cmd](a)
 
 
 if __name__ == "__main__":

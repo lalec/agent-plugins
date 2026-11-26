@@ -113,8 +113,9 @@ def run_cmd(cmd: str, timeout: int, head: int) -> dict:
     """One observation. Never a verdict — see the module docstring."""
     started = time.monotonic()
     try:
-        p = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=timeout
+        # The command is a custom-tests.yaml check (committed repo config), run as the shell line it is.
+        p = subprocess.run(  # nosemgrep: python.lang.security.audit.subprocess-shell-true.subprocess-shell-true
+            cmd, shell=True, capture_output=True, text=True, timeout=timeout  # nosemgrep: python.lang.security.audit.subprocess-shell-true.subprocess-shell-true
         )
         secs = round(time.monotonic() - started, 1)
         # Both streams: a failing command routinely prints partial output on stdout and

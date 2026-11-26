@@ -30,7 +30,7 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 - `.claude/hooks/scan-due.sh` — SessionStart: names every whole-repository security scan past its cadence (`graph.py scans-due`), so `/audit --scan` is due in front of you, not only in `/whats-up`
 - `.claude/graph/graph.py` — delivery-graph projector + query engine (copied verbatim from `../../shared/graph.py`); `edges.jsonl` is generated and gitignored
 - `.claude/skills/<PREFIX>-test/scripts/run-checks.py` — batched execution of resolved Integration commands and `last:` recording for every type (copied verbatim from `../../shared/run-checks.py`); returns observations, never verdicts
-- `.claude/skills/<PREFIX>-review/scripts/scan.py` + `findings.py` — the security slot runner: runs the `scanners.yaml` tools a moment calls for in parallel, reads their output, and decides what is new and what holds (copied verbatim from `../../shared/`); the model decides each finding, never this script
+- `.claude/skills/<PREFIX>-review/scripts/scan.py` + `findings.py` + `watch.py` — the security slot runner and the advisory watch: runs the `scanners.yaml` tools a moment calls for in parallel, reads their output, and decides what is new and what holds (copied verbatim from `../../shared/`); the model decides each finding, never this script
 - `.srun.json` — written by the `srun:setup` skill (the srun plugin, installed with this one as a dependency): the project's `namespace` (from the repo folder name), so its secrets get their own store ids, and the list of secret NAMES, with the store that holds them when the project names one — never values. Agents use a secret by NAME and never see its value
 - `~/.claude/usage-snapshot.sh` — **outside the repo, opt-in** (Phase 3 Step 5): wraps the status line so a run can read the account's remaining allowance, writing one file per session under `~/.claude/usage/` and aggregating them on `--read`. Account-scoped, so one machine needs it once
 - `.claude/settings.json` — wires all hooks
@@ -41,7 +41,7 @@ Installs a multi-agent delivery workflow on a new project in five phases: discov
 - `../../shared/tpl-lifecycle.md` — 8 lifecycle skill templates
 - `../../shared/graph.py` — the delivery-graph projector, copied verbatim to `.claude/graph/graph.py`
 - `../../shared/run-checks.py` — the verification runner/recorder, copied verbatim to `.claude/skills/<PREFIX>-test/scripts/run-checks.py`
-- `../../shared/scan.py` + `../../shared/findings.py` — the security slot runner, copied verbatim to `.claude/skills/<PREFIX>-review/scripts/`
+- `../../shared/scan.py` + `../../shared/findings.py` + `../../shared/watch.py` — the security slot runner and the advisory watch, copied verbatim to `.claude/skills/<PREFIX>-review/scripts/`
 - `../../shared/usage-snapshot.sh` — the status-line allowance tee, copied verbatim to `~/.claude/usage-snapshot.sh` (opt-in, Phase 3 Step 5)
 - `../../shared/tpl-skill-guard.md` — all hook templates + governed-paths.conf + settings.json
 - `../../shared/tpl-domain-skill.md` — domain skill stub + project file sections

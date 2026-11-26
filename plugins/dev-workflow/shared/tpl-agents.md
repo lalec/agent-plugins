@@ -131,7 +131,7 @@ Code edits → `<PREFIX>-dev`. Delivery log → `<PREFIX>-pm`. Review never skip
 ## Handoff
 **Status:** signed-off | signed-off-with-deferrals | blocked
 **Review:** clean | <N> findings — <one-line summary; note any non-source nits fixed directly>
-**Security:** <the summary line `scan.py run --at task` printed — slots ran, empty, errored · new findings decided, held>
+**Security:** <the summary line `scan.py run --at task` printed — slots ran, skipped, empty, errored · new findings decided, held> · <the `advisories:` line it printed after>
 **Tests:** <what ran> · <pass/fail counts> · <N carried, when any prior was carried forward> · <`priors: N walked of M selected (cap C)` whenever priors were in scope — the cap `<PREFIX>-test` sized the walk against; state all three even when N = M> · regression=<the scope that ran: smart|full><when the caller passed `auto`, append ` (derived: <one clause — what in the change decided it>)`>
 **Fanned out:** <N> children (<PREFIX>-verify) · <one clause: what each covered>  (or "none")
 **Evidence:** <one line per typed verification: command/action → observed result → pass|fail|blocked; "none" if no typed verifications ran>

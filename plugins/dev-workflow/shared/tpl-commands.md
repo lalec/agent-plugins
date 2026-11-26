@@ -1510,7 +1510,7 @@ pilot-lane:
   reversal: statements and roadmap items land in one commit — `git revert <sha>` replays it.
 whats-up-store:
   reads: python3 .claude/skills/<PREFIX>-review/scripts/watch.py open --json — the one count of open security work over what the latest whole-tree check still finds (unjudged, unfiled, filed, left with no upstream fix, the other slots' backlog above low, the check's age), so an advisory an upgrade removed never counts — plus python3 .claude/graph/graph.py scans-due
-  healthy: all of — the check ran within 72 hours (one nobody refreshed reports zero exactly like a clean tree), zero unjudged, zero unfiled, zero backlog above low, and scans-due prints none. `filed` and `left` are shown, never unhealthy. A critical makes the row high and first; a due scan's row says `Next: /audit --scan`
+  healthy: all of — the check ran within 72 hours (one nobody refreshed reports zero exactly like a clean tree), zero unjudged, zero unfiled, zero backlog above low, and scans-due prints none. `filed` and `left` are shown, never unhealthy. A critical makes the row high and first. Unjudged, unfiled or backlog → the row's `Next` is `/audit`, which a run takes on its own; a due scan is a row of its own, `Next: /audit --scan`, because only that one needs a person — so a due scan never hides the work a run can do
   when-bad: degraded
 ---
 

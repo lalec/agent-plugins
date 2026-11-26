@@ -447,10 +447,29 @@ Not a hook: a helper the two push gates source, so what counts as a push of this
 # `git` where a command starts: after a separator or a word that runs the next one, past any VAR=value
 # prefixes and a `srun NAME --`; then `push` as a whole word. A quoted string that contains `push` is masked first, so
 # a mention inside quotes is not a push even after a `(` or `;` (measured: a quoted "(git -C … push" was blocked).
+# Quotes are read left to right, as the shell reads them: a pattern match ran from one string's closing quote to the
+# next string's opening one and hid the real push between them (measured: `git commit -m "x" && git push && echo "y"`
+# passed both gates). An unclosed quote masks nothing — the command is left as written, so it is gated, not hidden.
 PUSH_RE="(^|[;&|({]|(^|[[:space:]])(then|do|else|time|nohup|exec|command|sudo))[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=(\"[^\"]*\"|'[^']*'|[^[:space:]]*)[[:space:]]+)*(srun [^;&|]*--[[:space:]]+)?git([[:space:]]+-C[[:space:]]+[^[:space:]]+)*[[:space:]]+push([^A-Za-z0-9_-]|\$)"
+mask_quoted_push() {
+  awk -v SQ="'" '{
+    out = ""; span = ""; q = ""
+    for (i = 1; i <= length($0); i++) {
+      c = substr($0, i, 1)
+      if (q == "") {
+        if (c == "\"" || c == SQ) { q = c; span = c } else out = out c
+      } else {
+        span = span c
+        if (q == "\"" && c == "\\") { i++; span = span substr($0, i, 1); continue }
+        if (c == q) { out = out (span ~ /push/ ? "Q" : span); q = ""; span = "" }
+      }
+    }
+    print (q == "" ? out : $0)
+  }'
+}
 project_push() {
   local cmd pre cdir cflag dir common here
-  cmd=$(printf '%s' "$1" | tr '\n' ';' | sed -E "s/\"[^\"]*push[^\"]*\"/Q/g; s/'[^']*push[^']*'/Q/g")
+  cmd=$(printf '%s' "$1" | tr '\n' ';' | mask_quoted_push)
   echo "$cmd" | grep -qE "$PUSH_RE" || return 1
   # Where the push runs: its `-C <dir>`, taken from the last `cd <dir>` before it.
   # A `cd` inside a subshell that closed before the push does not move the push: drop closed `( … )` groups.

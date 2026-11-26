@@ -761,17 +761,23 @@ exit 0
 
 ## § scan-due.sh
 
-Fires on `SessionStart` for `startup|resume` — not after a compaction or `/clear`, so it speaks once per session — and says when a whole-repository security scan in `<PREFIX>-review/references/scanners.yaml` is past its cadence — so a due scan reaches you every time a session opens, not only when someone thinks to run `/whats-up`. The due rule is `graph.py scans-due`'s, never restated here. It prints the same line to you (`systemMessage`) and to the model (`additionalContext`), never blocks, and is silent when nothing is due, when `python3` or the graph script is missing, or when the project has no `scanners.yaml`.
+Fires on `SessionStart` for `startup|resume` — not after a compaction or `/clear`, so it speaks once per session — and says when a whole-repository security scan in `<PREFIX>-review/references/scanners.yaml` is past its cadence — so a due scan reaches you every time a session opens, not only when someone thinks to run `/whats-up`. The due rule is `graph.py scans-due`'s, never restated here. It also starts the advisory watch's refresh, detached, when its record is over a day old, and adds the watch's line when it names a critical — so a critical published overnight reaches you when the session opens, while a project with only non-critical advisories hears about them in `/whats-up` and before each task, not at every start. It prints the same line to you (`systemMessage`) and to the model (`additionalContext`), never blocks or waits on the network, and is silent when nothing is due and nothing is critical, when `python3` or the graph script is missing, or when the project has no `scanners.yaml`.
 
 ```bash
 #!/bin/bash
-# SessionStart hook — names every security scan past its cadence; /audit --scan runs them.
+# SessionStart hook — names every security scan past its cadence (/audit --scan runs them) and a critical advisory.
 ROOT="${CLAUDE_PROJECT_DIR:-.}"
 DUE=$(cd "$ROOT" && python3 .claude/graph/graph.py scans-due --json 2>/dev/null \
   | jq -r '.due[] | .name + (if .last_run then " (last run " + .last_run + ")" else " (never run)" end)' 2>/dev/null \
   | paste -sd ',' - | sed 's/,/, /g')
-[ -z "$DUE" ] && exit 0
-MSG="Security scan due: $DUE — run /audit --scan"
+WATCH="$ROOT/.claude/skills/<PREFIX>-review/scripts/watch.py"
+CRIT=""
+if [ -f "$WATCH" ]; then
+  (cd "$ROOT" && python3 "$WATCH" refresh --if-older --background >/dev/null 2>&1)
+  CRIT=$(cd "$ROOT" && python3 "$WATCH" open --line 2>/dev/null | grep ' critical (')
+fi
+[ -z "$DUE" ] && [ -z "$CRIT" ] && exit 0
+MSG=$( { [ -n "$DUE" ] && echo "Security scan due: $DUE — run /audit --scan"; [ -n "$CRIT" ] && echo "$CRIT"; } | paste -sd '|' - | sed 's/|/ · /')
 jq -n --arg m "$MSG" '{systemMessage: $m, hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $m}}'
 exit 0
 ```

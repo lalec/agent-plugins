@@ -183,3 +183,4 @@ Report a summary of what was upgraded.
 - `precompact-handover.sh` contains `Inside a run, name the file for the dispatch it covers`, and `.claude/handovers/` holds no `1970-01-01T*` file
 - `pilot/references/plan.md` contains `cannot spend it`; `CLAUDE.md § Secrets` contains `grep -q '^KEY='` (when srun is installed)
 - `skill-manifest.md` names no `srun/` or `secretrun/` folder that is absent under `.claude/`
+- `<PREFIX>-review/scripts/watch.py` exists and `watch.py open --line` prints an `advisories:` line; `scan-due.sh` contains `watch.py`; `security-review.md` contains `A published fix comes before tracing`; `audit.md`'s `whats-up-store:` reads `watch.py open --json`

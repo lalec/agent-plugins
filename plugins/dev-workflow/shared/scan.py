@@ -8,6 +8,9 @@
     scan.py status [--one-line]
     scan.py backlog [--count]
 
+Advisories published against packages a change did not touch are watch.py's (it re-checks the whole
+tree on a clock); a push holds only on what the change itself introduced.
+
 Tools find; this file only runs them, reads their output and counts. Whether a finding is
 real is the model's call, recorded as a vex.yaml statement. Writes nothing tracked except
 scan-baseline.txt (by `baseline` only); results live in the gitignored .claude/scans/.
@@ -109,6 +112,7 @@ def in_scope(e: dict, files: list[str]) -> list[str]:
 
 def launch(e: dict, outdir: Path, rng: str, files: list[str], url: str):
     out = outdir / f"{e['name']}.out"
+    out.unlink(missing_ok=True)  # a tool that fails without writing must never leave the last run's output to be read as this one's
     cmd = (e["command"].replace("{out}", shlex.quote(str(out))).replace("{range}", shlex.quote(rng))
            .replace("{files}", " ".join(map(shlex.quote, files)) or ".").replace("{url}", shlex.quote(url)))
     log = open(outdir / f"{e['name']}.log", "w")
@@ -136,7 +140,7 @@ def run_entries(sel: list[dict], at: str, base: str, url: str, whole: bool) -> d
         if not e.get("command"):
             state[e["name"]] = {**rec, "state": "empty"}
         elif not whole and not scope:
-            state[e["name"]] = {**rec, "state": "ran", "seconds": 0}  # nothing in its scope changed
+            state[e["name"]] = {**rec, "state": "ran", "seconds": 0, "skipped": True}  # nothing in its scope changed
         else:
             todo.append((e, rec, scope))
     for attempt in (1, 2):  # one retry: a network blip is not a hold
@@ -201,24 +205,54 @@ def baseline_keys() -> set[str]:
     return {ln.split()[1] for ln in read(BASELINE).splitlines() if len(ln.split()) > 1}
 
 
+@functools.lru_cache(None)
+def added_manifest_text(base: str, head: str) -> str | None:
+    """The lines a range added to the dependency manifests; None when the range cannot be read."""
+    pat = conf("DEPENDENCY_MANIFESTS")
+    if not (base and head and pat):
+        return None
+    if subprocess.run(["git", "rev-parse", "-q", "--verify", f"{base}^{{commit}}"], cwd=ROOT, capture_output=True).returncode:
+        return None
+    files = [f for f in changed(base, head) if re.search(pat, f)]
+    diff = git("diff", "-U0", f"{base}..{head}", "--", *files) if files else ""
+    return "\n".join(ln[1:] for ln in diff.splitlines() if ln.startswith("+") and not ln.startswith("+++"))
+
+
+def introduced(f: dict, r: dict) -> bool:
+    """Whether this change added or moved the package an advisory names: its name on a line the range
+    added to a manifest — a pin, a lockfile entry or its download URL. An advisory against a package
+    the change did not touch was there before it, published on its own schedule: the watch counts it
+    and /audit owns it, never this push. Unreadable range → treat it as introduced (hold, as before)."""
+    text = added_manifest_text(r.get("base", ""), r.get("head", ""))
+    if text is None:
+        return True
+    name = "[-_.]".join(map(re.escape, re.split(r"[-_.]", f["dep"]["package"])))
+    return bool(re.search(rf"(?<![A-Za-z0-9_-]){name}(?![A-Za-z0-9_]|-[A-Za-z])", text, re.I))
+
+
 def verdict(state: dict) -> dict:
     dec, old = decisions(), baseline_keys()
-    v = {"undecided": [], "held": [], "errored": [], "empty": [], "ran": [], "decided": 0}
+    v = {"undecided": [], "held": [], "errored": [], "empty": [], "ran": [], "skipped": [], "decided": 0}
     for name, r in state.items():
-        v[r["state"] if r["state"] in ("errored", "empty") else "ran"].append(name)
+        v[r["state"] if r["state"] in ("errored", "empty") else "skipped" if r.get("skipped") else "ran"].append(name)
         for f in r.get("findings", []):
-            if f["key"] in old:
-                continue  # existed before the slots ran: /audit's backlog, never a hold
             # An advisory's aliases (GHSA, CVE, PYSEC) are one flaw: a statement under any of them counts.
             ids = (f.get("dep") or {}).get("aliases") or []
             found = [dec[k] for k in [f["key"]] + [f"{i}@{f['dep']['package']}" for i in ids] if k in dec]
             s = next((c for c in found if c.get("status") != "under_investigation"), found[0] if found else None)
+            if s and s.get("status") == "fixed":
+                v["held"].append(f)  # `fixed` yet still found is not fixed — backlog or not, it came back
+                continue
+            if f["key"] in old:
+                continue  # existed before the slots ran: /audit's backlog, never a hold
+            if f.get("dep") and not introduced(f, r):
+                continue  # published against a package this change left alone: the watch's, not this push's
             if s is None or s.get("status") == "under_investigation":
                 v["undecided"].append(f)  # seen is not decided
                 continue
             v["decided"] += 1
-            if s.get("status") == "affected" and f["severity"] != "low" or s.get("status") == "fixed":
-                v["held"].append(f)  # `fixed` yet still found is not fixed
+            if s.get("status") == "affected" and f["severity"] != "low":
+                v["held"].append(f)
     return v
 
 
@@ -228,6 +262,7 @@ def line(f: dict) -> str:
 
 def summary(v: dict) -> str:
     s = f"security: {len(v['ran'])} ran"
+    s += f" ({len(v['skipped'])} with nothing in scope: {', '.join(v['skipped'])})" if v.get("skipped") else ""
     s += f" · empty: {', '.join(v['empty'])}" if v["empty"] else ""
     s += f" · errored: {', '.join(v['errored'])}" if v["errored"] else ""
     return s + f" · new {len(v['undecided']) + v['decided']}: {v['decided']} decided, {len(v['undecided'])} undecided, {len(v['held'])} held"
@@ -262,6 +297,13 @@ def cmd_run(a):
         print("NEW", line(f))
     for f in v["held"]:
         print("HELD", line(f))
+    watch = HERE / "watch.py"
+    if watch.is_file() and a.at in ("task", "ship"):
+        # Advisories are published on their own clock: refresh the whole-tree check beside the work
+        # (detached, never waited on), and print the open count the last check left.
+        subprocess.run([sys.executable, str(watch), "refresh", "--if-older", "--background"], cwd=ROOT)
+        print(subprocess.run([sys.executable, str(watch), "open", "--line"], cwd=ROOT,
+                             capture_output=True, text=True).stdout.strip())
 
 
 def cmd_gate(a):

@@ -73,6 +73,20 @@ def read_sarif(data: dict, slot: str, root: Path) -> list[dict]:
     return out
 
 
+def _vkey(v: str) -> tuple:
+    return tuple(int(x) for x in re.findall(r"\d+", v or ""))
+
+
+def _fix(vuln: dict, name: str, ver: str) -> str | None:
+    """The lowest version that fixes this advisory for `name`, above the installed one; None when
+    no fixed version is published."""
+    fixed = [e["fixed"] for a in vuln.get("affected") or []
+             if (a.get("package") or {}).get("name", "").lower() == name.lower()
+             for r in a.get("ranges") or [] for e in r.get("events") or [] if "fixed" in e]
+    above = [f for f in fixed if _vkey(f) > _vkey(ver)]
+    return min(above, key=_vkey) if above else None
+
+
 def read_osv(data: dict, slot: str, root: Path) -> list[dict]:
     out = []
     for res in data.get("results") or []:
@@ -90,8 +104,12 @@ def read_osv(data: dict, slot: str, root: Path) -> list[dict]:
                     continue
                 db = json.dumps([vulns.get(i, {}).get("database_specific") or {} for i in ids])
                 cwe = (CWE_RE.findall(db) or [""])[0]
+                # The group's fix is the version that fixes every alias; any alias with none → no fix.
+                fixes = [_fix(vulns[i], name, ver) for i in ids if i in vulns]
+                fix = max(fixes, key=_vkey) if fixes and all(fixes) else None
                 out.append(_finding(slot, ids[0], file, 0, score_to_severity(g.get("max_severity")),
-                                    cwe, f"{name}@{ver}", {"id": ids[0], "package": name, "version": ver, "aliases": ids}))
+                                    cwe, f"{name}@{ver}", {"id": ids[0], "package": name, "version": ver,
+                                                           "aliases": ids, "fixed": fix}))
     return out
 
 

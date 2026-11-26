@@ -479,11 +479,12 @@ project_push() {
   # text before the push — `cd <plain dir> &&` — since any other shape may not move it: a subshell, a quote,
   # an escape or an expansion (every attempt to parse those left a way through), a `cd` that is skipped
   # (`false && cd x;`) or fails (`cd x || true;`). Any other `cd` gates, a push to another repository included.
-  # PUSH_RE takes the separator before `git`, so one `&` of the `&&` is already gone.
+  # PUSH_RE takes the separator before `git`, so one `&` of the `&&` is already gone and exactly one must be
+  # left: none means `cd x & git push`, whose cd runs in the background while the push runs here.
   pre=$(echo "$cmd" | sed -E "s/$PUSH_RE.*//")
   cdir=""
   if echo "$pre" | grep -qE '(^|[^A-Za-z0-9_-])cd([[:space:]]|$)'; then
-    echo "$pre" | grep -qE '^[[:space:]]*cd[[:space:]]+[A-Za-z0-9_./~+@%:,=-]+[[:space:]]*&&?[[:space:]]*$' || return 0
+    echo "$pre" | grep -qE '^[[:space:]]*cd[[:space:]]+[A-Za-z0-9_./~+@%:,=-]+[[:space:]]*&[[:space:]]*$' || return 0
     cdir=$(echo "$pre" | sed -E 's/^[[:space:]]*cd[[:space:]]+([^[:space:]&]+).*/\1/')
   fi
   cflag=$(echo "$cmd" | grep -oE "$PUSH_RE" | head -1 | grep -oE -- '-C[[:space:]]+[^[:space:]]+' | tail -1 | sed -E 's/-C[[:space:]]+//')

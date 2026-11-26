@@ -26,8 +26,9 @@ def score_to_severity(score) -> str:
 
 def _rel(uri: str, root: Path) -> str:
     p = re.sub(r"^file://", "", uri or "")
-    if p.startswith(str(root)):
-        return str(Path(p).relative_to(root))
+    for r in {str(root), str(Path(root).resolve())}:  # a symlinked temp dir (/var → /private/var) is the same root
+        if p.startswith(r + "/"):
+            return p[len(r) + 1:]
     return (p[2:] if p.startswith("./") else p) or "-"
 
 

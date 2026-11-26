@@ -209,7 +209,7 @@ def baseline_keys() -> set[str]:
 def at_commit(sha: str, sel: list[dict]) -> dict:
     """Run `sel` on the whole tree at `sha`, on a temporary checkout; HEAD's tree is never touched."""
     global ROOT
-    keep, tmp = ROOT, tempfile.mkdtemp(prefix="scan-at-")
+    keep, tmp = ROOT, str(Path(tempfile.mkdtemp(prefix="scan-at-")).resolve())  # resolved: tools report /private/var, not /var
     git("worktree", "add", "--detach", tmp, sha)
     try:
         ROOT = Path(tmp)

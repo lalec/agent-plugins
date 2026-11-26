@@ -78,7 +78,8 @@ def entries() -> list[dict]:
 
 
 def conf(name: str) -> str:
-    m = re.search(rf"^{name}='(.*)'$", read(ROOT / ".claude/hooks/governed-paths.conf"), re.M)
+    # Read as bash reads it: a trailing `# comment` after the closing quote is not part of the value.
+    m = re.search(rf"^{name}='([^']*)'\s*(#.*)?$", read(ROOT / ".claude/hooks/governed-paths.conf"), re.M)
     return m.group(1) if m else ""
 
 

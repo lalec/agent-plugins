@@ -458,7 +458,8 @@ mask_quoted_push() {
     for (i = 1; i <= length($0); i++) {
       c = substr($0, i, 1)
       if (q == "") {
-        if (c == "\"" || c == SQ) { q = c; span = c } else out = out c
+        if (c == "\\") { out = out c substr($0, i + 1, 1); i++ }   # outside quotes a backslash makes the next char literal
+        else if (c == "\"" || c == SQ) { q = c; span = c } else out = out c
       } else {
         span = span c
         if (q == "\"" && c == "\\") { i++; span = span substr($0, i, 1); continue }
@@ -483,7 +484,8 @@ project_push() {
   # left: none means `cd x & git push`, whose cd runs in the background while the push runs here.
   pre=$(echo "$cmd" | sed -E "s/$PUSH_RE.*//")
   cdir=""
-  if echo "$pre" | grep -qE '(^|[^A-Za-z0-9_-])cd([[:space:]]|$)'; then
+  # pushd and popd move the directory too, and never form the lone shape, so they always gate.
+  if echo "$pre" | grep -qE '(^|[^A-Za-z0-9_-])(cd|pushd|popd)([[:space:]]|$)'; then
     echo "$pre" | grep -qE '^[[:space:]]*cd[[:space:]]+[A-Za-z0-9_./~+@%:,=-]+[[:space:]]*&[[:space:]]*$' || return 0
     cdir=$(echo "$pre" | sed -E 's/^[[:space:]]*cd[[:space:]]+([^[:space:]&]+).*/\1/')
   fi

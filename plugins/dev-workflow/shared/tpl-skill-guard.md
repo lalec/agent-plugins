@@ -472,13 +472,20 @@ project_push() {
   local cmd pre cdir cflag dir common here
   cmd=$(printf '%s' "$1" | tr '\n' ';' | mask_quoted_push)
   echo "$cmd" | grep -qE "$PUSH_RE" || return 1
-  # Where the push runs: its `-C <dir>`, taken from the last `cd <dir>` before it.
+  # Two pushes in one command: the first one's directory says nothing about the second — gate.
+  # (Separators doubled first: a match ends by taking the next one, which the next match needs.)
+  [ "$(echo "$cmd" | sed -E 's/([;&|])/\1\1/g' | grep -oE "$PUSH_RE" | wc -l)" -gt 1 ] && return 0
+  # Where the push runs: its `-C <dir>`, else a `cd <dir>` before it. A `cd` counts only as the whole
+  # text before the push — `cd <plain dir> &&` — since any other shape may not move it: a subshell, a quote,
+  # an escape or an expansion (every attempt to parse those left a way through), a `cd` that is skipped
+  # (`false && cd x;`) or fails (`cd x || true;`). Any other `cd` gates, a push to another repository included.
+  # PUSH_RE takes the separator before `git`, so one `&` of the `&&` is already gone.
   pre=$(echo "$cmd" | sed -E "s/$PUSH_RE.*//")
-  # A `cd` is trusted only in plain text. Beside a subshell, a quote, a backtick, an expansion or an escape
-  # it may not move the push, and every attempt to parse that shape left a way through (a closed subshell,
-  # a quoted paren, an escaped one) — so it gates. A push to another repository from such a line is gated too.
-  echo "$pre" | grep -qE '(^|[^A-Za-z0-9_-])cd([[:space:]]|$)' && echo "$pre" | grep -q '[]()"'"'"'`$\\[]' && return 0
-  cdir=$(echo "$pre" | grep -oE '(^|[;&|(])[[:space:]]*cd +[^ ;&|)]+' | tail -1 | sed -E 's/.*cd +//')
+  cdir=""
+  if echo "$pre" | grep -qE '(^|[^A-Za-z0-9_-])cd([[:space:]]|$)'; then
+    echo "$pre" | grep -qE '^[[:space:]]*cd[[:space:]]+[A-Za-z0-9_./~+@%:,=-]+[[:space:]]*&&?[[:space:]]*$' || return 0
+    cdir=$(echo "$pre" | sed -E 's/^[[:space:]]*cd[[:space:]]+([^[:space:]&]+).*/\1/')
+  fi
   cflag=$(echo "$cmd" | grep -oE "$PUSH_RE" | head -1 | grep -oE -- '-C[[:space:]]+[^[:space:]]+' | tail -1 | sed -E 's/-C[[:space:]]+//')
   cdir=${cdir//[\"\']/}; cflag=${cflag//[\"\']/}; cdir=${cdir/#\~/$HOME}; cflag=${cflag/#\~/$HOME}
   case "$cflag" in /*) dir=$cflag ;; "") dir=$cdir ;; *) dir=${cdir:-.}/$cflag ;; esac

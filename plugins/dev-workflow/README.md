@@ -37,6 +37,28 @@ A multi-agent delivery workflow for Claude Code. It runs your plan through a tea
 
 ---
 
+## Security
+
+Security is checked at seven points, so a flaw is caught where it is cheapest to fix and nothing ships that a scanner and a reviewer haven't read.
+
+| When | What runs | What it stops |
+|---|---|---|
+| Every change | `myapp-qa` runs the scanners on the task's commits — gitleaks for secrets, Semgrep for code, osv-scanner for packages, Trivy for infrastructure — and decides each new finding: exploitable here, or not, with the reason | A leaked key or unsafe code reaching sign-off |
+| Every push and prod deploy | The security gate runs any scanner that hasn't read the unpushed commits, and Claude Code's `/security-review` reads the source changes | A push with an undecided or open finding, or a scanner that failed twice. It holds only on what the change brings in; older findings are backlog |
+| Daily, and after a dependency file changes | The advisory watch re-checks the whole dependency tree in the background, sending only package names and versions | A critical advisory published overnight going unseen — it is named before every task, in `/whats-up`, and first in `/pilot`'s list |
+| On demand | `/audit` decides the backlog: each finding is exploitable or not, and *not* needs one of five reasons | A long list with no priority. Fixes become upgrade items `/pilot` can run unattended |
+| Every 90 days | `/audit --scan` runs the whole-repository scans listed in `scanners.yaml` — the `claude-security` plugin by default | A flaw spread across files no single change touches. Each finding becomes a roadmap item |
+| After a prod deploy | A passive scan of the live site | A misconfigured live site. Findings are filed; the deploy is not undone |
+| Always | Secrets are used by name through `srun`. Its guard blocks reading a `.env`, `~/.aws` or `~/.ssh`; its redactor masks anything shaped like a credential | A secret value reaching a transcript |
+
+Rules that hold throughout:
+- A scanner that fails leaves the code unassessed, never clean.
+- A WAF or rate limit lowers a finding's priority, never closes it.
+- An unattended run may change only versions in a dependency file, and only for an `/audit` upgrade item.
+- Known limit: a push spelt through `sh -c`, `env` or a full path to `git` is not gated.
+
+---
+
 ## Prerequisites
 
 - Claude Code (`claude`) installed and authenticated — its own `/code-review` is the bug hunt in every review, at the effort level you last typed for it (`/code-review high` once sets it for every later run)
